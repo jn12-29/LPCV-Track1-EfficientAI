@@ -3,4 +3,8 @@
 /26LPCVC_Track1_Sample_Solution-wjc
 /LPCV-gxz
 **/data
+**/vis_out
+**/sample_data
 /exported_*
+.env
+**/*.zip
