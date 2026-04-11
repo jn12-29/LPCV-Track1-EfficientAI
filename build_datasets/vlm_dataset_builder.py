@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import itertools
 import json
 import mimetypes
 import os
@@ -24,7 +25,7 @@ class GenerationResult:
     image_path: str
     image_id: str
     raw_record: Optional[Dict[str, Any]] = None
-    flat_records: Optional[List[Dict[str, Any]]] = None
+    aggregated_record: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     latency_sec: Optional[float] = None
 
@@ -34,14 +35,23 @@ def parse_args() -> argparse.Namespace:
         description="Batch-generate retrieval annotations from images via OpenRouter."
     )
     parser.add_argument(
-        "--image_dir", required=True, help="Root folder containing images."
+        "--reconvert_raw",
+        default=None,
+        help=(
+            "Path to an existing dataset_raw.jsonl. When set, skip VLM calls and "
+            "re-aggregate the raw file into dataset.jsonl. --output_dir is still "
+            "required; all other generation flags are ignored."
+        ),
+    )
+    parser.add_argument(
+        "--image_dir", default=None, help="Root folder containing images."
     )
     parser.add_argument(
         "--output_dir", required=True, help="Output directory for JSONL files."
     )
     parser.add_argument(
         "--model",
-        required=True,
+        default=None,
         help="OpenRouter model name, e.g. openai/gpt-4.1-mini or anthropic/claude-3.7-sonnet.",
     )
     parser.add_argument(
@@ -225,32 +235,46 @@ def normalize_raw_record(raw: Dict[str, Any], image_path: Path) -> Dict[str, Any
     return record
 
 
-def flatten_raw_record(raw_record: Dict[str, Any]) -> List[Dict[str, Any]]:
-    flat_records: List[Dict[str, Any]] = []
+def aggregate_raw_record(raw_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Collapse a per-object raw record into one image-level record.
+
+    positives  — every text that truthfully describes this image:
+                 global_texts, per-object positive_texts / weak_positives /
+                 relational_texts / ocr_texts / absence_texts, and
+                 hard_negatives_scene (which describe *other real objects*
+                 in the same image and are therefore still true at image level).
+
+    hard_negatives — only hard_negatives_attribute, which contain a wrong
+                     factual claim about an object that IS in the image and
+                     are therefore genuinely false at image level.
+    """
     image_id = raw_record["image_id"]
     image_path = raw_record["image_path"]
     challenge_tags = raw_record.get("challenge_tags", [])
-    global_texts = raw_record.get("global_texts", [])
+
+    positives: List[str] = list(raw_record.get("global_texts", []))
+    hard_negatives: List[str] = []
 
     for obj in raw_record.get("objects", []):
-        flat_records.append(
-            {
-                "image_id": image_id,
-                "image_path": image_path,
-                "target_object": obj["object_name"],
-                "salience": obj["salience"],
-                "positive_texts": obj.get("positive_texts", []),
-                "weak_positives": obj.get("weak_positives", []),
-                "hard_negatives_attribute": obj.get("hard_negatives_attribute", []),
-                "hard_negatives_scene": obj.get("hard_negatives_scene", []),
-                "relational_texts": obj.get("relational_texts", []),
-                "absence_texts": obj.get("absence_texts", []),
-                "ocr_texts": obj.get("ocr_texts", []),
-                "challenge_tags": challenge_tags,
-                "global_texts": global_texts,
-            }
-        )
-    return flat_records
+        positives.extend(obj.get("positive_texts", []))
+        positives.extend(obj.get("weak_positives", []))
+        positives.extend(obj.get("relational_texts", []))
+        positives.extend(obj.get("ocr_texts", []))
+        positives.extend(obj.get("absence_texts", []))
+        # hard_negatives_scene describes other real objects in this image
+        # → they are still true descriptions of the image at the global level
+        positives.extend(obj.get("hard_negatives_scene", []))
+
+        # Only attribute negatives are factually wrong for this image
+        hard_negatives.extend(obj.get("hard_negatives_attribute", []))
+
+    return {
+        "image_id": image_id,
+        "image_path": image_path,
+        "positives": dedupe_keep_order(positives),
+        "hard_negatives": dedupe_keep_order(hard_negatives),
+        "challenge_tags": challenge_tags,
+    }
 
 
 def build_input_items(image_path: Path, detail: str) -> List[Dict[str, Any]]:
@@ -327,12 +351,12 @@ def process_one_image(
                 store=store,
             )
             raw_record = normalize_raw_record(raw, image_path=image_path)
-            flat_records = flatten_raw_record(raw_record)
+            aggregated_record = aggregate_raw_record(raw_record)
             return GenerationResult(
                 image_path=str(image_path),
                 image_id=image_path.name,
                 raw_record=raw_record,
-                flat_records=flat_records,
+                aggregated_record=aggregated_record,
                 latency_sec=time.time() - start,
             )
         except Exception as exc:  # noqa: BLE001
@@ -375,12 +399,85 @@ class JsonlWriter:
                     f.write(line + "\n")
 
 
+def reconvert_raw(raw_jsonl: Path, output_dir: Path) -> int:
+    """Re-aggregate an existing dataset_raw.jsonl into dataset.jsonl."""
+    if not raw_jsonl.exists():
+        raise FileNotFoundError(f"Raw JSONL not found: {raw_jsonl}")
+
+    ensure_dir(str(output_dir))
+    agg_path = output_dir / "dataset.jsonl"
+    summary_path = output_dir / "run_summary.json"
+
+    # Overwrite any previous aggregated file
+    if agg_path.exists():
+        agg_path.unlink()
+
+    total = 0
+    total_positives = 0
+    total_hard_negatives = 0
+
+    with raw_jsonl.open("r", encoding="utf-8") as fin, agg_path.open(
+        "w", encoding="utf-8"
+    ) as fout:
+        for line in fin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw_record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                print(f"WARN: skipping malformed JSON line: {exc}")
+                continue
+            agg = aggregate_raw_record(raw_record)
+            fout.write(json.dumps(agg, ensure_ascii=False) + "\n")
+            total += 1
+            total_positives += len(agg["positives"])
+            total_hard_negatives += len(agg["hard_negatives"])
+            print(
+                f"[{total}] {agg['image_id']} :: positives={len(agg['positives'])}, hard_negatives={len(agg['hard_negatives'])}"
+            )
+            sys.stdout.flush()
+
+    summary = {
+        "mode": "reconvert_raw",
+        "raw_jsonl": str(raw_jsonl.resolve()),
+        "output_dir": str(output_dir.resolve()),
+        "total_records": total,
+        "total_positives": total_positives,
+        "total_hard_negatives": total_hard_negatives,
+        "dataset_jsonl": str(agg_path.resolve()),
+    }
+    with summary_path.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print("Done.")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main() -> int:
     args = parse_args()
+
+    if args.reconvert_raw is not None:
+        return reconvert_raw(Path(args.reconvert_raw), Path(args.output_dir))
+
+    if not args.image_dir:
+        print(
+            "ERROR: --image_dir is required when not using --reconvert_raw.",
+            file=sys.stderr,
+        )
+        return 1
+    if not args.model:
+        print(
+            "ERROR: --model is required when not using --reconvert_raw.",
+            file=sys.stderr,
+        )
+        return 1
+
     ensure_dir(args.output_dir)
 
     raw_path = Path(args.output_dir) / "dataset_raw.jsonl"
-    flat_path = Path(args.output_dir) / "dataset_flattened.jsonl"
+    agg_path = Path(args.output_dir) / "dataset.jsonl"
     fail_path = Path(args.output_dir) / "failed_images.jsonl"
     summary_path = Path(args.output_dir) / "run_summary.json"
 
@@ -398,37 +495,56 @@ def main() -> int:
 
     client = get_client(args)
     raw_writer = JsonlWriter(raw_path)
-    flat_writer = JsonlWriter(flat_path)
+    agg_writer = JsonlWriter(agg_path)
     fail_writer = JsonlWriter(fail_path)
 
     total = len(images)
     success = 0
     failed = 0
-    total_objects = 0
+    total_positives = 0
+    total_hard_negatives = 0
     latencies: List[float] = []
 
     print(
-        f"Processing {total} images via OpenRouter with model={args.model}, detail={args.detail}, workers={args.max_workers}"
+        f"Processing {total} images with model={args.model}, detail={args.detail}, workers={args.max_workers}"
     )
     sys.stdout.flush()
 
-    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        futures = {
-            executor.submit(
-                process_one_image,
-                client,
-                image_path,
-                args.model,
-                args.detail,
-                args.retries,
-                args.retry_backoff,
-                args.store,
-            ): image_path
-            for image_path in images
-        }
+    def _submit(image_path: Path):
+        return executor.submit(
+            process_one_image,
+            client,
+            image_path,
+            args.model,
+            args.detail,
+            args.retries,
+            args.retry_backoff,
+            args.store,
+        )
 
-        for idx, future in enumerate(as_completed(futures), start=1):
-            result = future.result()
+    with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        image_iter = iter(images)
+        # Seed the pool with at most max_workers tasks
+        active: Dict[Any, Path] = {}
+        for image_path in itertools.islice(image_iter, args.max_workers):
+            f = _submit(image_path)
+            active[f] = image_path
+
+        idx = 0
+        while active:
+            done = next(as_completed(active))
+            active.pop(done)
+            idx += 1
+            result = done.result()
+
+            # Submit next task as soon as a slot is free
+            try:
+                next_image = next(image_iter)
+                f = _submit(next_image)
+                active[f] = next_image
+            except StopIteration:
+                pass
+
             if result.latency_sec is not None:
                 latencies.append(result.latency_sec)
 
@@ -445,13 +561,16 @@ def main() -> int:
                 print(f"[{idx}/{total}] FAIL  {result.image_id} :: {result.error}")
             else:
                 assert result.raw_record is not None
-                assert result.flat_records is not None
+                assert result.aggregated_record is not None
                 success += 1
-                total_objects += len(result.flat_records)
+                n_pos = len(result.aggregated_record["positives"])
+                n_neg = len(result.aggregated_record["hard_negatives"])
+                total_positives += n_pos
+                total_hard_negatives += n_neg
                 raw_writer.append(result.raw_record)
-                flat_writer.append_many(result.flat_records)
+                agg_writer.append(result.aggregated_record)
                 print(
-                    f"[{idx}/{total}] OK    {result.image_id} :: objects={len(result.flat_records)}"
+                    f"[{idx}/{total}] OK    {result.image_id} :: positives={n_pos}, hard_negatives={n_neg}"
                 )
             sys.stdout.flush()
 
@@ -468,10 +587,11 @@ def main() -> int:
         "total_images_requested": total,
         "success": success,
         "failed": failed,
-        "flattened_records": total_objects,
+        "total_positives": total_positives,
+        "total_hard_negatives": total_hard_negatives,
         "avg_latency_sec": avg_latency,
         "raw_jsonl": str(raw_path.resolve()),
-        "flattened_jsonl": str(flat_path.resolve()),
+        "dataset_jsonl": str(agg_path.resolve()),
         "failed_jsonl": str(fail_path.resolve()),
     }
 

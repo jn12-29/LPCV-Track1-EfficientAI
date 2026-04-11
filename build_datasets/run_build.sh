@@ -24,14 +24,42 @@
 
 python build_datasets/vlm_dataset_builder.py \
     --image_dir ./build_datasets/data/VG_100K \
-    --output_dir build_datasets/data/VG_100K_TEST \
+    --output_dir build_datasets/data/VG_100K_GEMINI31PRO \
     --model google/gemini-3.1-pro-preview \
     --detail high \
     --max_images 16 \
     --max_workers 8
 
 python build_datasets/visualize_annotations.py \
-    --jsonl build_datasets/data/VG_100K_TEST/dataset_raw.jsonl \
+    --jsonl build_datasets/data/VG_100K_GEMINI31PRO/dataset_raw.jsonl \
     --image_dir build_datasets/data/VG_100K \
-    --output_dir build_datasets/data/VG_100K_TEST/vis_out \
+    --output_dir build_datasets/data/VG_100K_GEMINI31PRO/vis_out \
+    --n 16
+
+python build_datasets/vlm_dataset_builder.py \
+    --image_dir ./build_datasets/data/VG_100K \
+    --output_dir build_datasets/data/VG_100K_GEMINI31FLASHLITE \
+    --model google/gemini-3.1-flash-lite-preview \
+    --detail high \
+    --max_images 16 \
+    --max_workers 8
+
+python build_datasets/visualize_annotations.py \
+    --jsonl build_datasets/data/VG_100K_GEMINI31FLASHLITE/dataset_raw.jsonl \
+    --image_dir build_datasets/data/VG_100K \
+    --output_dir build_datasets/data/VG_100K_GEMINI31FLASHLITE/vis_out \
+    --n 16
+
+python build_datasets/vlm_dataset_builder.py \
+    --image_dir ./build_datasets/data/VG_100K \
+    --output_dir build_datasets/data/VG_100K_GEMINI31FLASHLITE_low \
+    --model google/gemini-3.1-flash-lite-preview \
+    --detail low \
+    --max_images 16 \
+    --max_workers 8
+
+python build_datasets/visualize_annotations.py \
+    --jsonl build_datasets/data/VG_100K_GEMINI31FLASHLITE_low/dataset_raw.jsonl \
+    --image_dir build_datasets/data/VG_100K \
+    --output_dir build_datasets/data/VG_100K_GEMINI31FLASHLITE_low/vis_out \
     --n 16
