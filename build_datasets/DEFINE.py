@@ -1,293 +1,278 @@
 BASE_URL = "https://openrouter.ai/api/v1"
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
 ALLOWED_TAGS = [
-    "small_object",
-    "multi_object_scene",
-    "fine_grained_attribute",
-    "spatial_relation",
-    "ocr",
-    "occlusion",
-    "cluttered_background",
-    "low_contrast",
-    "similar_objects",
-    "dominant_distractor",
+    "small_object", "multi_object_scene", "fine_grained_attribute",
+    "spatial_relation", "visible_text", "occlusion", "cluttered_background",
+    "low_contrast", "similar_objects", "dominant_distractor",
     "attribute_ambiguity",
 ]
 
-SYSTEM_PROMPT = """You are an expert computer vision dataset annotator for fine-grained image-text retrieval.
+# Fixed attribute axes — enforces LPCV-style discrimination.
+# Derived from analysis of the official 222-text corpus.
+ATTRIBUTE_AXES = [
+    "color", "size", "state", "position", "material",
+    "shape", "visible_text", "distinctive_part",
+]
 
-Your task is to analyze ONE image and generate structured object-centric retrieval annotations.
+SYSTEM_PROMPT = """You are an expert computer vision dataset annotator for fine-grained image-text retrieval (LPCV 2026 Track 1).
 
-Goal:
-Create high-quality retrieval training data that helps a model:
-- recognize both dominant objects and smaller secondary objects,
-- distinguish fine-grained visible attributes,
-- handle multi-object scenes (especially distinguishing similar instances),
-- use relational cues when useful,
-- use OCR cues when fully legible,
-- learn hard negatives that are close, plausible, but unequivocally false.
+TASK: Analyze ONE image and generate structured object-centric retrieval annotations that mimic the official corpus style — ultra-short referring expressions such as:
+  "the white ping pong ball", "the tilted monitor", "the round mouse",
+  "the airplane with red tail", "the pig facing left",
+  "the rabbit with one ear up",
+  "the ping pong ball with black text", "the keyboard with white key labels",
+  "tent with white lettering", "the logo says up north".
 
-Each "object" means one visually retrievable object instance in the image, not just one semantic category.
-Multiple objects may belong to the same category if they are visibly distinguishable.
-For example, three ping pong balls of different colors or in different positions should be annotated as three separate object blocks if each one can be reliably identified.
-Objects may also come from different categories.
+GOAL: Train a model that can:
+- recognize both dominant AND small secondary objects (mice, keyboards, logos, accessories),
+- distinguish fine-grained attributes on the CORRECT attribute axis (color vs state vs size vs shape),
+- separate visibly distinguishable instances of the same category,
+- reject plausible but indisputably false hard negatives.
 
-Critical rules:
-1. STRICT VISUAL EVIDENCE: Only generate annotations supported by absolute clear visual evidence. Do not hallucinate or infer missing parts.
-2. NO OCR GUESSING: If text or numbers are blurry, pixelated, or partially obscured, DO NOT extract them. Use OCR only if it is completely legible to the naked eye.
-3. INSTANCE SEPARATION AND DISAMBIGUATION: If multiple objects of the same category appear in the image, and they are visibly distinguishable by color, size, position, state, visible part, or legible text, treat them as separate target objects and create separate object blocks for them. The positive and relational texts for each block must uniquely identify that exact instance using explicit spatial anchors, unique visible attributes, or legible OCR when available. Do not merge multiple distinguishable instances of the same category into one object block.
-4. UNAMBIGUOUS NEGATIVES: Hard negatives must contain an absolute, visually indisputable contradiction. Avoid subjective or borderline attributes (e.g., do not use "blue" as a negative for a "bluish-grey" object).
-5. Include both dominant objects and smaller secondary objects if they could plausibly serve as retrieval targets. Ignore objects that are too tiny or ambiguous.
-6. Keep all prompts concise, natural, and similar to real-world human search queries (**typically 3-10 words**, noun phrases preferred).
-7. Do not over-describe background details or invent hidden materials, brands, or intent.
-8. Lowercase all generated phrases unless capitalization is absolutely necessary for exact OCR matching.
-9. Do not generate duplicates or near-duplicates.
-10. All texts inside one object block must refer to the exact same target object instance.
-11. A negative must be false for the full image, not merely false for the target region.
+Each "object" = one visually retrievable INSTANCE, not one semantic class. Multiple same-category instances that are distinguishable (color, position, state, size, text presence) MUST be split into separate object blocks.
 
-For each target object, generate:
-- positive_texts:
-  1-2 highly accurate, discriminative descriptions of the target object.
-- weak_positives:
-  0-1 correct but less specific descriptions of the same target object.
-- hard_negatives_attribute:
-  0-2 descriptions containing exactly ONE indisputably wrong intrinsic fact (e.g., a drastically different color, shape, or state).
-- hard_negatives_scene:
-  0-2 descriptions where the object is identical, but ONE surrounding-scene or local-context fact is completely altered (e.g., changing the support surface or relative position).
-- relational_texts:
-  0-2 true descriptions based on explicit, unambiguous relative position or interaction with another clearly visible object.
-- ocr_texts:
-  0-1 true descriptions based STRICTLY on fully legible text/logos. If you have to squint, guess, or infer the letters due to blur, folds, or occlusion, DO NOT extract it.
+CRITICAL RULES
+1. STRICT VISUAL EVIDENCE. Never hallucinate.
+2. TEXT AWARENESS NOT OCR. When an object has visible text, lettering, or a logo, describe its PRESENCE using patterns like:
+   - "with [color] text"  →  "the ball with black text", "the hoodie with white lettering"
+   - "with no text"       →  "the ping pong ball with no text"  (useful when other instances DO have text)
+   - "the logo says [X]"  →  ONLY for short (≤4 words), clearly legible, prominent logos or slogans.
+   NEVER attempt to transcribe multi-word body text or guess partially-visible characters.
+3. INSTANCE SEPARATION. Distinguishable same-category instances → separate blocks. Each block's texts must uniquely identify THAT instance (via color, position, state, text presence, or legible logo).
+4. PLAUSIBLE YET FALSE NEGATIVES. Every hard negative must pass BOTH checks:
+   (a) FALSE for the entire image — not even partially true anywhere in the scene.
+   (b) CATEGORY-PLAUSIBLE — real instances of this object type CAN have this attribute
+       in the real world. Never negate a defining species/category trait:
+       ✗ "solid black zebra"   — zebras are always striped (category-impossible)
+       ✗ "wingless butterfly"  — contradicts the category definition
+       ✗ "the square monitor"  — consumer monitors are never square
+       ✗ "the pink elephant"   — elephants are never pink
+       ✓ "the zebra facing right"  — plausible (some do), false here if facing left
+       ✓ "the adult bear cub"  — size/age confusion a model might make
+       ✓ "the white keyboard"  — perfectly plausible, false if keyboard is black
+   Hard negatives must represent mistakes a vision model could realistically make, not
+   obvious impossibilities.
+5. SECONDARY OBJECT COVERAGE. You MUST include small but identifiable secondary objects (keyboard, mouse, cable, sticker, logo, sign, label, background animal). Failure mode being fixed: small objects get dominated by large objects.
+6. ATTRIBUTE-AXIS DIVERSITY. Across ALL positives for one image, cover ≥4 of these axes: {color, size, state, position, material, shape, visible_text, distinctive_part}. Each object block should use ≥2 different axes when possible.
+7. CONCISE NOUN PHRASES. 3–10 words. Lowercase.
+8. No duplicates, no near-duplicates.
+9. All texts in one object block refer to the exact same instance.
 
-Output requirements:
-- Return valid JSON only.
-- Top-level output must be object-centric.
-- If a field does not apply or cannot be generated safely, return an empty list []. Do not force generation.
-- Salience must be "primary" or "secondary".
-- Challenge tags must be chosen only from the provided list.
+PER OBJECT, GENERATE
+- positive_texts (1-2): highly accurate discriminative descriptions. Tag each with its attribute_axis.
+- weak_positives (0-1): correct but less specific.
+- hard_negatives_attribute (1-2): ONE indisputably wrong INTRINSIC fact (color/shape/state/size/text flip). Edit-type: "axis_flip" or "axis_swap". Must pass the plausibility check from Rule 4.
+- hard_negatives_scene (0-2): object identical, ONE surrounding/context fact altered (support surface, relative position to another clearly-present object).
+- relational_texts (0-2): true relations using explicit, unambiguous relative position to another visible object.
+- text_on_object (0-1): If the object has visible text, lettering, or a logo, produce ONE description using the text-awareness patterns from Rule 2. Use attribute_axis "visible_text". Leave empty if no text is visible on the object.
+
+NEGATIVE DESIGN GUIDANCE (bad-case-driven)
+- Before emitting each negative, run TWO silent checks:
+  1. "Is this false for the whole image?" — if no/unsure → discard.
+  2. "Can a real [object type] actually have this attribute?" — if no → discard.
+- Target axes where models make real errors: exact color (white/grey/silver/black confusion),
+  orientation/pose (facing left vs right), state (on/off, open/closed, tilted/upright),
+  size rank (largest vs smallest among similar objects), text presence (with/without text).
+
+OUTPUT: valid JSON matching the provided schema. salience ∈ {primary, secondary}. challenge_tags from the fixed list only.
 """
 
-USER_PROMPT = """Analyze this image and generate structured image to text retrieval training data.
+USER_PROMPT = """Analyze this image and generate structured image-to-text retrieval training data.
 
 Requirements:
-- Include all reasonably identifiable retrieval targets, including smaller secondary objects.
-- Treat visibly distinguishable instances of the same category as separate objects.
-- For example, multiple ping pong balls, cups, bottles, or signs should be annotated separately if they can be reliably told apart by visible attributes or position.
-- Prefer concise noun phrases.
-- Use only visible, image-grounded attributes.
-- Generate strong positives, weak positives, attribute hard negatives, scene hard negatives, relational texts, and OCR texts when supported.
-- Return valid JSON only following the required schema.
+- Cover ≥3 distinct object categories when present; include small secondary objects (keyboard, mouse, logo, label, cable, accessory).
+- Split visibly distinguishable same-category instances into separate object blocks.
+- Across all positives in this image, use ≥4 different attribute axes from {color, size, state, position, material, shape, visible_text, distinctive_part}.
+- Each positive_text item must declare its attribute_axis.
+- For text_on_object: describe the PRESENCE of text/lettering using patterns like "with [color] text", "with white lettering", "with no text", or "the logo says [X]" (≤4 words, clearly legible only). Do NOT transcribe multi-word text verbatim.
+- Hard negatives must be absolutely false for the WHOLE image.
+- Concise noun phrases, 3–10 words, lowercase.
+- Return valid JSON only.
 """
 
-FEW_SHOT_EXAMPLE = [
+FEW_SHOT_EXAMPLES = [
     {
         "image_id": "example_ping_pong_balls.jpg",
-        "global_texts": [
-            "three ping pong balls on a dark scratched surface",
-            "colored table tennis balls grouped together",
-        ],
-        "challenge_tags": [
-            "multi_object_scene",
-            "fine_grained_attribute",
-            "spatial_relation",
-            "similar_objects",
-        ],
+        "global_texts": ["three ping pong balls on a dark scratched surface"],
+        "challenge_tags": ["multi_object_scene", "fine_grained_attribute",
+                           "spatial_relation", "similar_objects", "visible_text"],
         "objects": [
-            {
-                "object_name": "ping pong ball",
-                "salience": "primary",
-                "positive_texts": [
-                    "the white ping pong ball",
-                    "the white ball at the upper left",
-                ],
-                "weak_positives": [],
-                "hard_negatives_attribute": ["the blue ping pong ball"],
-                "hard_negatives_scene": [
-                    "the white ping pong ball on a wooden table",
-                    "the white ping pong ball below the green ball",
-                ],
-                "relational_texts": [
-                    "the white ping pong ball left of the orange ball",
-                    "the white ping pong ball above the green ball",
-                ],
-                "ocr_texts": [],
-            },
-            {
-                "object_name": "ping pong ball",
-                "salience": "primary",
-                "positive_texts": [
-                    "the orange ping pong ball",
-                    "the orange ball at the upper right",
-                ],
-                "weak_positives": [],
-                "hard_negatives_attribute": ["the purple ping pong ball"],
-                "hard_negatives_scene": [
-                    "the orange ping pong ball on a wooden table",
-                    "the orange ping pong ball left of the white ball",
-                ],
-                "relational_texts": [
-                    "the orange ping pong ball right of the white ball",
-                    "the orange ping pong ball above the green ball",
-                ],
-                "ocr_texts": [],
-            },
-            {
-                "object_name": "ping pong ball",
-                "salience": "primary",
-                "positive_texts": [
-                    "the light green ping pong ball",
-                    "the bottom ping pong ball",
-                ],
-                "weak_positives": [],
-                "hard_negatives_attribute": ["the black ping pong ball"],
-                "hard_negatives_scene": [
-                    "the green ping pong ball on a wooden table",
-                    "the green ping pong ball above the white ball",
-                ],
-                "relational_texts": [
-                    "the green ping pong ball below the white ball",
-                    "the green ping pong ball below the orange ball",
-                ],
-                "ocr_texts": [],
-            },
+            {"object_name": "ping pong ball", "salience": "primary",
+             "positive_texts": [
+                 {"text": "the white ping pong ball", "attribute_axis": "color"},
+                 {"text": "the ball at the upper left", "attribute_axis": "position"}],
+             "weak_positives": [],
+             "hard_negatives_attribute": [
+                 {"text": "the blue ping pong ball", "edit_type": "axis_flip",
+                  "rationale": "no blue ball present"},
+                 {"text": "the cube-shaped ping pong ball", "edit_type": "axis_swap",
+                  "rationale": "all balls are round"}],
+             "hard_negatives_scene": [
+                 {"text": "the white ping pong ball on a wooden table",
+                  "rationale": "surface is scratched dark metal, not wood"}],
+             "relational_texts": ["the white ping pong ball left of the orange ball"],
+             "text_on_object": ["the ping pong ball with black text"]},
+            {"object_name": "ping pong ball", "salience": "primary",
+             "positive_texts": [
+                 {"text": "the orange ping pong ball", "attribute_axis": "color"},
+                 {"text": "the ball at the upper right", "attribute_axis": "position"}],
+             "weak_positives": [],
+             "hard_negatives_attribute": [
+                 {"text": "the purple ping pong ball", "edit_type": "axis_flip",
+                  "rationale": "no purple ball present"}],
+             "hard_negatives_scene": [],
+             "relational_texts": ["the orange ping pong ball right of the white ball"],
+             "text_on_object": ["the ping pong ball with no text"]},
+            {"object_name": "ping pong ball", "salience": "primary",
+             "positive_texts": [
+                 {"text": "the light green ping pong ball", "attribute_axis": "color"},
+                 {"text": "the bottom ping pong ball", "attribute_axis": "position"}],
+             "weak_positives": [],
+             "hard_negatives_attribute": [
+                 {"text": "the black ping pong ball", "edit_type": "axis_flip",
+                  "rationale": "no black ball present"}],
+             "hard_negatives_scene": [],
+             "relational_texts": ["the green ping pong ball below the white ball"],
+             "text_on_object": ["the ping pong ball with blue text"]},
         ],
     },
     {
-        "image_id": "example_dual_computers.jpg",
-        "global_texts": [
-            "two desktop computer setups on a table",
-            "crt monitors on desktop towers with keyboards and a mouse",
-        ],
-        "challenge_tags": [
-            "multi_object_scene",
-            "similar_objects",
-            "spatial_relation",
-            "ocr",
-        ],
+        "image_id": "example_desk_multi_monitor.jpg",
+        "global_texts": ["a desk with three monitors, keyboard and mouse"],
+        "challenge_tags": ["multi_object_scene", "small_object",
+                           "similar_objects", "dominant_distractor"],
         "objects": [
-            {
-                "object_name": "monitor",
-                "salience": "primary",
-                "positive_texts": [
-                    "black crt monitor with dell logo",
-                    "crt monitor above desktop tower",
-                ],
-                "weak_positives": ["crt monitor"],
-                "hard_negatives_attribute": ["white crt monitor"],
-                "hard_negatives_scene": [
-                    "crt monitor mounted on the wall",
-                    "crt monitor on the floor",
-                ],
-                "relational_texts": [
-                    "crt monitor behind keyboard",
-                    "crt monitor above computer tower",
-                ],
-                "ocr_texts": ["crt monitor with dell logo"],
-            },
-            {
-                "object_name": "desktop tower",
-                "salience": "primary",
-                "positive_texts": [
-                    "black desktop tower with dell logo",
-                    "desktop tower under crt monitor",
-                ],
-                "weak_positives": ["computer tower"],
-                "hard_negatives_attribute": ["white computer tower"],
-                "hard_negatives_scene": [
-                    "computer tower under the table",
-                    "computer tower stacked on another tower",
-                ],
-                "relational_texts": [
-                    "desktop tower below monitor",
-                    "desktop tower behind keyboard",
-                ],
-                "ocr_texts": ["desktop tower with dell logo"],
-            },
-            {
-                "object_name": "keyboard",
-                "salience": "secondary",
-                "positive_texts": [
-                    "black keyboard at the front of the table",
-                    "keyboard in front of desktop tower",
-                ],
-                "weak_positives": ["black keyboard"],
-                "hard_negatives_attribute": ["white keyboard"],
-                "hard_negatives_scene": [
-                    "keyboard on top of the monitor",
-                    "keyboard under the table",
-                ],
-                "relational_texts": [
-                    "keyboard below monitor",
-                    "keyboard beside the mouse",
-                ],
-                "ocr_texts": ["keyboard with dell text"],
-            },
-            {
-                "object_name": "mouse",
-                "salience": "secondary",
-                "positive_texts": [
-                    "black wired mouse in the center",
-                    "mouse between the keyboards",
-                ],
-                "weak_positives": ["wired mouse"],
-                "hard_negatives_attribute": ["white mouse"],
-                "hard_negatives_scene": [
-                    "mouse without a cable",
-                    "mouse on top of a keyboard",
-                ],
-                "relational_texts": [
-                    "mouse below the monitors",
-                    "mouse between the keyboards",
-                ],
-                "ocr_texts": ["mouse with dell logo"],
-            },
+            {"object_name": "monitor", "salience": "primary",
+             "positive_texts": [
+                 {"text": "the tilted monitor", "attribute_axis": "state"},
+                 {"text": "the black crt monitor", "attribute_axis": "color"}],
+             "weak_positives": ["crt monitor"],
+             "hard_negatives_attribute": [
+                 {"text": "the white monitor", "edit_type": "axis_flip",
+                  "rationale": "all monitors are black"},
+                 {"text": "the glowing monitor", "edit_type": "axis_swap",
+                  "rationale": "all monitors are off"}],
+             "hard_negatives_scene": [
+                 {"text": "monitor mounted on the wall",
+                  "rationale": "monitors stand on the desk"}],
+             "relational_texts": ["the monitor behind the keyboard"],
+             "text_on_object": ["the monitor with a white brand logo"]},
+            {"object_name": "keyboard", "salience": "secondary",
+             "positive_texts": [
+                 {"text": "the black keyboard", "attribute_axis": "color"},
+                 {"text": "the rectangular keyboard", "attribute_axis": "shape"}],
+             "weak_positives": ["wired keyboard"],
+             "hard_negatives_attribute": [
+                 {"text": "the white keyboard", "edit_type": "axis_flip",
+                  "rationale": "keyboard is black"},
+                 {"text": "the rounded keyboard", "edit_type": "axis_swap",
+                  "rationale": "keyboard is rectangular not rounded"}],
+             "hard_negatives_scene": [],
+             "relational_texts": ["the keyboard in front of the monitors"],
+             "text_on_object": ["the keyboard with white key labels"]},
+            {"object_name": "mouse", "salience": "secondary",
+             "positive_texts": [
+                 {"text": "the round mouse", "attribute_axis": "shape"},
+                 {"text": "the black mouse on the mousepad", "attribute_axis": "color"}],
+             "weak_positives": ["wired mouse"],
+             "hard_negatives_attribute": [
+                 {"text": "the white mouse", "edit_type": "axis_flip",
+                  "rationale": "mouse is black"},
+                 {"text": "the rectangular mouse", "edit_type": "axis_swap",
+                  "rationale": "mouse is rounded"}],
+             "hard_negatives_scene": [],
+             "relational_texts": ["the mouse right of the keyboard"],
+             "text_on_object": []},
         ],
     },
 ]
 
 RESPONSE_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
+    "type": "object", "additionalProperties": False,
     "properties": {
         "image_id": {"type": "string"},
         "global_texts": {"type": "array", "items": {"type": "string"}},
-        "challenge_tags": {
-            "type": "array",
-            "items": {"type": "string", "enum": ALLOWED_TAGS},
-        },
-        "objects": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "object_name": {"type": "string"},
-                    "salience": {"type": "string", "enum": ["primary", "secondary"]},
-                    "positive_texts": {"type": "array", "items": {"type": "string"}},
-                    "weak_positives": {"type": "array", "items": {"type": "string"}},
-                    "hard_negatives_attribute": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "hard_negatives_scene": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    "relational_texts": {"type": "array", "items": {"type": "string"}},
-                    "ocr_texts": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": [
-                    "object_name",
-                    "salience",
-                    "positive_texts",
-                    "weak_positives",
-                    "hard_negatives_attribute",
-                    "hard_negatives_scene",
-                    "relational_texts",
-                    "ocr_texts",
-                ],
+        "challenge_tags": {"type": "array",
+            "items": {"type": "string", "enum": ALLOWED_TAGS}},
+        "objects": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "object_name": {"type": "string"},
+                "salience": {"type": "string", "enum": ["primary", "secondary"]},
+                "positive_texts": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "attribute_axis": {"type": "string", "enum": ATTRIBUTE_AXES},
+                    }, "required": ["text", "attribute_axis"]}},
+                "weak_positives": {"type": "array", "items": {"type": "string"}},
+                "hard_negatives_attribute": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "edit_type": {"type": "string",
+                            "enum": ["axis_flip", "axis_swap", "cross_object", "sibling"]},
+                        "rationale": {"type": "string"},
+                    }, "required": ["text", "edit_type", "rationale"]}},
+                "hard_negatives_scene": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False,
+                    "properties": {
+                        "text": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    }, "required": ["text", "rationale"]}},
+                "relational_texts": {"type": "array", "items": {"type": "string"}},
+                "text_on_object": {"type": "array", "items": {"type": "string"},
+                    "description": "Text-awareness descriptions: 'with [color] text', "
+                                   "'with white lettering', 'with no text', or "
+                                   "'the logo says [X]' (≤4 words, clearly legible only)."},
             },
-        },
+            "required": ["object_name", "salience", "positive_texts",
+                "weak_positives", "hard_negatives_attribute",
+                "hard_negatives_scene", "relational_texts", "text_on_object"],
+        }},
     },
     "required": ["image_id", "global_texts", "challenge_tags", "objects"],
 }
+
+VERIFY_PROMPT = """You are a strict visual fact-checker. Decide whether ANY region, instance, part, accessory, or attribute in the image could be truthfully described by the expression.
+
+Answer "yes" if ANY part matches, even partially.
+Answer "no" ONLY if confident no region matches.
+When uncertain, answer "yes" (we prefer dropping borderline negatives).
+
+Expression: "{TEXT}"
+
+Return JSON: {{"match": "yes"|"no"|"unsure", "reason": "<short>", "region": "<which part or none>"}}
+"""
+
+BATCH_VERIFY_PROMPT = """You are a strict visual fact-checker. Given an image and a JSON list of text descriptions, decide for each whether ANY region, instance, part, accessory, or attribute in the image could be truthfully described by that text.
+
+For each item return:
+- "no"     — you are confident NO part of the image matches
+- "yes"    — any part matches, even partially or approximately
+- "unsure" — borderline; when in doubt prefer "yes"
+
+We keep only hard negatives that are indisputably false. Answer "no" only when clearly certain.
+
+The output "results" array MUST have the same length and order as the input list.
+"""
+
+BATCH_VERIFY_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "text":  {"type": "string"},
+                    "match": {"type": "string", "enum": ["yes", "no", "unsure"]},
+                },
+                "required": ["text", "match"],
+            },
+        },
+    },
+    "required": ["results"],
+}
+
