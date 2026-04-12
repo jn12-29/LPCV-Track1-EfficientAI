@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Personal Preferences
 
 - Use English for code and annotations, but communicate with me in Chinese.
-- Update README.md, CLAUDE.md and \*.sh files when necessary.
+- Update README.md, CLAUDE.md, and any \*.sh files when modifications are needed.
 
 ## Project Overview
 

@@ -14,9 +14,9 @@ TEXT_ONNX_PATH = os.path.join(ONNX_DIR, "text_encoder.onnx")
 IMAGE_ONNX_QAI_PATH = os.path.join(ONNX_DIR, "image_encoder_qai_int8.onnx")
 TEXT_ONNX_QAI_PATH = os.path.join(ONNX_DIR, "text_encoder_qai_int8.onnx")
 
-DATA_ROOT = "./data"
-IMAGE_TO_TEXT_CSV = "./data/img_list.csv"
-TEXTNUMS_TO_TEXTS_CSV = "./data/txt_list.csv"
+DATA_ROOT = "./sample_data"
+IMAGE_TO_TEXT_CSV = "./sample_data/img_list.csv"
+TEXTNUMS_TO_TEXTS_CSV = "./sample_data/txt_list.csv"
 CALIBRATION_SAMPLES = 300
 
 

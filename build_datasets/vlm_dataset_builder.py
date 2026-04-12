@@ -22,10 +22,11 @@ Usage:
     --verify --verify_model google/gemini-3.1-flash-lite-preview \
     --detail high --max_workers 8 --max_images 100
 """
-import os, sys, json, base64, argparse, time, traceback, mimetypes, logging, copy
+import os, sys, json, base64, argparse, time, traceback, mimetypes, logging, copy, random
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
+from openai import APIStatusError
 from DEFINE import (SUPPORTED_EXTS, SYSTEM_PROMPT, USER_PROMPT,
                     FEW_SHOT_EXAMPLES, RESPONSE_SCHEMA,
                     BATCH_VERIFY_PROMPT, BATCH_VERIFY_SCHEMA)
@@ -37,6 +38,8 @@ def setup_logging(log_path: Path):
                             datefmt="%Y-%m-%d %H:%M:%S")
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
+    # Clear existing handlers to avoid duplicates on repeated calls
+    root.handlers.clear()
     # File handler — append so multiple runs accumulate
     fh = logging.FileHandler(str(log_path), encoding="utf-8")
     fh.setLevel(logging.DEBUG)
@@ -47,6 +50,10 @@ def setup_logging(log_path: Path):
     ch.setLevel(logging.INFO)
     ch.setFormatter(fmt)
     root.addHandler(ch)
+    # Suppress DEBUG output from HTTP libraries (would log full request bodies
+    # including base64-encoded images, flooding build.log with binary noise)
+    for noisy in ("openai", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 def _rec_stats(rec):
     """Extract per-image annotation counts for logging."""
@@ -86,7 +93,9 @@ def build_messages(mime, b64, image_id, detail="high"):
     ]})
     return msgs
 
-def call_json(client, model, messages, temperature=0.2, retries=3, schema=None):
+_NON_RETRYABLE_STATUS = {400, 401, 403, 404, 422}
+
+def call_json(client, model, messages, temperature=0.2, retries=7, schema=None):
     kwargs = {"model": model, "messages": messages, "temperature": temperature}
     if schema:
         kwargs["response_format"] = {"type": "json_schema",
@@ -97,11 +106,33 @@ def call_json(client, model, messages, temperature=0.2, retries=3, schema=None):
     for i in range(retries):
         try:
             r = client.chat.completions.create(**kwargs)
-            return json.loads(r.choices[0].message.content)
+            if not r.choices:
+                raise ValueError(f"Model returned empty choices (finish_reason unknown); "
+                                 f"raw={r!r}")
+            content = r.choices[0].message.content
+            if content is None:
+                finish = r.choices[0].finish_reason
+                raise ValueError(f"Model returned null content "
+                                 f"(finish_reason={finish!r}); likely refusal or content filter")
+            return json.loads(content)
+        except APIStatusError as e:
+            # Non-retryable HTTP errors (auth, bad request, etc.)
+            if e.status_code in _NON_RETRYABLE_STATUS:
+                raise
+            if i == retries - 1:
+                raise
+            # Rate-limited: use Retry-After header if provided, else exponential backoff
+            # Add ±50% jitter to prevent thundering herd under high concurrency
+            retry_after = e.response.headers.get("Retry-After") if hasattr(e, "response") else None
+            base_wait = float(retry_after) if retry_after else min(2 ** i * 5, 120)
+            wait = base_wait * random.uniform(0.5, 1.5)
+            log.warning("API error %s (attempt %d/%d), retrying in %.0fs",
+                        e.status_code, i + 1, retries, wait)
+            time.sleep(wait)
         except Exception:
             if i == retries - 1:
                 raise
-            time.sleep(2 ** i)
+            time.sleep(2 ** i * random.uniform(0.75, 1.25))
 
 def annotate(client, model, path, image_id, detail="high"):
     mime, b64 = encode_image(path)
@@ -332,7 +363,7 @@ def main():
             sys.exit(1)
         return
 
-    client = OpenAI(base_url=a.base_url, api_key=a.api_key)
+    client = OpenAI(base_url=a.base_url, api_key=a.api_key, timeout=120.0)
 
     # Collect and sort images deterministically
     imgs = sorted(str(p) for p in Path(a.image_dir).rglob("*")
@@ -371,56 +402,59 @@ def main():
 
     raw_f = open(str(raw_path), "a", buffering=1)
     ver_f = open(str(ver_path), "a", buffering=1) if a.verify else None
-    with ThreadPoolExecutor(max_workers=a.max_workers) as ex:
-        futs = {ex.submit(process, client, a.model, p, a.verify, a.detail, v_model): p
-                for p in todo}
-        for i, fu in enumerate(as_completed(futs)):
-            p = futs[fu]
-            name = Path(p).name
-            try:
-                raw_rec, ver_rec = fu.result()
-            except Exception as e:
-                raw_rec = {"image_path": p, "error": str(e),
-                           "trace": traceback.format_exc(limit=3)}
-                ver_rec = None
+    try:
+        with ThreadPoolExecutor(max_workers=a.max_workers) as ex:
+            futs = {ex.submit(process, client, a.model, p, a.verify, a.detail, v_model): p
+                    for p in todo}
+            for i, fu in enumerate(as_completed(futs)):
+                p = futs[fu]
+                name = Path(p).name
+                try:
+                    raw_rec, ver_rec = fu.result()
+                except Exception as e:
+                    raw_rec = {"image_path": p, "error": str(e),
+                               "trace": traceback.format_exc(limit=3)}
+                    ver_rec = None
 
-            raw_f.write(json.dumps(raw_rec, ensure_ascii=False) + "\n")
-            if ver_rec is not None and ver_f is not None:
-                ver_f.write(json.dumps(ver_rec, ensure_ascii=False) + "\n")
+                raw_f.write(json.dumps(raw_rec, ensure_ascii=False) + "\n")
+                raw_f.flush()
+                if ver_rec is not None and ver_f is not None:
+                    ver_f.write(json.dumps(ver_rec, ensure_ascii=False) + "\n")
+                    ver_f.flush()
 
-            if raw_rec.get("error"):
-                n_err += 1
-                log.error("[%d/%d] ERROR  %s\n%s",
-                          i + 1, len(todo), name, raw_rec.get("trace", ""))
-            else:
-                n_ok += 1
-                append_contrastive(raw_rec, str(raw_con))
-                if ver_rec is not None:
-                    append_contrastive(ver_rec, str(ver_con))
-
-                st_raw = _rec_stats(raw_rec)
-                st_ver = _rec_stats(ver_rec) if ver_rec else st_raw
-                sum_obj      += st_raw["n_obj"]
-                sum_pos      += st_raw["n_pos"]
-                sum_raw_neg  += st_raw["kept_neg"]   # raw has no drops yet
-                sum_kept_neg += st_ver["kept_neg"]
-                sum_drop_neg += st_ver["drop_neg"]
-
-                if a.verify:
-                    log.info("[%d/%d] OK  %-36s  obj=%d  pos=%d  "
-                             "raw_neg=%d  ver_neg=%d(kept=%d drop=%d)",
-                             i + 1, len(todo), name,
-                             st_raw["n_obj"], st_raw["n_pos"],
-                             st_raw["kept_neg"],
-                             st_ver["kept_neg"], st_ver["kept_neg"], st_ver["drop_neg"])
+                if raw_rec.get("error"):
+                    n_err += 1
+                    log.error("[%d/%d] ERROR  %s\n%s",
+                              i + 1, len(todo), name, raw_rec.get("trace", ""))
                 else:
-                    log.info("[%d/%d] OK  %-36s  obj=%d  pos=%d  neg=%d",
-                             i + 1, len(todo), name,
-                             st_raw["n_obj"], st_raw["n_pos"], st_raw["kept_neg"])
+                    n_ok += 1
+                    append_contrastive(raw_rec, str(raw_con))
+                    if ver_rec is not None:
+                        append_contrastive(ver_rec, str(ver_con))
 
-    raw_f.close()
-    if ver_f is not None:
-        ver_f.close()
+                    st_raw = _rec_stats(raw_rec)
+                    st_ver = _rec_stats(ver_rec) if ver_rec else st_raw
+                    sum_obj      += st_raw["n_obj"]
+                    sum_pos      += st_raw["n_pos"]
+                    sum_raw_neg  += st_raw["kept_neg"]   # raw has no drops yet
+                    sum_kept_neg += st_ver["kept_neg"]
+                    sum_drop_neg += st_ver["drop_neg"]
+
+                    if a.verify:
+                        log.info("[%d/%d] OK  %-36s  obj=%d  pos=%d  "
+                                 "raw_neg=%d  ver_neg=%d(kept=%d drop=%d)",
+                                 i + 1, len(todo), name,
+                                 st_raw["n_obj"], st_raw["n_pos"],
+                                 st_raw["kept_neg"],
+                                 st_ver["kept_neg"], st_ver["kept_neg"], st_ver["drop_neg"])
+                    else:
+                        log.info("[%d/%d] OK  %-36s  obj=%d  pos=%d  neg=%d",
+                                 i + 1, len(todo), name,
+                                 st_raw["n_obj"], st_raw["n_pos"], st_raw["kept_neg"])
+    finally:
+        raw_f.close()
+        if ver_f is not None:
+            ver_f.close()
 
     # ── session summary ─────────────────────────────────────────────────────
     log.info("=" * 60)

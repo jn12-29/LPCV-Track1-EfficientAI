@@ -20,7 +20,7 @@ from PIL import Image
 from transformers import CLIPTokenizer
 
 # --- Configuration ---
-DATA_DIR = Path("./data")
+DATA_DIR = Path("./sample_data")
 IMAGE_DIR = DATA_DIR / "images"
 IMG_LIST_CSV = DATA_DIR / "img_list.csv"
 TXT_LIST_CSV = DATA_DIR / "txt_list.csv"

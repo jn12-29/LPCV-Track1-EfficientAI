@@ -38,18 +38,6 @@ eval_remote_eval_inference.py: 传入inference job id（获得云端推理输出
 
 ## other
 
-### 文件夹
-
-LPCV：笑泽的代码
-
-26LPCVC_Track1_Sample_Solution: 官方代码
-
-26LPCVC_Track1_Sample_Solution-wjc: 家诚的代码
-
-data：官方给的样例数据集
+sample_data：官方给的样例数据集
 
 exported\_{model_name}\_onnx: 导出的onnx模型
-
-### fp16
-
-mobileclipv2_fp16.py: 其实qaihub会自动转换为fp16，所以不需要手动指定。该文件没有用。

@@ -113,10 +113,12 @@ def run_clip_finetune(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="OpenCLIP Fine-tuning Pipeline")
-    parser.add_argument("--root-dir", type=str, default="./data")
-    parser.add_argument("--image-to-text-csv", type=str, default="./data/img_list.csv")
+    parser.add_argument("--root-dir", type=str, default="./sample_data")
     parser.add_argument(
-        "--textnums-to-texts-csv", type=str, default="./data/txt_list.csv"
+        "--image-to-text-csv", type=str, default="./sample_data/img_list.csv"
+    )
+    parser.add_argument(
+        "--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv"
     )
     parser.add_argument("--output-dir", type=str, default="./checkpoints")
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")

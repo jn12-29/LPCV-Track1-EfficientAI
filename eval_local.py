@@ -123,12 +123,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="CLIP image-text retrieval evaluation with Recall@10"
     )
-    parser.add_argument("--root-dir", type=str, default="./data")
-    parser.add_argument("--image-to-text-csv", type=str, default="./data/img_list.csv")
+    parser.add_argument("--root-dir", type=str, default="./sample_data")
+    parser.add_argument(
+        "--image-to-text-csv", type=str, default="./sample_data/img_list.csv"
+    )
     parser.add_argument(
         "--textnums-to-texts-csv",
         type=str,
-        default="./data/txt_list.csv",
+        default="./sample_data/txt_list.csv",
     )
     parser.add_argument("--model-name", type=str, default="ViT-B-32")
     parser.add_argument("--batch-size", type=int, default=32)

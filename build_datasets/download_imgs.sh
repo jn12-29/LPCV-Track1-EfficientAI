@@ -1,1 +1,1 @@
-modelscope download --dataset leehirwin0215/VisualGenome images.zip --local_dir ./data
+modelscope download --dataset leehirwin0215/VisualGenome images.zip --local_dir ./sample_data

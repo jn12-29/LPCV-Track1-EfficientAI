@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 import argparse
 
-DATA_DIR = Path("./data")
+DATA_DIR = Path("./sample_data")
 IMG_LIST_CSV = DATA_DIR / "img_list.csv"
 TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
 
