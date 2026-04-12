@@ -6,7 +6,6 @@ ALLOWED_TAGS = [
     "fine_grained_attribute",
     "spatial_relation",
     "ocr",
-    "absence",
     "occlusion",
     "cluttered_background",
     "low_contrast",
@@ -23,151 +22,228 @@ Goal:
 Create high-quality retrieval training data that helps a model:
 - recognize both dominant objects and smaller secondary objects,
 - distinguish fine-grained visible attributes,
-- handle multi-object scenes,
+- handle multi-object scenes (especially distinguishing similar instances),
 - use relational cues when useful,
-- use OCR cues when visible,
-- learn hard negatives that are highly plausible confusions.
+- use OCR cues when fully legible,
+- learn hard negatives that are close, plausible, but unequivocally false.
+
+Each "object" means one visually retrievable object instance in the image, not just one semantic category.
+Multiple objects may belong to the same category if they are visibly distinguishable.
+For example, three ping pong balls of different colors or in different positions should be annotated as three separate object blocks if each one can be reliably identified.
+Objects may also come from different categories.
 
 Critical rules:
-1. Only generate annotations supported by clear visual evidence. Do not hallucinate.
-2. Include both dominant objects and smaller secondary objects if they are visually identifiable and could plausibly serve as retrieval targets.
-3. Ignore objects that are too tiny, too blurry, or too ambiguous to describe reliably.
-4. Keep all prompts concise, natural, and similar to real-world human search queries.
-5. Use short noun phrases whenever possible, typically 3-10 words.
-6. Do not over-describe background details.
-7. Do not invent hidden attributes, brands, materials, intent, or unreadable text.
-8. Avoid subjective or speculative words such as beautiful, nice, modern, expensive, cute, unless visually explicit and retrieval-useful.
-9. Lowercase all generated phrases unless capitalization is necessary for clearly readable text.
-10. Do not generate duplicates or near-duplicates.
+1. STRICT VISUAL EVIDENCE: Only generate annotations supported by absolute clear visual evidence. Do not hallucinate or infer missing parts.
+2. NO OCR GUESSING: If text or numbers are blurry, pixelated, or partially obscured, DO NOT extract them. Use OCR only if it is completely legible to the naked eye.
+3. INSTANCE SEPARATION AND DISAMBIGUATION: If multiple objects of the same category appear in the image, and they are visibly distinguishable by color, size, position, state, visible part, or legible text, treat them as separate target objects and create separate object blocks for them. The positive and relational texts for each block must uniquely identify that exact instance using explicit spatial anchors, unique visible attributes, or legible OCR when available. Do not merge multiple distinguishable instances of the same category into one object block.
+4. UNAMBIGUOUS NEGATIVES: Hard negatives must contain an absolute, visually indisputable contradiction. Avoid subjective or borderline attributes (e.g., do not use "blue" as a negative for a "bluish-grey" object).
+5. Include both dominant objects and smaller secondary objects if they could plausibly serve as retrieval targets. Ignore objects that are too tiny or ambiguous.
+6. Keep all prompts concise, natural, and similar to real-world human search queries (**typically 3-10 words**, noun phrases preferred).
+7. Do not over-describe background details or invent hidden materials, brands, or intent.
+8. Lowercase all generated phrases unless capitalization is absolutely necessary for exact OCR matching.
+9. Do not generate duplicates or near-duplicates.
+10. All texts inside one object block must refer to the exact same target object instance.
+11. A negative must be false for the full image, not merely false for the target region.
 
 For each target object, generate:
 - positive_texts:
-  2-3 highly accurate, concise, retrieval-useful descriptions of the exact same target object.
+  1-2 highly accurate, discriminative descriptions of the target object.
 - weak_positives:
-  1-3 correct but less specific descriptions of the same target object.
+  0-1 correct but less specific descriptions of the same target object.
 - hard_negatives_attribute:
-  2 descriptions that stay very close to the positive descriptions but contain exactly one key factual error about the same object, such as color, text, state, local part, or attribute.
+  0-2 descriptions containing exactly ONE indisputably wrong intrinsic fact (e.g., a drastically different color, shape, or state).
 - hard_negatives_scene:
-  2 descriptions of other real objects in the same image that are plausible distractors for retrieval.
+  0-2 descriptions where the object is identical, but ONE surrounding-scene or local-context fact is completely altered (e.g., changing the support surface or relative position).
 - relational_texts:
-  0-2 descriptions based on explicit interaction or relative position, only if clearly supported by the image.
-- absence_texts:
-  0-2 descriptions based on a clearly visible missing feature, only if genuinely discriminative.
+  0-2 true descriptions based on explicit, unambiguous relative position or interaction with another clearly visible object.
 - ocr_texts:
-  0-2 descriptions based on clearly readable text, letters, or logos, only if present and legible.
-
-Visible evidence types you may use:
-- attribute: color, texture, material appearance, local shape, local pose, state
-- absence/negation: a clearly missing expected part or feature
-- relation/interaction: explicit relative position or interaction with another object
-- OCR/scene text: clearly readable text or logo
-
-Negative generation rules:
-- Attribute negatives should stay highly similar to the positive descriptions and differ by exactly one key fact.
-- Scene negatives should refer to other real objects in the same image, not unrelated imaginary objects.
-- Negatives must be plausible confusions, not absurd mismatches.
+  0-1 true descriptions based STRICTLY on fully legible text/logos. If you have to squint, guess, or infer the letters due to blur, folds, or occlusion, DO NOT extract it.
 
 Output requirements:
 - Return valid JSON only.
-- Top-level output must be object-centric, not category-centric.
-- If a field does not apply, return an empty list.
-- Salience must be one of: \"primary\" or \"secondary\".
-- Challenge tags must be chosen only from:
-  [
-    \"small_object\",
-    \"multi_object_scene\",
-    \"fine_grained_attribute\",
-    \"spatial_relation\",
-    \"ocr\",
-    \"absence\",
-    \"occlusion\",
-    \"cluttered_background\",
-    \"low_contrast\",
-    \"similar_objects\",
-    \"dominant_distractor\",
-    \"attribute_ambiguity\"
-  ]
+- Top-level output must be object-centric.
+- If a field does not apply or cannot be generated safely, return an empty list []. Do not force generation.
+- Salience must be "primary" or "secondary".
+- Challenge tags must be chosen only from the provided list.
 """
 
-USER_PROMPT = """Analyze this image and generate structured retrieval training data.
+USER_PROMPT = """Analyze this image and generate structured image to text retrieval training data.
 
 Requirements:
 - Include all reasonably identifiable retrieval targets, including smaller secondary objects.
+- Treat visibly distinguishable instances of the same category as separate objects.
+- For example, multiple ping pong balls, cups, bottles, or signs should be annotated separately if they can be reliably told apart by visible attributes or position.
 - Prefer concise noun phrases.
 - Use only visible, image-grounded attributes.
-- Generate strong positives, weak positives, attribute hard negatives, scene hard negatives, relational texts, absence texts, and OCR texts when supported.
+- Generate strong positives, weak positives, attribute hard negatives, scene hard negatives, relational texts, and OCR texts when supported.
 - Return valid JSON only following the required schema.
 """
 
-FEW_SHOT_EXAMPLE = {
-    "image_id": "example_001.jpg",
-    "global_texts": [
-        "a desk setup with a monitor, keyboard, and mouse",
-        "an office desk with computer equipment",
-    ],
-    "challenge_tags": [
-        "small_object",
-        "multi_object_scene",
-        "fine_grained_attribute",
-        "dominant_distractor",
-    ],
-    "objects": [
-        {
-            "object_name": "monitor",
-            "salience": "primary",
-            "positive_texts": [
-                "the white monitor",
-                "the bezeled monitor",
-                "the grey monitor",
-            ],
-            "weak_positives": [
-                "the desk monitor",
-                "the computer monitor",
-            ],
-            "hard_negatives_attribute": [
-                "the black monitor",
-                "the illuminated monitor",
-            ],
-            "hard_negatives_scene": [
-                "the white keyboard",
-                "the black and grey mouse",
-            ],
-            "relational_texts": [
-                "the monitor behind the keyboard",
-            ],
-            "absence_texts": [
-                "the monitor with no sticky note",
-            ],
-            "ocr_texts": [],
-        },
-        {
-            "object_name": "mouse",
-            "salience": "secondary",
-            "positive_texts": [
-                "the round mouse",
-                "the black and grey mouse",
-            ],
-            "weak_positives": [
-                "the desk mouse",
-                "the mouse near the keyboard",
-            ],
-            "hard_negatives_attribute": [
-                "the white mouse",
-                "the silver mouse",
-            ],
-            "hard_negatives_scene": [
-                "the off monitor",
-                "the white keyboard",
-            ],
-            "relational_texts": [
-                "the mouse in front of the monitor",
-                "the mouse next to the keyboard",
-            ],
-            "absence_texts": [],
-            "ocr_texts": [],
-        },
-    ],
-}
+FEW_SHOT_EXAMPLE = [
+    {
+        "image_id": "example_ping_pong_balls.jpg",
+        "global_texts": [
+            "three ping pong balls on a dark scratched surface",
+            "colored table tennis balls grouped together",
+        ],
+        "challenge_tags": [
+            "multi_object_scene",
+            "fine_grained_attribute",
+            "spatial_relation",
+            "similar_objects",
+        ],
+        "objects": [
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    "the white ping pong ball",
+                    "the white ball at the upper left",
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": ["the blue ping pong ball"],
+                "hard_negatives_scene": [
+                    "the white ping pong ball on a wooden table",
+                    "the white ping pong ball below the green ball",
+                ],
+                "relational_texts": [
+                    "the white ping pong ball left of the orange ball",
+                    "the white ping pong ball above the green ball",
+                ],
+                "ocr_texts": [],
+            },
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    "the orange ping pong ball",
+                    "the orange ball at the upper right",
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": ["the purple ping pong ball"],
+                "hard_negatives_scene": [
+                    "the orange ping pong ball on a wooden table",
+                    "the orange ping pong ball left of the white ball",
+                ],
+                "relational_texts": [
+                    "the orange ping pong ball right of the white ball",
+                    "the orange ping pong ball above the green ball",
+                ],
+                "ocr_texts": [],
+            },
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    "the light green ping pong ball",
+                    "the bottom ping pong ball",
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": ["the black ping pong ball"],
+                "hard_negatives_scene": [
+                    "the green ping pong ball on a wooden table",
+                    "the green ping pong ball above the white ball",
+                ],
+                "relational_texts": [
+                    "the green ping pong ball below the white ball",
+                    "the green ping pong ball below the orange ball",
+                ],
+                "ocr_texts": [],
+            },
+        ],
+    },
+    {
+        "image_id": "example_dual_computers.jpg",
+        "global_texts": [
+            "two desktop computer setups on a table",
+            "crt monitors on desktop towers with keyboards and a mouse",
+        ],
+        "challenge_tags": [
+            "multi_object_scene",
+            "similar_objects",
+            "spatial_relation",
+            "ocr",
+        ],
+        "objects": [
+            {
+                "object_name": "monitor",
+                "salience": "primary",
+                "positive_texts": [
+                    "black crt monitor with dell logo",
+                    "crt monitor above desktop tower",
+                ],
+                "weak_positives": ["crt monitor"],
+                "hard_negatives_attribute": ["white crt monitor"],
+                "hard_negatives_scene": [
+                    "crt monitor mounted on the wall",
+                    "crt monitor on the floor",
+                ],
+                "relational_texts": [
+                    "crt monitor behind keyboard",
+                    "crt monitor above computer tower",
+                ],
+                "ocr_texts": ["crt monitor with dell logo"],
+            },
+            {
+                "object_name": "desktop tower",
+                "salience": "primary",
+                "positive_texts": [
+                    "black desktop tower with dell logo",
+                    "desktop tower under crt monitor",
+                ],
+                "weak_positives": ["computer tower"],
+                "hard_negatives_attribute": ["white computer tower"],
+                "hard_negatives_scene": [
+                    "computer tower under the table",
+                    "computer tower stacked on another tower",
+                ],
+                "relational_texts": [
+                    "desktop tower below monitor",
+                    "desktop tower behind keyboard",
+                ],
+                "ocr_texts": ["desktop tower with dell logo"],
+            },
+            {
+                "object_name": "keyboard",
+                "salience": "secondary",
+                "positive_texts": [
+                    "black keyboard at the front of the table",
+                    "keyboard in front of desktop tower",
+                ],
+                "weak_positives": ["black keyboard"],
+                "hard_negatives_attribute": ["white keyboard"],
+                "hard_negatives_scene": [
+                    "keyboard on top of the monitor",
+                    "keyboard under the table",
+                ],
+                "relational_texts": [
+                    "keyboard below monitor",
+                    "keyboard beside the mouse",
+                ],
+                "ocr_texts": ["keyboard with dell text"],
+            },
+            {
+                "object_name": "mouse",
+                "salience": "secondary",
+                "positive_texts": [
+                    "black wired mouse in the center",
+                    "mouse between the keyboards",
+                ],
+                "weak_positives": ["wired mouse"],
+                "hard_negatives_attribute": ["white mouse"],
+                "hard_negatives_scene": [
+                    "mouse without a cable",
+                    "mouse on top of a keyboard",
+                ],
+                "relational_texts": [
+                    "mouse below the monitors",
+                    "mouse between the keyboards",
+                ],
+                "ocr_texts": ["mouse with dell logo"],
+            },
+        ],
+    },
+]
 
 RESPONSE_SCHEMA = {
     "type": "object",
@@ -198,7 +274,6 @@ RESPONSE_SCHEMA = {
                         "items": {"type": "string"},
                     },
                     "relational_texts": {"type": "array", "items": {"type": "string"}},
-                    "absence_texts": {"type": "array", "items": {"type": "string"}},
                     "ocr_texts": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
@@ -209,7 +284,6 @@ RESPONSE_SCHEMA = {
                     "hard_negatives_attribute",
                     "hard_negatives_scene",
                     "relational_texts",
-                    "absence_texts",
                     "ocr_texts",
                 ],
             },

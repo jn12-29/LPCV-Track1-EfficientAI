@@ -222,7 +222,6 @@ def normalize_raw_record(raw: Dict[str, Any], image_path: Path) -> Dict[str, Any
                 obj.get("hard_negatives_scene", [])
             ),
             "relational_texts": dedupe_keep_order(obj.get("relational_texts", [])),
-            "absence_texts": dedupe_keep_order(obj.get("absence_texts", [])),
             "ocr_texts": dedupe_keep_order(obj.get("ocr_texts", [])),
         }
         if not new_obj["object_name"]:
@@ -240,11 +239,10 @@ def aggregate_raw_record(raw_record: Dict[str, Any]) -> Dict[str, Any]:
 
     positives  — every text that truthfully describes this image:
                  global_texts, per-object positive_texts / weak_positives /
-                 relational_texts / ocr_texts / absence_texts, and
-                 hard_negatives_scene (which describe *other real objects*
+                 relational_texts / ocr_texts
                  in the same image and are therefore still true at image level).
 
-    hard_negatives — only hard_negatives_attribute, which contain a wrong
+    hard_negatives — attribute negatives, scene negatives are factually wrong for this image, which contain a wrong
                      factual claim about an object that IS in the image and
                      are therefore genuinely false at image level.
     """
@@ -260,12 +258,9 @@ def aggregate_raw_record(raw_record: Dict[str, Any]) -> Dict[str, Any]:
         positives.extend(obj.get("weak_positives", []))
         positives.extend(obj.get("relational_texts", []))
         positives.extend(obj.get("ocr_texts", []))
-        positives.extend(obj.get("absence_texts", []))
-        # hard_negatives_scene describes other real objects in this image
-        # → they are still true descriptions of the image at the global level
-        positives.extend(obj.get("hard_negatives_scene", []))
 
-        # Only attribute negatives are factually wrong for this image
+        # attribute negatives, scene negatives are factually wrong for this image
+        hard_negatives.extend(obj.get("hard_negatives_scene", []))
         hard_negatives.extend(obj.get("hard_negatives_attribute", []))
 
     return {

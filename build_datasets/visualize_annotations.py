@@ -54,7 +54,6 @@ _FIELDS: List[Tuple[str, str, str]] = [
     ("hard_negatives_attribute", "HN attr",  "#B52020"),
     ("hard_negatives_scene",     "HN scene", "#9E1060"),
     ("relational_texts",         "Spatial",  "#1040A8"),
-    ("absence_texts",            "Absence",  "#6A1EA0"),
     ("ocr_texts",                "OCR",      "#C04000"),
 ]
 
