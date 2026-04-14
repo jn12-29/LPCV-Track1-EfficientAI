@@ -69,7 +69,7 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
 ### Training (`train/`)
 
-- **`train/finetune.py`** — fine-tunes MobileCLIP2 on flat contrastive JSONL from `build_datasets/`.
+- **`train/finetune.py`** — fine-tunes MobileCLIP2 on flat contrastive JSONL from `build_datasets/`. Writes each run to `checkpoints/<model>__<config>__<timestamp>/` with `train.log`, metrics files, epoch-tagged checkpoints, `run_config.json`, and TensorBoard logs under `tensorboard/`.
 - **`train/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
 
 ### Dataset builder (`build_datasets/`)

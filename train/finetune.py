@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import datetime
 import json
 import math
 import random
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -22,10 +23,97 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
 import open_clip
 
 from utils.clip_utils import _load_clip
 from utils.preprocess import preprocess_image
+
+
+MetricValue = float | int | str
+MetricsRow = Dict[str, MetricValue]
+TRAIN_LOG_PATH: Optional[Path] = None
+
+
+def current_timestamp() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def make_run_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def sanitize_tag(value: str) -> str:
+    sanitized = "".join(
+        ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in value
+    )
+    return sanitized.strip("-_") or "unknown"
+
+
+def format_config_value(value: Any) -> str:
+    if isinstance(value, float):
+        if value != 0 and (abs(value) < 1e-3 or abs(value) >= 1e3):
+            return format(value, ".0e")
+        return format(value, "g")
+    return str(value)
+
+
+def build_config_stamp(args: argparse.Namespace) -> str:
+    config_stamp = "_".join(
+        [
+            f"bs{args.batch_size}",
+            f"ep{args.epochs}",
+            f"lr{sanitize_tag(format_config_value(args.lr))}",
+            f"wd{sanitize_tag(format_config_value(args.weight_decay))}",
+            f"acc{args.accum_freq}",
+            f"hn{args.num_hard_negatives}",
+            f"hnw{sanitize_tag(format_config_value(args.hard_negative_weight))}",
+            f"seed{args.seed}",
+        ]
+    )
+    return sanitize_tag(config_stamp)
+
+
+def build_run_name(args: argparse.Namespace, run_timestamp: str) -> str:
+    return "__".join(
+        [
+            sanitize_tag(args.model_name),
+            build_config_stamp(args),
+            run_timestamp,
+        ]
+    )
+
+
+def log_message(message: str, run_name: Optional[str] = None) -> None:
+    prefix = f"[{current_timestamp()}]"
+    if run_name:
+        prefix = f"{prefix}[{run_name}]"
+    line = f"{prefix} {message}"
+    print(line)
+    if TRAIN_LOG_PATH is not None:
+        TRAIN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with TRAIN_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+
+def save_run_config(config_path: Path, payload: Dict[str, Any]) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def write_tensorboard_scalars(
+    writer: Optional[SummaryWriter],
+    tag_prefix: str,
+    metrics: Dict[str, MetricValue],
+    step: int,
+) -> None:
+    if writer is None:
+        return
+
+    for key, value in metrics.items():
+        if isinstance(value, (int, float)):
+            writer.add_scalar(f"{tag_prefix}/{key}", value, step)
 
 
 def set_seed(seed: int) -> None:
@@ -81,7 +169,7 @@ class ContrastiveRecordDataset(Dataset):
                     break
 
                 if line_idx % 50000 == 0:
-                    print(f"Loaded {line_idx} rows from {self.jsonl_path}")
+                    log_message(f"Loaded {line_idx} rows from {self.jsonl_path}")
 
         if not records:
             raise ValueError(f"No usable training records found in {self.jsonl_path}")
@@ -226,7 +314,7 @@ def compute_hard_negative_loss(
     raise ValueError(f"Unsupported hard negative loss strategy: {strategy}")
 
 
-def append_metrics_row(csv_path: Path, row: Dict[str, float | int]) -> None:
+def append_metrics_row(csv_path: Path, row: MetricsRow) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     file_exists = csv_path.exists()
     with csv_path.open("a", newline="", encoding="utf-8") as f:
@@ -236,14 +324,14 @@ def append_metrics_row(csv_path: Path, row: Dict[str, float | int]) -> None:
         writer.writerow(row)
 
 
-def append_metrics_jsonl(jsonl_path: Path, row: Dict[str, float | int]) -> None:
+def append_metrics_jsonl(jsonl_path: Path, row: MetricsRow) -> None:
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     with jsonl_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def plot_training_curves(
-    metrics_history: List[Dict[str, float | int]], output_dir: Path
+    metrics_history: List[MetricsRow], output_dir: Path
 ) -> None:
     if not metrics_history:
         return
@@ -287,7 +375,7 @@ def save_checkpoint(
     epoch: int,
     global_step: int,
     args: argparse.Namespace,
-    metrics_history: List[Dict[str, float | int]],
+    metrics_history: List[MetricsRow],
 ) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -321,6 +409,8 @@ def train_one_epoch(
     hard_negative_weight: float,
     hard_negative_margin: float,
     hard_negative_loss_type: str,
+    run_name: Optional[str] = None,
+    writer: Optional[SummaryWriter] = None,
 ) -> Tuple[Dict[str, float], int]:
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -393,12 +483,26 @@ def train_one_epoch(
             elapsed = time.time() - start_time
             throughput = (batch_idx * images.shape[0]) / max(elapsed, 1e-6)
             current_lr = scheduler.get_last_lr()[0]
-            print(
+            tb_step = (epoch - 1) * num_batches + batch_idx
+            write_tensorboard_scalars(
+                writer,
+                "train_step",
+                {
+                    "total_loss": total_loss.item(),
+                    "clip_loss": clip_loss.item(),
+                    "hard_negative_loss": hard_negative_loss.item(),
+                    "lr": current_lr,
+                    "throughput": throughput,
+                },
+                tb_step,
+            )
+            log_message(
                 f"Epoch {epoch} Step {batch_idx}/{num_batches} "
                 f"Total {total_loss.item():.4f} "
                 f"CLIP {clip_loss.item():.4f} "
                 f"HardNeg {hard_negative_loss.item():.4f} "
-                f"LR {current_lr:.6e} Throughput {throughput:.2f} samples/s"
+                f"LR {current_lr:.6e} Throughput {throughput:.2f} samples/s",
+                run_name=run_name,
             )
 
     return (
@@ -466,117 +570,175 @@ def parse_args() -> argparse.Namespace:
 
 
 def run_training(args: argparse.Namespace) -> None:
+    global TRAIN_LOG_PATH
+
     set_seed(args.seed)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    model, _, tokenizer = _load_clip(args.model_name, device, args.pretrained)
-    if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
-        model.set_grad_checkpointing()
-
-    train_dataset = ContrastiveRecordDataset(
-        jsonl_path=args.jsonl_path,
-        max_records=args.max_records,
-        max_positives_per_image=args.max_positives_per_image,
-        max_hard_negatives_per_image=args.max_hard_negatives_per_image,
-        shuffle_texts_on_load=args.shuffle_texts_on_load,
-    )
-    print(f"Loaded {len(train_dataset)} image records from {args.jsonl_path}")
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        drop_last=False,
-        collate_fn=create_collate_fn(
-            tokenizer=tokenizer,
-            num_hard_negatives=args.num_hard_negatives,
-            text_sampling=args.text_sampling,
-        ),
-    )
-
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
-        betas=(0.9, args.beta2),
-        weight_decay=args.weight_decay,
-    )
-    scheduler = build_scheduler(
-        optimizer=optimizer,
-        total_steps=max(
-            math.ceil(len(train_dataloader) / max(args.accum_freq, 1)) * args.epochs, 1
-        ),
-        warmup_steps=args.warmup_steps,
-    )
-    scaler = GradScaler(enabled=device.type == "cuda")
-    clip_loss_fn = open_clip.ClipLoss()
-
-    output_dir = Path(args.output_dir)
+    run_timestamp = make_run_timestamp()
+    run_name = build_run_name(args, run_timestamp)
+    output_dir = Path(args.output_dir) / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    train_log_path = output_dir / "train.log"
     metrics_csv_path = output_dir / "metrics.csv"
     metrics_jsonl_path = output_dir / "metrics.jsonl"
+    config_json_path = output_dir / "run_config.json"
+    tensorboard_dir = output_dir / "tensorboard"
 
-    metrics_history: List[Dict[str, float | int]] = []
-    global_step = 0
+    previous_log_path = TRAIN_LOG_PATH
+    TRAIN_LOG_PATH = train_log_path
+    writer = SummaryWriter(log_dir=str(tensorboard_dir))
 
-    for epoch in range(1, args.epochs + 1):
-        epoch_metrics, global_step = train_one_epoch(
-            model=model,
-            dataloader=train_dataloader,
+    run_config: Dict[str, Any] = {
+        "run_name": run_name,
+        "run_timestamp": run_timestamp,
+        "started_at": current_timestamp(),
+        "output_dir": str(output_dir.resolve()),
+        "train_log_path": str(train_log_path.resolve()),
+        "tensorboard_dir": str(tensorboard_dir.resolve()),
+        "args": vars(args),
+    }
+    try:
+        save_run_config(config_json_path, run_config)
+
+        log_message(f"Using device: {device}", run_name=run_name)
+        log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
+        log_message(f"Train log saved to {train_log_path}", run_name=run_name)
+        log_message(
+            f"TensorBoard logs saved to {tensorboard_dir}",
+            run_name=run_name,
+        )
+        log_message(f"Run config saved to {config_json_path}", run_name=run_name)
+
+        model, _, tokenizer = _load_clip(args.model_name, device, args.pretrained)
+        if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
+            model.set_grad_checkpointing()
+
+        train_dataset = ContrastiveRecordDataset(
+            jsonl_path=args.jsonl_path,
+            max_records=args.max_records,
+            max_positives_per_image=args.max_positives_per_image,
+            max_hard_negatives_per_image=args.max_hard_negatives_per_image,
+            shuffle_texts_on_load=args.shuffle_texts_on_load,
+        )
+        log_message(
+            f"Loaded {len(train_dataset)} image records from {args.jsonl_path}",
+            run_name=run_name,
+        )
+        run_config["num_records"] = len(train_dataset)
+        save_run_config(config_json_path, run_config)
+        writer.add_text(
+            "run/config_json",
+            json.dumps(run_config, ensure_ascii=False, indent=2),
+            0,
+        )
+
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=device.type == "cuda",
+            drop_last=False,
+            collate_fn=create_collate_fn(
+                tokenizer=tokenizer,
+                num_hard_negatives=args.num_hard_negatives,
+                text_sampling=args.text_sampling,
+            ),
+        )
+
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=args.lr,
+            betas=(0.9, args.beta2),
+            weight_decay=args.weight_decay,
+        )
+        scheduler = build_scheduler(
             optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            clip_loss_fn=clip_loss_fn,
-            device=device,
-            epoch=epoch,
-            global_step=global_step,
-            log_every_n_steps=args.log_every_n_steps,
-            grad_clip_norm=args.grad_clip_norm,
-            accum_freq=args.accum_freq,
-            hard_negative_weight=args.hard_negative_weight,
-            hard_negative_margin=args.hard_negative_margin,
-            hard_negative_loss_type=args.hard_negative_loss_type,
+            total_steps=max(
+                math.ceil(len(train_dataloader) / max(args.accum_freq, 1))
+                * args.epochs,
+                1,
+            ),
+            warmup_steps=args.warmup_steps,
         )
+        scaler = GradScaler(enabled=device.type == "cuda")
+        clip_loss_fn = open_clip.ClipLoss()
 
-        epoch_row: Dict[str, float | int] = {
-            "epoch": epoch,
-            "global_step": global_step,
-            "num_records": len(train_dataset),
-            "batch_size": args.batch_size,
-            "num_hard_negatives": args.num_hard_negatives,
-            **epoch_metrics,
-        }
-        metrics_history.append(epoch_row)
-        append_metrics_row(metrics_csv_path, epoch_row)
-        append_metrics_jsonl(metrics_jsonl_path, epoch_row)
-        plot_training_curves(metrics_history, output_dir)
+        metrics_history: List[MetricsRow] = []
+        global_step = 0
+        epoch_digits = max(len(str(args.epochs)), 2)
+        previous_latest_path: Optional[Path] = None
 
-        print(
-            f"Epoch {epoch} summary: "
-            f"total={epoch_metrics['train_total_loss']:.4f} "
-            f"clip={epoch_metrics['train_loss']:.4f} "
-            f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}"
-        )
+        for epoch in range(1, args.epochs + 1):
+            epoch_metrics, global_step = train_one_epoch(
+                model=model,
+                dataloader=train_dataloader,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                clip_loss_fn=clip_loss_fn,
+                device=device,
+                epoch=epoch,
+                global_step=global_step,
+                log_every_n_steps=args.log_every_n_steps,
+                grad_clip_norm=args.grad_clip_norm,
+                accum_freq=args.accum_freq,
+                hard_negative_weight=args.hard_negative_weight,
+                hard_negative_margin=args.hard_negative_margin,
+                hard_negative_loss_type=args.hard_negative_loss_type,
+                run_name=run_name,
+                writer=writer,
+            )
 
-        latest_path = output_dir / "checkpoint_latest.pt"
-        save_checkpoint(
-            save_path=latest_path,
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            epoch=epoch,
-            global_step=global_step,
-            args=args,
-            metrics_history=metrics_history,
-        )
+            epoch_row: MetricsRow = {
+                "logged_at": current_timestamp(),
+                "run_timestamp": run_timestamp,
+                "run_name": run_name,
+                "model_name": args.model_name,
+                "jsonl_path": str(Path(args.jsonl_path).resolve()),
+                "epoch": epoch,
+                "global_step": global_step,
+                "num_records": len(train_dataset),
+                "batch_size": args.batch_size,
+                "epochs": args.epochs,
+                "lr_init": args.lr,
+                "weight_decay": args.weight_decay,
+                "accum_freq": args.accum_freq,
+                "seed": args.seed,
+                "num_hard_negatives": args.num_hard_negatives,
+                "hard_negative_weight": args.hard_negative_weight,
+                "hard_negative_margin": args.hard_negative_margin,
+                "text_sampling": args.text_sampling,
+                **epoch_metrics,
+            }
+            metrics_history.append(epoch_row)
+            append_metrics_row(metrics_csv_path, epoch_row)
+            append_metrics_jsonl(metrics_jsonl_path, epoch_row)
+            plot_training_curves(metrics_history, output_dir)
+            write_tensorboard_scalars(writer, "train_epoch", epoch_metrics, epoch)
+            write_tensorboard_scalars(
+                writer,
+                "train_epoch_meta",
+                {"global_step": global_step},
+                epoch,
+            )
+            writer.flush()
 
-        if args.save_every_epoch:
-            epoch_path = output_dir / f"checkpoint_epoch_{epoch}.pt"
+            log_message(
+                f"Epoch {epoch} summary: "
+                f"total={epoch_metrics['train_total_loss']:.4f} "
+                f"clip={epoch_metrics['train_loss']:.4f} "
+                f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}",
+                run_name=run_name,
+            )
+
+            latest_path = output_dir / (
+                f"checkpoint_latest_epoch_{epoch:0{epoch_digits}d}.pt"
+            )
+            if previous_latest_path is not None and previous_latest_path.exists():
+                previous_latest_path.unlink()
             save_checkpoint(
-                save_path=epoch_path,
+                save_path=latest_path,
                 model=model,
                 optimizer=optimizer,
                 scheduler=scheduler,
@@ -586,12 +748,48 @@ def run_training(args: argparse.Namespace) -> None:
                 args=args,
                 metrics_history=metrics_history,
             )
+            previous_latest_path = latest_path
 
-    final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
-    torch.save(model.state_dict(), final_weights_path)
-    print(f"Training complete. Final weights saved to {final_weights_path}")
-    print(f"Metrics saved to {metrics_csv_path} and {metrics_jsonl_path}")
-    print(f"Training curves saved to {output_dir / 'training_curves.png'}")
+            if args.save_every_epoch:
+                epoch_path = output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
+                save_checkpoint(
+                    save_path=epoch_path,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    epoch=epoch,
+                    global_step=global_step,
+                    args=args,
+                    metrics_history=metrics_history,
+                )
+
+        final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
+        torch.save(model.state_dict(), final_weights_path)
+        run_config["finished_at"] = current_timestamp()
+        run_config["final_weights_path"] = str(final_weights_path.resolve())
+        save_run_config(config_json_path, run_config)
+        writer.add_text(
+            "run/final_weights_path",
+            str(final_weights_path.resolve()),
+            global_step,
+        )
+        writer.flush()
+        log_message(
+            f"Training complete. Final weights saved to {final_weights_path}",
+            run_name=run_name,
+        )
+        log_message(
+            f"Metrics saved to {metrics_csv_path} and {metrics_jsonl_path}",
+            run_name=run_name,
+        )
+        log_message(
+            f"Training curves saved to {output_dir / 'training_curves.png'}",
+            run_name=run_name,
+        )
+    finally:
+        writer.close()
+        TRAIN_LOG_PATH = previous_log_path
 
 
 if __name__ == "__main__":

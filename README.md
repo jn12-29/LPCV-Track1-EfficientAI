@@ -72,6 +72,14 @@ python train/analyze_hard_negatives.py \
 
 `train/finetune.py` reads the JSONL records as-is, samples one positive text and `--num-hard-negatives` hard negatives per image, and optimizes `CLIP loss + hard negative loss`.
 
+Each training run now writes into a structured subdirectory under `--output-dir`, for example `checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260414_153000/`. The run directory includes `train.log`, `metrics.csv`, `metrics.jsonl`, `training_curves.png`, checkpoints named with epoch information such as `checkpoint_latest_epoch_03.pt` and `checkpoint_epoch_03.pt`, `run_config.json`, and TensorBoard event files under `tensorboard/`.
+
+To inspect TensorBoard logs:
+
+```bash
+tensorboard --logdir checkpoints
+```
+
 ## `eval_remote.py` Modes
 
 | Mode | Arguments | Description |
