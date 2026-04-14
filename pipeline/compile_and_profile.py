@@ -1,4 +1,5 @@
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -99,18 +100,25 @@ def main():
     print(f"Image compilation job ID: {img_id}")
     print(f"Text compilation job ID: {txt_id}")
 
-    # Submit profiling jobs
-    print("\nSubmitting profiling jobs to QAI Hub...")
-    run_profile(
-        model=qai_hub.get_job(img_id).get_target_model(),
-        name=model_name + f"_image_encoder{postfix}",
-        device=target_device,
-    )
-    run_profile(
-        model=qai_hub.get_job(txt_id).get_target_model(),
-        name=model_name + f"_text_encoder{postfix}",
-        device=target_device,
-    )
+    # Wait for both compile jobs to finish, then submit profile jobs in parallel
+    print("\nWaiting for compilation and submitting profiling jobs to QAI Hub...")
+
+    def _wait_and_profile(job_id: str, name: str) -> str:
+        target_model = qai_hub.get_job(job_id).get_target_model()
+        profile_job_id = run_profile(model=target_model, name=name, device=target_device)
+        print(f"Profile job submitted for {name}: {profile_job_id}")
+        return profile_job_id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        img_profile_future = executor.submit(
+            _wait_and_profile, img_id, model_name + f"_image_encoder{postfix}"
+        )
+        txt_profile_future = executor.submit(
+            _wait_and_profile, txt_id, model_name + f"_text_encoder{postfix}"
+        )
+        img_profile_future.result()
+        txt_profile_future.result()
+
     print("Profiling jobs submitted for both models.")
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -45,8 +46,8 @@ DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
 # Dataset upload
 # ---------------------------------------------------------------------------
 
-def upload_datasets() -> tuple[str, str]:
-    """Upload image and text datasets to QAI Hub and return their IDs."""
+def _upload_image_dataset() -> str:
+    """Preprocess and upload the image dataset; return dataset ID."""
     print("Processing images...")
     image_names = []
     with open(IMG_LIST_CSV, encoding="utf-8-sig", newline="") as f:
@@ -63,8 +64,12 @@ def upload_datasets() -> tuple[str, str]:
     print("Uploading image dataset to QAI Hub...")
     image_dataset = qai_hub.upload_dataset({"image": images})
     print(f"  Image dataset ID: {image_dataset.dataset_id}")
+    return image_dataset.dataset_id
 
-    print("\nLoading text prompts...")
+
+def _upload_text_dataset() -> str:
+    """Tokenize and upload the text dataset; return dataset ID."""
+    print("Loading text prompts...")
     prompts = []
     with open(TXT_LIST_CSV, encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
@@ -77,8 +82,17 @@ def upload_datasets() -> tuple[str, str]:
     print("Uploading text dataset to QAI Hub...")
     text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
     print(f"  Text dataset ID: {text_dataset.dataset_id}")
+    return text_dataset.dataset_id
 
-    return image_dataset.dataset_id, text_dataset.dataset_id
+
+def upload_datasets() -> tuple[str, str]:
+    """Upload image and text datasets to QAI Hub in parallel; return their IDs."""
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        img_future = executor.submit(_upload_image_dataset)
+        txt_future = executor.submit(_upload_text_dataset)
+        img_ds_id = img_future.result()
+        txt_ds_id = txt_future.result()
+    return img_ds_id, txt_ds_id
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +147,21 @@ if __name__ == "__main__":
         for task_name, job_id in tasks.items():
             if job_id is None:
                 raise ValueError(f"--{task_name}-inference-id is required in Mode C")
+
+        def _fetch_output(task_name: str, job_id: str):
             print(f"Fetching {task_name} inference job {job_id} ...")
             inference_job = qai_hub.get_job(job_id)
             inference_output = inference_job.download_output_data()
-            outputs[task_name] = inference_output["output_0"]
+            return task_name, inference_output["output_0"]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(_fetch_output, task_name, job_id)
+                for task_name, job_id in tasks.items()
+            ]
+            for future in as_completed(futures):
+                task_name, result = future.result()
+                outputs[task_name] = result
 
     else:
         if args.image_compiled_id is None or args.text_compiled_id is None:
@@ -158,10 +183,10 @@ if __name__ == "__main__":
             "text":  {"compiled_id": args.text_compiled_id,  "dataset_id": txt_ds_id},
             "image": {"compiled_id": args.image_compiled_id, "dataset_id": img_ds_id},
         }
-        for task_name, info in tasks.items():
+
+        def _run_task(task_name: str, info: dict):
             input_dataset = qai_hub.get_dataset(info["dataset_id"])
             compiled_model = qai_hub.get_job(info["compiled_id"]).get_target_model()
-
             print(f"Running inference for {task_name} model {compiled_model.model_id}")
             inference_job = run_inference(
                 compiled_model,
@@ -169,13 +194,20 @@ if __name__ == "__main__":
                 device,
                 input_dataset,
             )
-
             if inference_job.get_status().failure:
                 print(f"{task_name.capitalize()} inference failed")
-                outputs[task_name] = None
-            else:
-                inference_output = inference_job.download_output_data()
-                outputs[task_name] = inference_output["output_0"]
+                return task_name, None
+            inference_output = inference_job.download_output_data()
+            return task_name, inference_output["output_0"]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(_run_task, task_name, info)
+                for task_name, info in tasks.items()
+            ]
+            for future in as_completed(futures):
+                task_name, result = future.result()
+                outputs[task_name] = result
 
     img_embeds = np.vstack(outputs["image"])
     txt_embeds = np.vstack(outputs["text"])
