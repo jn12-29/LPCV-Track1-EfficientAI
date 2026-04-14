@@ -48,6 +48,30 @@ python eval_remote.py \
 
 Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
+## Training
+
+Run training and analysis from the repository root.
+
+The builder writes flat contrastive JSONL records consumed directly by `train/`:
+
+```json
+{"image_path": "build_datasets/data/VG_100K/107914.jpg", "positives": ["..."], "hard_negatives": ["..."]}
+```
+
+```bash
+# fine-tune MobileCLIP2 on builder output
+python train/finetune.py \
+    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --batch-size 256 --epochs 20
+
+# analyze positive vs hard-negative similarity distributions
+python train/analyze_hard_negatives.py \
+    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S0
+```
+
+`train/finetune.py` reads the JSONL records as-is, samples one positive text and `--num-hard-negatives` hard negatives per image, and optimizes `CLIP loss + hard negative loss`.
+
 ## `eval_remote.py` Modes
 
 | Mode | Arguments | Description |
@@ -92,7 +116,7 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 
 ### Dataset builder (`build_datasets/`)
 
-Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
+Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`. The main training artifact is `dataset_raw_contrastive.jsonl`, which is consumed directly by `train/finetune.py` and `train/analyze_hard_negatives.py`.
 
 ## Key Gotchas
 

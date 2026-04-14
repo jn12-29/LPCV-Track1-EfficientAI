@@ -26,7 +26,6 @@ import open_clip
 
 from utils.clip_utils import _load_clip
 from utils.preprocess import preprocess_image
-from train.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
 
 
 def set_seed(seed: int) -> None:
@@ -40,14 +39,12 @@ class ContrastiveRecordDataset(Dataset):
     def __init__(
         self,
         jsonl_path: str | Path,
-        repo_root: str | Path | None = None,
         max_records: Optional[int] = None,
         max_positives_per_image: Optional[int] = None,
         max_hard_negatives_per_image: Optional[int] = None,
         shuffle_texts_on_load: bool = False,
     ) -> None:
         self.jsonl_path = Path(jsonl_path).resolve()
-        self.repo_root = Path(repo_root).resolve() if repo_root else None
         self.max_records = max_records
         self.max_positives_per_image = max_positives_per_image
         self.max_hard_negatives_per_image = max_hard_negatives_per_image
@@ -58,10 +55,7 @@ class ContrastiveRecordDataset(Dataset):
         records = []
         with self.jsonl_path.open("r", encoding="utf-8") as f:
             for line_idx, line in enumerate(f, start=1):
-                raw_record = json.loads(line)
-                record = normalize_record(raw_record)
-                if record is None:
-                    continue
+                record = json.loads(line)
 
                 positives = list(record["positives"])
                 hard_negatives = list(record["hard_negatives"])
@@ -75,19 +69,11 @@ class ContrastiveRecordDataset(Dataset):
                 if self.max_hard_negatives_per_image is not None:
                     hard_negatives = hard_negatives[: self.max_hard_negatives_per_image]
 
-                resolved_image_path = resolve_image_path(
-                    image_path=record["image_path"],
-                    jsonl_path=self.jsonl_path,
-                    repo_root=self.repo_root,
-                )
-
                 records.append(
                     {
-                        "image_path": str(resolved_image_path),
-                        "image_id": record["image_id"],
+                        "image_path": record["image_path"],
                         "positives": positives,
                         "hard_negatives": hard_negatives,
-                        "challenge_tags": record["challenge_tags"],
                     }
                 )
 
@@ -110,11 +96,8 @@ class ContrastiveRecordDataset(Dataset):
         image_tensor = preprocess_image(image)
         return {
             "image": image_tensor,
-            "image_path": record["image_path"],
-            "image_id": record["image_id"],
             "positives": list(record["positives"]),
             "hard_negatives": list(record["hard_negatives"]),
-            "challenge_tags": list(record["challenge_tags"]),
         }
 
 
@@ -189,9 +172,6 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
             "positive_tokens": positive_tokens,
             "negative_tokens": negative_tokens,
             "negative_mask": negative_mask,
-            "positive_texts": positive_texts,
-            "image_paths": [item["image_path"] for item in batch],
-            "image_ids": [item["image_id"] for item in batch],
         }
 
     return collate_fn
@@ -442,7 +422,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="./build_datasets/data/dataset_raw_contrastive.jsonl",
     )
-    parser.add_argument("--repo-root", type=str, default=".")
     parser.add_argument("--output-dir", type=str, default="./checkpoints")
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--pretrained", type=str, default=None)
@@ -497,7 +476,6 @@ def run_training(args: argparse.Namespace) -> None:
 
     train_dataset = ContrastiveRecordDataset(
         jsonl_path=args.jsonl_path,
-        repo_root=args.repo_root,
         max_records=args.max_records,
         max_positives_per_image=args.max_positives_per_image,
         max_hard_negatives_per_image=args.max_hard_negatives_per_image,

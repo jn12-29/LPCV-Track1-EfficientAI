@@ -1,3 +1,6 @@
+# Run these commands from the repository root.
+# Training JSONL is expected to use the flat contrastive format produced by build_datasets/.
+
 # export onnx
 python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2
