@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import argparse
 import csv
 import json
 import math
 import random
+import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,158 +24,16 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
 import open_clip
 
+from utils.clip_utils import _load_clip
+from utils.preprocess import preprocess_image
+from train_clip.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
+
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
-
-def preprocess_image_competition_style(image: Image.Image) -> torch.Tensor:
-    image = image.convert("RGB").resize((224, 224))
-    image_array = np.asarray(image, dtype=np.float32) / 255.0
-    image_array = np.transpose(image_array, (2, 0, 1))
-    return torch.from_numpy(image_array)
-
-
-def dedupe_keep_order(items: Sequence[str]) -> List[str]:
-    output = []
-    seen = set()
-    for item in items:
-        item = item.strip()
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        output.append(item)
-    return output
-
-
-def flatten_raw_record(record: Dict[str, object]) -> Dict[str, object]:
-    annotation = record.get("annotation", {})
-    positives = list(annotation.get("global_texts", []))
-    hard_negatives: List[str] = []
-
-    for obj in annotation.get("objects", []):
-        positives.extend(
-            item["text"] for item in obj.get("positive_texts", []) if isinstance(item, dict)
-        )
-        positives.extend(obj.get("weak_positives", []))
-        positives.extend(obj.get("relational_texts", []))
-        positives.extend(obj.get("text_on_object", []))
-        hard_negatives.extend(
-            item["text"]
-            for item in obj.get("hard_negatives_attribute", [])
-            if isinstance(item, dict)
-        )
-        hard_negatives.extend(
-            item["text"]
-            for item in obj.get("hard_negatives_scene", [])
-            if isinstance(item, dict)
-        )
-
-    return {
-        "image_path": record["image_path"],
-        "positives": dedupe_keep_order(positives),
-        "hard_negatives": dedupe_keep_order(hard_negatives),
-    }
-
-
-def normalize_record(record: Dict[str, object]) -> Optional[Dict[str, object]]:
-    if "annotation" in record:
-        record = flatten_raw_record(record)
-
-    if "image_path" not in record:
-        return None
-
-    positives = dedupe_keep_order(record.get("positives", []))
-    hard_negatives = dedupe_keep_order(record.get("hard_negatives", []))
-
-    if not positives:
-        return None
-
-    return {
-        "image_path": record["image_path"],
-        "positives": positives,
-        "hard_negatives": [t for t in hard_negatives if t not in set(positives)],
-        "image_id": record.get("image_id", Path(record["image_path"]).name),
-        "challenge_tags": record.get("challenge_tags", []),
-    }
-
-
-def resolve_image_path(
-    image_path: str,
-    jsonl_path: Path,
-    repo_root: Optional[Path],
-) -> Path:
-    candidate = Path(image_path)
-    candidates = []
-    if candidate.is_absolute():
-        candidates.append(candidate)
-    if repo_root is not None:
-        candidates.append(repo_root / image_path)
-    candidates.append(jsonl_path.parent / image_path)
-
-    for path in candidates:
-        if path.exists():
-            return path.resolve()
-
-    raise FileNotFoundError(f"Unable to resolve image path: {image_path}")
-
-
-def _select_pretrained_tag(
-    model_name: str,
-    requested_pretrained: Optional[str],
-    available_models_tuple: Sequence[Tuple[str, str]],
-) -> str:
-    if requested_pretrained:
-        return requested_pretrained
-
-    available_tags = [ckpt for name, ckpt in available_models_tuple if name == model_name]
-    if not available_tags:
-        raise ValueError(f"Available models: {open_clip.list_pretrained()}")
-
-    if model_name.startswith("MobileCLIP2") and "dfndr2b" in available_tags:
-        return "dfndr2b"
-
-    return available_tags[0]
-
-
-def _load_clip(
-    model_name: str,
-    device: torch.device,
-    pretrained: Optional[str] = None,
-):
-    print(f"Loading CLIP model '{model_name}'...")
-    available_models_tuple = open_clip.list_pretrained()
-    available_model_names = {name for name, _ in available_models_tuple}
-    if model_name not in available_model_names:
-        raise ValueError(f"Available models: {open_clip.list_pretrained()}")
-
-    pretrained_tag = _select_pretrained_tag(
-        model_name=model_name,
-        requested_pretrained=pretrained,
-        available_models_tuple=available_models_tuple,
-    )
-
-    model_kwargs = {}
-    if model_name in {"MobileCLIP2-S0", "MobileCLIP2-S2", "MobileCLIP2-B"}:
-        # LPCV expects external preprocessing to stop at resize/div255/HWC->CHW.
-        # Apple explicitly loads these MobileCLIP2 variants with zero-mean/unit-std
-        # image config so the model consumes [0, 1] RGB directly.
-        model_kwargs = {"image_mean": (0.0, 0.0, 0.0), "image_std": (1.0, 1.0, 1.0)}
-
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        model_name,
-        pretrained=pretrained_tag,
-        **model_kwargs,
-    )
-    model.to(device)
-    try:
-        tokenizer = open_clip.get_tokenizer(model_name)
-    except Exception:
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    return model, preprocess, tokenizer
 
 
 class ContrastiveRecordDataset(Dataset):
@@ -244,7 +107,7 @@ class ContrastiveRecordDataset(Dataset):
     def __getitem__(self, index: int) -> Dict[str, object]:
         record = self.records[index]
         image = Image.open(record["image_path"]).convert("RGB")
-        image_tensor = preprocess_image_competition_style(image)
+        image_tensor = preprocess_image(image)
         return {
             "image": image_tensor,
             "image_path": record["image_path"],
