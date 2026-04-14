@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,104 +14,18 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 
-from eval_local import _load_clip
-
-
-def preprocess_image_competition_style(image: Image.Image) -> torch.Tensor:
-    image = image.convert("RGB").resize((224, 224))
-    image_array = np.asarray(image, dtype=np.float32) / 255.0
-    image_array = np.transpose(image_array, (2, 0, 1))
-    return torch.from_numpy(image_array)
-
-
-def dedupe_keep_order(items: Sequence[str]) -> List[str]:
-    output = []
-    seen = set()
-    for item in items:
-        item = item.strip()
-        if not item or item in seen:
-            continue
-        seen.add(item)
-        output.append(item)
-    return output
-
-
-def flatten_raw_record(record: Dict[str, object]) -> Dict[str, object]:
-    annotation = record.get("annotation", {})
-    positives = list(annotation.get("global_texts", []))
-    hard_negatives = []
-
-    for obj in annotation.get("objects", []):
-        positives.extend(
-            item["text"] for item in obj.get("positive_texts", []) if isinstance(item, dict)
-        )
-        positives.extend(obj.get("weak_positives", []))
-        positives.extend(obj.get("relational_texts", []))
-        positives.extend(obj.get("text_on_object", []))
-        hard_negatives.extend(
-            item["text"]
-            for item in obj.get("hard_negatives_attribute", [])
-            if isinstance(item, dict)
-        )
-        hard_negatives.extend(
-            item["text"]
-            for item in obj.get("hard_negatives_scene", [])
-            if isinstance(item, dict)
-        )
-
-    return {
-        "image_path": record["image_path"],
-        "positives": dedupe_keep_order(positives),
-        "hard_negatives": dedupe_keep_order(hard_negatives),
-        "image_id": record.get("image_id", Path(record["image_path"]).name),
-    }
-
-
-def normalize_record(record: Dict[str, object]) -> Optional[Dict[str, object]]:
-    if "annotation" in record:
-        record = flatten_raw_record(record)
-
-    if "image_path" not in record:
-        return None
-
-    positives = dedupe_keep_order(record.get("positives", []))
-    hard_negatives = dedupe_keep_order(record.get("hard_negatives", []))
-    if not positives or not hard_negatives:
-        return None
-
-    return {
-        "image_path": record["image_path"],
-        "positives": positives,
-        "hard_negatives": hard_negatives,
-        "image_id": record.get("image_id", Path(record["image_path"]).name),
-    }
-
-
-def resolve_image_path(image_path: str, jsonl_path: Path, repo_root: Optional[Path]) -> Path:
-    candidate = Path(image_path)
-    candidates = []
-    if candidate.is_absolute():
-        candidates.append(candidate)
-    if repo_root is not None:
-        candidates.append(repo_root / image_path)
-    candidates.append(jsonl_path.parent / image_path)
-
-    for path in candidates:
-        if path.exists():
-            return path.resolve()
-
-    raise FileNotFoundError(f"Unable to resolve image path: {image_path}")
-
-
-def batched(items: Sequence[str], batch_size: int):
-    for start in range(0, len(items), batch_size):
-        yield items[start : start + batch_size]
+from utils.clip_utils import _load_clip
+from utils.data_utils import _batched
+from utils.preprocess import preprocess_image
+from train_clip.record_utils import normalize_record, resolve_image_path
 
 
 @torch.no_grad()
-def encode_texts(model, tokenizer, texts: Sequence[str], device: torch.device, batch_size: int) -> torch.Tensor:
+def encode_texts(
+    model, tokenizer, texts: List[str], device: torch.device, batch_size: int
+) -> torch.Tensor:
     outputs = []
-    for batch_texts in batched(list(texts), batch_size):
+    for _, batch_texts in _batched(list(texts), batch_size):
         text_tokens = tokenizer(list(batch_texts)).to(device)
         text_features = model.encode_text(text_tokens)
         outputs.append(F.normalize(text_features, dim=-1).cpu())
@@ -116,7 +35,7 @@ def encode_texts(model, tokenizer, texts: Sequence[str], device: torch.device, b
 @torch.no_grad()
 def encode_image(model, image_path: Path, device: torch.device) -> torch.Tensor:
     image = Image.open(image_path).convert("RGB")
-    image_tensor = preprocess_image_competition_style(image).unsqueeze(0).to(device)
+    image_tensor = preprocess_image(image).unsqueeze(0).to(device)
     image_features = model.encode_image(image_tensor)
     return F.normalize(image_features, dim=-1).cpu().squeeze(0)
 
@@ -166,7 +85,7 @@ def main() -> None:
         for idx, line in enumerate(f, start=1):
             raw_record = json.loads(line)
             record = normalize_record(raw_record)
-            if record is None:
+            if record is None or not record["hard_negatives"]:
                 continue
 
             image_path = resolve_image_path(record["image_path"], jsonl_path, repo_root)
