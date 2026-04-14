@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Reorganize the codebase into `utils/` (shared), `pipeline/` (export/eval), and cleaned-up `train_clip/` (training), eliminating all code duplication.
+**Goal:** Reorganize the codebase into `utils/` (shared), `pipeline/` (export/eval), and cleaned-up `train/` (training), eliminating all code duplication.
 
-**Architecture:** Shared utilities (`_load_clip`, `preprocess_image`, metrics, CSV helpers) live in `utils/`. Pipeline scripts (ONNX export, QAI Hub compile/profile, local and remote eval) move into `pipeline/`. Training scripts stay in `train_clip/` but shed duplicate data-processing code, consuming only pre-built contrastive JSONL.
+**Architecture:** Shared utilities (`_load_clip`, `preprocess_image`, metrics, CSV helpers) live in `utils/`. Pipeline scripts (ONNX export, QAI Hub compile/profile, local and remote eval) move into `pipeline/`. Training scripts stay in `train/` but shed duplicate data-processing code, consuming only pre-built contrastive JSONL.
 
 **Tech Stack:** Python, PyTorch, open_clip, onnxruntime, qai_hub, sklearn
 
@@ -13,6 +13,7 @@
 ## File Map
 
 **Create:**
+
 - `utils/__init__.py`
 - `utils/preprocess.py` — single `preprocess_image` implementation
 - `utils/clip_utils.py` — single `_load_clip` implementation
@@ -23,16 +24,18 @@
 - `pipeline/compile_and_profile.py` — migrated + argparse-in-main fix
 - `pipeline/eval_local.py` — migrated + deduped
 - `pipeline/eval_remote.py` — migrated + deduped
-- `train_clip/__init__.py`
-- `train_clip/record_utils.py` — `dedupe_keep_order`, `resolve_image_path`, `normalize_record` (simple format only)
+- `train/__init__.py`
+- `train/record_utils.py` — `dedupe_keep_order`, `resolve_image_path`, `normalize_record` (simple format only)
 
 **Modify:**
-- `train_clip/finetune_mobileclip2_jsonl.py` — remove duplicated functions, import from utils/record_utils
-- `train_clip/analyze_hard_negatives.py` — remove duplicated functions, import from utils/record_utils
+
+- `train/finetune_mobileclip2_jsonl.py` — remove duplicated functions, import from utils/record_utils
+- `train/analyze_hard_negatives.py` — remove duplicated functions, import from utils/record_utils
 - `script.sh` — update command paths
 - `CLAUDE.md` — update architecture section
 
 **Delete:**
+
 - `eval_common.py`
 - `sample_dataset.py`
 - `export_onnx.py` (root)
@@ -45,6 +48,7 @@
 ## Task 1: Create `utils/` package — preprocess, clip_utils, data_utils
 
 **Files:**
+
 - Create: `utils/__init__.py`
 - Create: `utils/preprocess.py`
 - Create: `utils/clip_utils.py`
@@ -53,7 +57,9 @@
 - [ ] **Step 1: Create `utils/__init__.py`**
 
 ```python
+
 ```
+
 (empty file — marks `utils/` as a Python package)
 
 - [ ] **Step 2: Create `utils/preprocess.py`**
@@ -253,11 +259,13 @@ def load_ground_truth(
 - [ ] **Step 5: Verify imports work**
 
 Run from project root:
+
 ```bash
 python -c "from utils.preprocess import preprocess_image; print('preprocess OK')"
 python -c "from utils.data_utils import recall_at_k, _batched, load_ground_truth; print('data_utils OK')"
 python -c "from utils.clip_utils import _load_clip; print('clip_utils OK')"
 ```
+
 Expected: three `OK` lines, no ImportError.
 
 - [ ] **Step 6: Commit**
@@ -272,13 +280,16 @@ git commit -m "refactor: add utils/ package with canonical preprocess, clip_util
 ## Task 2: Create `pipeline/` package with `dataset.py`
 
 **Files:**
+
 - Create: `pipeline/__init__.py`
 - Create: `pipeline/dataset.py`
 
 - [ ] **Step 1: Create `pipeline/__init__.py`**
 
 ```python
+
 ```
+
 (empty)
 
 - [ ] **Step 2: Create `pipeline/dataset.py`**
@@ -466,6 +477,7 @@ from pipeline.dataset import RetrievalEvalDataset, ImageTextRetrievalDataset
 print('pipeline.dataset OK')
 "
 ```
+
 Expected: `pipeline.dataset OK`
 
 - [ ] **Step 4: Commit**
@@ -480,6 +492,7 @@ git commit -m "refactor: add pipeline/ package with dataset.py (migrated from sa
 ## Task 3: Migrate `export_onnx.py` → `pipeline/export_onnx.py`
 
 **Files:**
+
 - Create: `pipeline/export_onnx.py`
 
 - [ ] **Step 1: Create `pipeline/export_onnx.py`**
@@ -641,6 +654,7 @@ if __name__ == "__main__":
 ```bash
 python -c "import pipeline.export_onnx; print('export_onnx OK')"
 ```
+
 Expected: `export_onnx OK`
 
 - [ ] **Step 3: Commit**
@@ -655,9 +669,11 @@ git commit -m "refactor: migrate export_onnx.py to pipeline/, use utils.clip_uti
 ## Task 4: Migrate `compile_and_profile.py` → `pipeline/compile_and_profile.py`
 
 **Files:**
+
 - Create: `pipeline/compile_and_profile.py`
 
 Changes from the root version:
+
 - Move all module-level code into `main()` so the file can be imported
 - Translate Chinese print string to English
 
@@ -784,6 +800,7 @@ if __name__ == "__main__":
 ```bash
 python -c "import pipeline.compile_and_profile; print('compile_and_profile OK')"
 ```
+
 Expected: `compile_and_profile OK` (qai_hub import may warn if not configured, but should not error on import)
 
 - [ ] **Step 3: Commit**
@@ -798,6 +815,7 @@ git commit -m "refactor: migrate compile_and_profile.py to pipeline/, fix module
 ## Task 5: Migrate `eval_local.py` → `pipeline/eval_local.py`
 
 **Files:**
+
 - Create: `pipeline/eval_local.py`
 
 Changes: remove `_load_clip` (use `utils.clip_utils`), remove ONNX zip-extract and ONNX session code (dead path no longer needed — ONNX eval is handled separately), use `_batched` from `utils.data_utils`, import Dataset from `pipeline.dataset`.
@@ -932,6 +950,7 @@ Note: The ONNX backend (`--backend onnx`) is removed from this file. ONNX local 
 ```bash
 python -c "import pipeline.eval_local; print('eval_local OK')"
 ```
+
 Expected: `eval_local OK`
 
 - [ ] **Step 3: Commit**
@@ -946,6 +965,7 @@ git commit -m "refactor: migrate eval_local.py to pipeline/, remove ONNX backend
 ## Task 6: Migrate `eval_remote.py` → `pipeline/eval_remote.py`
 
 **Files:**
+
 - Create: `pipeline/eval_remote.py`
 
 Changes: replace inline `_process_image` with `preprocess_image` from `utils.preprocess`.
@@ -1149,6 +1169,7 @@ if __name__ == "__main__":
 ```bash
 python -c "import pipeline.eval_remote; print('eval_remote OK')"
 ```
+
 Expected: `eval_remote OK`
 
 - [ ] **Step 3: Commit**
@@ -1160,19 +1181,22 @@ git commit -m "refactor: migrate eval_remote.py to pipeline/, use utils.preproce
 
 ---
 
-## Task 7: Create `train_clip/record_utils.py` and `__init__.py`
+## Task 7: Create `train/record_utils.py` and `__init__.py`
 
 **Files:**
-- Create: `train_clip/__init__.py`
-- Create: `train_clip/record_utils.py`
 
-- [ ] **Step 1: Create `train_clip/__init__.py`**
+- Create: `train/__init__.py`
+- Create: `train/record_utils.py`
+
+- [ ] **Step 1: Create `train/__init__.py`**
 
 ```python
+
 ```
+
 (empty)
 
-- [ ] **Step 2: Create `train_clip/record_utils.py`**
+- [ ] **Step 2: Create `train/record_utils.py`**
 
 Simplified from the two training scripts. `normalize_record` now only handles the simple contrastive format `{image_path, positives, hard_negatives}` — the nested raw annotation format is handled upstream by `build_datasets/`.
 
@@ -1256,7 +1280,7 @@ def normalize_record(record: Dict[str, object]) -> Optional[Dict[str, object]]:
 ```bash
 python -c "
 import sys; sys.path.insert(0, '.')
-from train_clip.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
+from train.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
 r = normalize_record({'image_path': 'a.jpg', 'positives': ['cat', 'cat', ''], 'hard_negatives': ['dog', 'cat']})
 assert r['positives'] == ['cat'], r
 assert r['hard_negatives'] == ['dog'], r
@@ -1264,26 +1288,28 @@ assert r['image_id'] == 'a.jpg', r
 print('record_utils OK')
 "
 ```
+
 Expected: `record_utils OK`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add train_clip/__init__.py train_clip/record_utils.py
-git commit -m "refactor: add train_clip/record_utils.py, simplified normalize_record for contrastive JSONL"
+git add train/__init__.py train/record_utils.py
+git commit -m "refactor: add train/record_utils.py, simplified normalize_record for contrastive JSONL"
 ```
 
 ---
 
-## Task 8: Refactor `train_clip/analyze_hard_negatives.py`
+## Task 8: Refactor `train/analyze_hard_negatives.py`
 
 **Files:**
-- Modify: `train_clip/analyze_hard_negatives.py`
+
+- Modify: `train/analyze_hard_negatives.py`
 
 Remove: `preprocess_image_competition_style`, `dedupe_keep_order`, `flatten_raw_record`, `normalize_record`, `resolve_image_path`, `batched`.
-Import from: `utils.clip_utils`, `utils.preprocess`, `utils.data_utils`, `train_clip.record_utils`.
+Import from: `utils.clip_utils`, `utils.preprocess`, `utils.data_utils`, `train.record_utils`.
 
-- [ ] **Step 1: Rewrite `train_clip/analyze_hard_negatives.py`**
+- [ ] **Step 1: Rewrite `train/analyze_hard_negatives.py`**
 
 ```python
 from __future__ import annotations
@@ -1305,7 +1331,7 @@ import torch.nn.functional as F
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched
 from utils.preprocess import preprocess_image
-from train_clip.record_utils import normalize_record, resolve_image_path
+from train.record_utils import normalize_record, resolve_image_path
 
 
 @torch.no_grad()
@@ -1488,26 +1514,28 @@ if __name__ == "__main__":
 - [ ] **Step 2: Verify import**
 
 ```bash
-python -c "import train_clip.analyze_hard_negatives; print('analyze_hard_negatives OK')"
+python -c "import train.analyze_hard_negatives; print('analyze_hard_negatives OK')"
 ```
+
 Expected: `analyze_hard_negatives OK`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add train_clip/analyze_hard_negatives.py
+git add train/analyze_hard_negatives.py
 git commit -m "refactor: clean up analyze_hard_negatives.py, remove duplicated helpers"
 ```
 
 ---
 
-## Task 9: Refactor `train_clip/finetune_mobileclip2_jsonl.py`
+## Task 9: Refactor `train/finetune_mobileclip2_jsonl.py`
 
 **Files:**
-- Modify: `train_clip/finetune_mobileclip2_jsonl.py`
+
+- Modify: `train/finetune_mobileclip2_jsonl.py`
 
 Remove: `preprocess_image_competition_style`, `dedupe_keep_order`, `flatten_raw_record`, `normalize_record`, `resolve_image_path`, `_select_pretrained_tag`, `_load_clip`.
-Import from: `utils.clip_utils`, `utils.preprocess`, `train_clip.record_utils`.
+Import from: `utils.clip_utils`, `utils.preprocess`, `train.record_utils`.
 The `ContrastiveRecordDataset._load_records` method only handles the flat contrastive format now.
 
 - [ ] **Step 1: Rewrite the header / imports section of `finetune_mobileclip2_jsonl.py`**
@@ -1543,7 +1571,7 @@ import open_clip
 
 from utils.clip_utils import _load_clip
 from utils.preprocess import preprocess_image
-from train_clip.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
+from train.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
 ```
 
 - [ ] **Step 2: Replace `ContrastiveRecordDataset._load_records` to remove nested annotation parsing**
@@ -1555,10 +1583,13 @@ No change needed to `ContrastiveRecordDataset` — it already calls `normalize_r
 - [ ] **Step 3: Replace `__getitem__` to use `preprocess_image` from utils**
 
 In `ContrastiveRecordDataset.__getitem__`, change:
+
 ```python
 image_tensor = preprocess_image_competition_style(image)
 ```
+
 to:
+
 ```python
 image_tensor = preprocess_image(image)
 ```
@@ -1566,14 +1597,15 @@ image_tensor = preprocess_image(image)
 - [ ] **Step 4: Verify import**
 
 ```bash
-python -c "import train_clip.finetune_mobileclip2_jsonl; print('finetune OK')"
+python -c "import train.finetune_mobileclip2_jsonl; print('finetune OK')"
 ```
+
 Expected: `finetune OK`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add train_clip/finetune_mobileclip2_jsonl.py
+git add train/finetune_mobileclip2_jsonl.py
 git commit -m "refactor: clean up finetune_mobileclip2_jsonl.py, remove duplicated helpers"
 ```
 
@@ -1582,6 +1614,7 @@ git commit -m "refactor: clean up finetune_mobileclip2_jsonl.py, remove duplicat
 ## Task 10: Delete old root-level files, update `script.sh` and `CLAUDE.md`
 
 **Files:**
+
 - Delete: `eval_common.py`, `sample_dataset.py`, `export_onnx.py`, `compile_and_profile.py`, `eval_local.py`, `eval_remote.py`
 - Modify: `script.sh`
 - Modify: `CLAUDE.md`
@@ -1595,6 +1628,7 @@ git rm eval_common.py sample_dataset.py export_onnx.py compile_and_profile.py ev
 - [ ] **Step 2: Update `script.sh`**
 
 Change all script paths from root to `pipeline/`:
+
 ```bash
 # Old → New
 python export_onnx.py          → python pipeline/export_onnx.py
@@ -1608,6 +1642,7 @@ Read the current `script.sh` first, then apply these substitutions throughout.
 - [ ] **Step 3: Update `CLAUDE.md` — Pipeline section**
 
 In the "End-to-End Pipeline" section, update commands to reflect new paths:
+
 ```bash
 # 1. Export ONNX
 python pipeline/export_onnx.py --model-name MobileCLIP2-S0
@@ -1628,6 +1663,7 @@ python pipeline/eval_remote.py \
 ```
 
 Update the Architecture section to reflect the new structure:
+
 - `utils/clip_utils.py` — `_load_clip` (shared by all)
 - `utils/preprocess.py` — `preprocess_image` (shared by all)
 - `utils/data_utils.py` — `_batched`, `recall_at_k`, CSV helpers, `load_ground_truth`
@@ -1636,9 +1672,9 @@ Update the Architecture section to reflect the new structure:
 - `pipeline/compile_and_profile.py` — QAI Hub compile + profile
 - `pipeline/eval_local.py` — torch local evaluation
 - `pipeline/eval_remote.py` — QAI Hub inference + evaluation
-- `train_clip/record_utils.py` — `dedupe_keep_order`, `normalize_record`, `resolve_image_path`
-- `train_clip/finetune_mobileclip2_jsonl.py` — fine-tuning
-- `train_clip/analyze_hard_negatives.py` — similarity distribution analysis
+- `train/record_utils.py` — `dedupe_keep_order`, `normalize_record`, `resolve_image_path`
+- `train/finetune_mobileclip2_jsonl.py` — fine-tuning
+- `train/analyze_hard_negatives.py` — similarity distribution analysis
 
 - [ ] **Step 4: Final smoke test**
 
@@ -1650,11 +1686,12 @@ from utils.clip_utils import _load_clip
 from utils.data_utils import recall_at_k, _batched, load_ground_truth
 from pipeline.dataset import RetrievalEvalDataset
 from pipeline import eval_local, eval_remote, export_onnx, compile_and_profile
-from train_clip.record_utils import normalize_record
-from train_clip import finetune_mobileclip2_jsonl, analyze_hard_negatives
+from train.record_utils import normalize_record
+from train import finetune_mobileclip2_jsonl, analyze_hard_negatives
 print('All imports OK')
 "
 ```
+
 Expected: `All imports OK`
 
 - [ ] **Step 5: Final commit**

@@ -67,15 +67,15 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference submission, and Recall@K. Three modes: (A) upload + infer, (B) infer with existing dataset IDs, (C) reuse inference job outputs.
 
-### Training (`train_clip/`)
+### Training (`train/`)
 
-- **`train_clip/record_utils.py`** — `dedupe_keep_order`, `normalize_record` (flat contrastive format only), `resolve_image_path`.
-- **`train_clip/finetune_mobileclip2_jsonl.py`** — fine-tunes MobileCLIP2 on contrastive JSONL from `build_datasets/`.
-- **`train_clip/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
+- **`train/record_utils.py`** — `dedupe_keep_order`, `normalize_record` (flat contrastive format only), `resolve_image_path`.
+- **`train/finetune_mobileclip2_jsonl.py`** — fine-tunes MobileCLIP2 on contrastive JSONL from `build_datasets/`.
+- **`train/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
 
 ### Dataset builder (`build_datasets/`)
 
-Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs `dataset_raw_contrastive.jsonl` consumed by `train_clip/`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
+Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs `dataset_raw_contrastive.jsonl` consumed by `train/`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
 
 ### Samples Dataset layout expected
 

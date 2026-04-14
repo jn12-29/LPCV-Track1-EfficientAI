@@ -143,8 +143,7 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
         images = torch.stack([item["image"] for item in batch], dim=0)
 
         positive_texts = [
-            choose_texts(item["positives"], 1, text_sampling)[0]
-            for item in batch
+            choose_texts(item["positives"], 1, text_sampling)[0] for item in batch
         ]
         positive_tokens = tokenizer(positive_texts)
 
@@ -152,11 +151,15 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
         hard_negative_mask = []
         for item in batch:
             negatives = item["hard_negatives"]
-            sampled = choose_texts(
-                negatives,
-                num_hard_negatives,
-                text_sampling,
-            ) if negatives else []
+            sampled = (
+                choose_texts(
+                    negatives,
+                    num_hard_negatives,
+                    text_sampling,
+                )
+                if negatives
+                else []
+            )
 
             row_texts = []
             row_mask = []
@@ -259,13 +262,15 @@ def append_metrics_jsonl(jsonl_path: Path, row: Dict[str, float | int]) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def plot_training_curves(metrics_history: List[Dict[str, float | int]], output_dir: Path) -> None:
+def plot_training_curves(
+    metrics_history: List[Dict[str, float | int]], output_dir: Path
+) -> None:
     if not metrics_history:
         return
 
     steps = [row["global_step"] for row in metrics_history]
     total_loss = [row["train_total_loss"] for row in metrics_history]
-    clip_loss = [row["train_clip_loss"] for row in metrics_history]
+    clip_loss = [row["train_loss"] for row in metrics_history]
     hard_neg_loss = [row["train_hard_negative_loss"] for row in metrics_history]
     lr = [row["lr"] for row in metrics_history]
 
@@ -354,7 +359,9 @@ def train_one_epoch(
         negative_mask = batch["negative_mask"].to(device, non_blocking=True)
 
         with autocast(enabled=amp_enabled):
-            image_features, positive_features, logit_scale = model(images, positive_tokens)
+            image_features, positive_features, logit_scale = model(
+                images, positive_tokens
+            )
             clip_loss = clip_loss_fn(image_features, positive_features, logit_scale)
 
             image_features = F.normalize(image_features, dim=-1)
@@ -362,7 +369,9 @@ def train_one_epoch(
             positive_scores = (image_features * positive_features).sum(dim=-1)
 
             if negative_tokens.numel() > 0:
-                flat_negative_tokens = negative_tokens.view(-1, negative_tokens.shape[-1])
+                flat_negative_tokens = negative_tokens.view(
+                    -1, negative_tokens.shape[-1]
+                )
                 flat_negative_features = model.encode_text(flat_negative_tokens)
                 flat_negative_features = F.normalize(flat_negative_features, dim=-1)
                 negative_features = flat_negative_features.view(
@@ -415,8 +424,9 @@ def train_one_epoch(
     return (
         {
             "train_total_loss": running_total_loss / max(num_batches, 1),
-            "train_clip_loss": running_clip_loss / max(num_batches, 1),
-            "train_hard_negative_loss": running_hard_negative_loss / max(num_batches, 1),
+            "train_loss": running_clip_loss / max(num_batches, 1),
+            "train_hard_negative_loss": running_hard_negative_loss
+            / max(num_batches, 1),
             "lr": scheduler.get_last_lr()[0],
         },
         global_step,
@@ -517,7 +527,9 @@ def run_training(args: argparse.Namespace) -> None:
     )
     scheduler = build_scheduler(
         optimizer=optimizer,
-        total_steps=max(math.ceil(len(train_dataloader) / max(args.accum_freq, 1)) * args.epochs, 1),
+        total_steps=max(
+            math.ceil(len(train_dataloader) / max(args.accum_freq, 1)) * args.epochs, 1
+        ),
         warmup_steps=args.warmup_steps,
     )
     scaler = GradScaler(enabled=device.type == "cuda")
@@ -566,7 +578,7 @@ def run_training(args: argparse.Namespace) -> None:
         print(
             f"Epoch {epoch} summary: "
             f"total={epoch_metrics['train_total_loss']:.4f} "
-            f"clip={epoch_metrics['train_clip_loss']:.4f} "
+            f"clip={epoch_metrics['train_loss']:.4f} "
             f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}"
         )
 

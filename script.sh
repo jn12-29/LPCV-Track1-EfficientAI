@@ -4,13 +4,14 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-S2
 python pipeline/export_onnx.py --model-name MobileCLIP2-S3
 
 # compile and profile
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 --postfix _fp16
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3 --postfix _fp16
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
+python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
+
+python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2_finetuned.pt
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -25,11 +26,11 @@ python pipeline/eval_remote.py \
     --image-inference-id <image_inference_job_id> --text-inference-id <text_inference_job_id>
 
 # fine-tune
-CUDA_VISIBLE_DEVICES=0 python train_clip/finetune_mobileclip2_jsonl.py \
-    --jsonl-path ./build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S0
+CUDA_VISIBLE_DEVICES=0 python train/finetune.py \
+    --jsonl-path ./build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --batch-size 256 --epochs 20
 
 # analyze hard negatives
-python train_clip/analyze_hard_negatives.py \
-    --jsonl-path ./build_datasets/data/dataset_raw_contrastive.jsonl \
+python train/analyze_hard_negatives.py \
+    --jsonl-path ./build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
     --model-name MobileCLIP2-S0
