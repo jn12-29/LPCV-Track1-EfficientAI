@@ -8,3 +8,4 @@
 /exported_*
 .env
 **/*.zip
+.worktrees/
