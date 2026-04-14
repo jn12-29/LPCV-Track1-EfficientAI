@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import argparse
@@ -46,7 +47,9 @@ class OpenClipTextEncoder(nn.Module):
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         token_ids = token_ids.to(dtype=torch.int64)
         eot_pos = token_ids.argmax(dim=-1, keepdim=True)
-        positions = torch.arange(token_ids.shape[-1], device=token_ids.device).unsqueeze(0)
+        positions = torch.arange(
+            token_ids.shape[-1], device=token_ids.device
+        ).unsqueeze(0)
         mask = (positions <= eot_pos).to(token_ids.dtype)
         return self.model.encode_text(token_ids * mask)
 
@@ -66,7 +69,9 @@ def verify_onnx(
     status = "PASS" if np.allclose(ort_out, pt_out, rtol=rtol, atol=atol) else "FAIL"
     print(f"  Max abs diff (ONNX vs PyTorch): {max_diff:.6f}  {status}")
     if status == "FAIL":
-        raise RuntimeError(f"ONNX output mismatch for {onnx_path}. Max diff={max_diff:.6f}")
+        raise RuntimeError(
+            f"ONNX output mismatch for {onnx_path}. Max diff={max_diff:.6f}"
+        )
 
 
 def main() -> None:
@@ -74,7 +79,11 @@ def main() -> None:
 
     output_dir_name = f"exported_{args.model_name}_onnx"
     if args.output_postfix:
-        output_dir_name += args.output_postfix
+        output_dir_name = output_dir_name = (
+            f"exported_{args.model_name}{args.output_postfix}_onnx"
+        )
+    else:
+        output_dir_name = f"exported_{args.model_name}_onnx"
     os.makedirs(output_dir_name, exist_ok=True)
     print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
 
@@ -93,7 +102,9 @@ def main() -> None:
     text_encoder.eval()
 
     dummy_image_input = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
-    dummy_text_input = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
+    dummy_text_input = torch.randint(
+        0, 49408, (1, 77), dtype=torch.int64, device=device
+    )
 
     print("\nCalculating PyTorch baseline outputs for validation...")
     with torch.no_grad():

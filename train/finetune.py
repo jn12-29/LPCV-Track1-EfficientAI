@@ -5,6 +5,7 @@ import csv
 from datetime import datetime
 import json
 import math
+import os
 import random
 import sys
 import time
@@ -17,12 +18,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
+from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 import open_clip
 
@@ -33,6 +37,10 @@ from utils.preprocess import preprocess_image
 MetricValue = float | int | str
 MetricsRow = Dict[str, MetricValue]
 TRAIN_LOG_PATH: Optional[Path] = None
+
+
+def unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
 
 
 def current_timestamp() -> str:
@@ -123,6 +131,101 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def seed_worker(worker_id: int) -> None:
+    worker_seed = torch.initial_seed() % (2**32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+
+
+def parse_gpu_ids(gpu_ids: Optional[str]) -> Optional[List[int]]:
+    if gpu_ids is None:
+        return None
+    parsed = [part.strip() for part in gpu_ids.split(",") if part.strip()]
+    if not parsed:
+        raise ValueError("--gpu-ids was provided but no valid GPU ids were found")
+    return [int(part) for part in parsed]
+
+
+def init_distributed_context(args: argparse.Namespace) -> Dict[str, Any]:
+    gpu_ids = parse_gpu_ids(args.gpu_ids)
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    env_local_rank = os.environ.get("LOCAL_RANK")
+    local_rank = args.local_rank
+    if env_local_rank is not None:
+        local_rank = int(env_local_rank)
+    elif local_rank < 0:
+        local_rank = 0
+
+    distributed = world_size > 1
+    use_cuda = torch.cuda.is_available() and args.device != "cpu"
+
+    if distributed:
+        if not use_cuda:
+            raise ValueError("Distributed training currently requires CUDA")
+        if gpu_ids is None:
+            if torch.cuda.device_count() < world_size:
+                raise ValueError(
+                    f"WORLD_SIZE={world_size} exceeds available CUDA devices ({torch.cuda.device_count()})"
+                )
+            gpu_ids = list(range(world_size))
+        if len(gpu_ids) != world_size:
+            raise ValueError(
+                f"WORLD_SIZE={world_size} but --gpu-ids resolved to {len(gpu_ids)} GPUs: {gpu_ids}"
+            )
+        if local_rank < 0 or local_rank >= len(gpu_ids):
+            raise ValueError(
+                f"LOCAL_RANK={local_rank} is out of range for --gpu-ids {gpu_ids}"
+            )
+
+        device_index = gpu_ids[local_rank]
+        torch.cuda.set_device(device_index)
+        dist.init_process_group(backend="nccl")
+        device = torch.device("cuda", device_index)
+    else:
+        if gpu_ids is not None:
+            if not use_cuda:
+                raise ValueError("--gpu-ids requires CUDA")
+            if len(gpu_ids) != 1:
+                raise ValueError(
+                    "Multiple --gpu-ids require torchrun, e.g. `torchrun --nproc_per_node=2 train/finetune.py --gpu-ids 0,1 ...`"
+                )
+            device = torch.device("cuda", gpu_ids[0])
+            torch.cuda.set_device(device)
+        else:
+            device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda" and device.index is not None:
+                torch.cuda.set_device(device)
+
+    return {
+        "distributed": distributed,
+        "world_size": world_size,
+        "rank": rank,
+        "local_rank": local_rank,
+        "is_main_process": rank == 0,
+        "device": device,
+        "gpu_ids": gpu_ids,
+    }
+
+
+def cleanup_distributed() -> None:
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def broadcast_run_timestamp(run_timestamp: Optional[str], distributed: bool) -> str:
+    if not distributed:
+        if run_timestamp is None:
+            raise ValueError("run_timestamp must be provided when not distributed")
+        return run_timestamp
+
+    payload = [run_timestamp]
+    dist.broadcast_object_list(payload, src=0)
+    if payload[0] is None:
+        raise RuntimeError("Failed to broadcast run timestamp from rank 0")
+    return payload[0]
+
+
 class ContrastiveRecordDataset(Dataset):
     def __init__(
         self,
@@ -131,16 +234,21 @@ class ContrastiveRecordDataset(Dataset):
         max_positives_per_image: Optional[int] = None,
         max_hard_negatives_per_image: Optional[int] = None,
         shuffle_texts_on_load: bool = False,
+        shuffle_seed: Optional[int] = None,
+        log_progress: bool = True,
     ) -> None:
         self.jsonl_path = Path(jsonl_path).resolve()
         self.max_records = max_records
         self.max_positives_per_image = max_positives_per_image
         self.max_hard_negatives_per_image = max_hard_negatives_per_image
         self.shuffle_texts_on_load = shuffle_texts_on_load
+        self.shuffle_seed = shuffle_seed
+        self.log_progress = log_progress
         self.records = self._load_records()
 
     def _load_records(self) -> List[Dict[str, object]]:
         records = []
+        rng = random.Random(self.shuffle_seed) if self.shuffle_seed is not None else None
         with self.jsonl_path.open("r", encoding="utf-8") as f:
             for line_idx, line in enumerate(f, start=1):
                 record = json.loads(line)
@@ -149,8 +257,12 @@ class ContrastiveRecordDataset(Dataset):
                 hard_negatives = list(record["hard_negatives"])
 
                 if self.shuffle_texts_on_load:
-                    random.shuffle(positives)
-                    random.shuffle(hard_negatives)
+                    if rng is None:
+                        random.shuffle(positives)
+                        random.shuffle(hard_negatives)
+                    else:
+                        rng.shuffle(positives)
+                        rng.shuffle(hard_negatives)
 
                 if self.max_positives_per_image is not None:
                     positives = positives[: self.max_positives_per_image]
@@ -168,7 +280,7 @@ class ContrastiveRecordDataset(Dataset):
                 if self.max_records is not None and len(records) >= self.max_records:
                     break
 
-                if line_idx % 50000 == 0:
+                if self.log_progress and line_idx % 50000 == 0:
                     log_message(f"Loaded {line_idx} rows from {self.jsonl_path}")
 
         if not records:
@@ -382,7 +494,7 @@ def save_checkpoint(
         {
             "epoch": epoch,
             "global_step": global_step,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": unwrap_model(model).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "scaler_state_dict": scaler.state_dict(),
@@ -409,6 +521,8 @@ def train_one_epoch(
     hard_negative_weight: float,
     hard_negative_margin: float,
     hard_negative_loss_type: str,
+    is_main_process: bool,
+    distributed: bool,
     run_name: Optional[str] = None,
     writer: Optional[SummaryWriter] = None,
 ) -> Tuple[Dict[str, float], int]:
@@ -428,7 +542,7 @@ def train_one_epoch(
         negative_tokens = batch["negative_tokens"].to(device, non_blocking=True)
         negative_mask = batch["negative_mask"].to(device, non_blocking=True)
 
-        with autocast(enabled=amp_enabled):
+        with autocast(device_type=device.type, enabled=amp_enabled):
             image_features, positive_features, logit_scale = model(
                 images, positive_tokens
             )
@@ -442,7 +556,7 @@ def train_one_epoch(
                 flat_negative_tokens = negative_tokens.view(
                     -1, negative_tokens.shape[-1]
                 )
-                flat_negative_features = model.encode_text(flat_negative_tokens)
+                _, flat_negative_features, _ = model(text=flat_negative_tokens)
                 flat_negative_features = F.normalize(flat_negative_features, dim=-1)
                 negative_features = flat_negative_features.view(
                     negative_tokens.shape[0],
@@ -466,20 +580,23 @@ def train_one_epoch(
         scaler.scale(loss_for_backward).backward()
 
         if batch_idx % accum_freq == 0 or batch_idx == num_batches:
+            previous_scale = scaler.get_scale() if amp_enabled else 1.0
             if grad_clip_norm is not None:
                 scaler.unscale_(optimizer)
                 clip_grad_norm_(model.parameters(), grad_clip_norm)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
-            scheduler.step()
+            current_scale = scaler.get_scale() if amp_enabled else 1.0
+            if not amp_enabled or current_scale >= previous_scale:
+                scheduler.step()
             global_step += 1
 
         running_total_loss += total_loss.item()
         running_clip_loss += clip_loss.item()
         running_hard_negative_loss += hard_negative_loss.item()
 
-        if batch_idx % log_every_n_steps == 0 or batch_idx == num_batches:
+        if is_main_process and (batch_idx % log_every_n_steps == 0 or batch_idx == num_batches):
             elapsed = time.time() - start_time
             throughput = (batch_idx * images.shape[0]) / max(elapsed, 1e-6)
             current_lr = scheduler.get_last_lr()[0]
@@ -505,12 +622,26 @@ def train_one_epoch(
                 run_name=run_name,
             )
 
+    reduced_stats = torch.tensor(
+        [
+            running_total_loss,
+            running_clip_loss,
+            running_hard_negative_loss,
+            float(num_batches),
+        ],
+        device=device,
+        dtype=torch.float64,
+    )
+    if distributed:
+        dist.all_reduce(reduced_stats, op=dist.ReduceOp.SUM)
+
+    total_batches = max(reduced_stats[3].item(), 1.0)
+
     return (
         {
-            "train_total_loss": running_total_loss / max(num_batches, 1),
-            "train_loss": running_clip_loss / max(num_batches, 1),
-            "train_hard_negative_loss": running_hard_negative_loss
-            / max(num_batches, 1),
+            "train_total_loss": reduced_stats[0].item() / total_batches,
+            "train_loss": reduced_stats[1].item() / total_batches,
+            "train_hard_negative_loss": reduced_stats[2].item() / total_batches,
             "lr": scheduler.get_last_lr()[0],
         },
         global_step,
@@ -530,6 +661,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--pretrained", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument(
+        "--gpu-ids",
+        type=str,
+        default=None,
+        help="Comma-separated GPU ids. Single-GPU example: 2. Multi-GPU example with torchrun: 0,1,2,3",
+    )
+    parser.add_argument("--local-rank", type=int, default=-1)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
 
@@ -572,9 +710,18 @@ def parse_args() -> argparse.Namespace:
 def run_training(args: argparse.Namespace) -> None:
     global TRAIN_LOG_PATH
 
-    set_seed(args.seed)
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    run_timestamp = make_run_timestamp()
+    dist_ctx = init_distributed_context(args)
+    distributed = dist_ctx["distributed"]
+    world_size = dist_ctx["world_size"]
+    rank = dist_ctx["rank"]
+    is_main_process = dist_ctx["is_main_process"]
+    device = dist_ctx["device"]
+    gpu_ids = dist_ctx["gpu_ids"]
+
+    set_seed(args.seed + rank)
+
+    run_timestamp = make_run_timestamp() if is_main_process else None
+    run_timestamp = broadcast_run_timestamp(run_timestamp, distributed)
     run_name = build_run_name(args, run_timestamp)
     output_dir = Path(args.output_dir) / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -585,8 +732,8 @@ def run_training(args: argparse.Namespace) -> None:
     tensorboard_dir = output_dir / "tensorboard"
 
     previous_log_path = TRAIN_LOG_PATH
-    TRAIN_LOG_PATH = train_log_path
-    writer = SummaryWriter(log_dir=str(tensorboard_dir))
+    TRAIN_LOG_PATH = train_log_path if is_main_process else None
+    writer = SummaryWriter(log_dir=str(tensorboard_dir)) if is_main_process else None
 
     run_config: Dict[str, Any] = {
         "run_name": run_name,
@@ -596,22 +743,46 @@ def run_training(args: argparse.Namespace) -> None:
         "train_log_path": str(train_log_path.resolve()),
         "tensorboard_dir": str(tensorboard_dir.resolve()),
         "args": vars(args),
+        "distributed": distributed,
+        "world_size": world_size,
+        "rank": rank,
+        "local_rank": dist_ctx["local_rank"],
+        "gpu_ids": gpu_ids,
     }
     try:
-        save_run_config(config_json_path, run_config)
+        if is_main_process:
+            save_run_config(config_json_path, run_config)
 
-        log_message(f"Using device: {device}", run_name=run_name)
-        log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
-        log_message(f"Train log saved to {train_log_path}", run_name=run_name)
-        log_message(
-            f"TensorBoard logs saved to {tensorboard_dir}",
-            run_name=run_name,
+        if is_main_process:
+            log_message(f"Using device: {device}", run_name=run_name)
+            log_message(
+                f"Distributed training: {distributed} (world_size={world_size}, gpu_ids={gpu_ids})",
+                run_name=run_name,
+            )
+            log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
+            log_message(f"Train log saved to {train_log_path}", run_name=run_name)
+            log_message(
+                f"TensorBoard logs saved to {tensorboard_dir}",
+                run_name=run_name,
+            )
+            log_message(f"Run config saved to {config_json_path}", run_name=run_name)
+
+        model, _, tokenizer = _load_clip(
+            args.model_name,
+            device,
+            pretrained=args.pretrained,
         )
-        log_message(f"Run config saved to {config_json_path}", run_name=run_name)
-
-        model, _, tokenizer = _load_clip(args.model_name, device, args.pretrained)
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
+        if distributed:
+            model = DistributedDataParallel(
+                model,
+                device_ids=[device.index],
+                output_device=device.index,
+                broadcast_buffers=False,
+                find_unused_parameters=False,
+                static_graph=True,
+            )
 
         train_dataset = ContrastiveRecordDataset(
             jsonl_path=args.jsonl_path,
@@ -619,26 +790,49 @@ def run_training(args: argparse.Namespace) -> None:
             max_positives_per_image=args.max_positives_per_image,
             max_hard_negatives_per_image=args.max_hard_negatives_per_image,
             shuffle_texts_on_load=args.shuffle_texts_on_load,
+            shuffle_seed=args.seed,
+            log_progress=is_main_process,
         )
-        log_message(
-            f"Loaded {len(train_dataset)} image records from {args.jsonl_path}",
-            run_name=run_name,
-        )
+        if is_main_process:
+            log_message(
+                f"Loaded {len(train_dataset)} image records from {args.jsonl_path}",
+                run_name=run_name,
+            )
         run_config["num_records"] = len(train_dataset)
-        save_run_config(config_json_path, run_config)
-        writer.add_text(
-            "run/config_json",
-            json.dumps(run_config, ensure_ascii=False, indent=2),
-            0,
+        run_config["effective_global_batch_size"] = args.batch_size * max(args.accum_freq, 1) * world_size
+        if is_main_process:
+            save_run_config(config_json_path, run_config)
+            writer.add_text(
+                "run/config_json",
+                json.dumps(run_config, ensure_ascii=False, indent=2),
+                0,
+            )
+
+        train_sampler = (
+            DistributedSampler(
+                train_dataset,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                drop_last=False,
+                seed=args.seed,
+            )
+            if distributed
+            else None
         )
+        dataloader_generator = torch.Generator()
+        dataloader_generator.manual_seed(args.seed + rank)
 
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=args.batch_size,
-            shuffle=True,
+            shuffle=train_sampler is None,
+            sampler=train_sampler,
             num_workers=args.num_workers,
             pin_memory=device.type == "cuda",
             drop_last=False,
+            worker_init_fn=seed_worker,
+            generator=dataloader_generator,
             collate_fn=create_collate_fn(
                 tokenizer=tokenizer,
                 num_hard_negatives=args.num_hard_negatives,
@@ -661,8 +855,12 @@ def run_training(args: argparse.Namespace) -> None:
             ),
             warmup_steps=args.warmup_steps,
         )
-        scaler = GradScaler(enabled=device.type == "cuda")
-        clip_loss_fn = open_clip.ClipLoss()
+        scaler = GradScaler(device=device.type, enabled=device.type == "cuda")
+        clip_loss_fn = open_clip.ClipLoss(
+            cache_labels=True,
+            rank=rank,
+            world_size=world_size,
+        )
 
         metrics_history: List[MetricsRow] = []
         global_step = 0
@@ -670,6 +868,9 @@ def run_training(args: argparse.Namespace) -> None:
         previous_latest_path: Optional[Path] = None
 
         for epoch in range(1, args.epochs + 1):
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
+
             epoch_metrics, global_step = train_one_epoch(
                 model=model,
                 dataloader=train_dataloader,
@@ -686,6 +887,8 @@ def run_training(args: argparse.Namespace) -> None:
                 hard_negative_weight=args.hard_negative_weight,
                 hard_negative_margin=args.hard_negative_margin,
                 hard_negative_loss_type=args.hard_negative_loss_type,
+                is_main_process=is_main_process,
+                distributed=distributed,
                 run_name=run_name,
                 writer=writer,
             )
@@ -709,51 +912,38 @@ def run_training(args: argparse.Namespace) -> None:
                 "hard_negative_weight": args.hard_negative_weight,
                 "hard_negative_margin": args.hard_negative_margin,
                 "text_sampling": args.text_sampling,
+                "world_size": world_size,
                 **epoch_metrics,
             }
-            metrics_history.append(epoch_row)
-            append_metrics_row(metrics_csv_path, epoch_row)
-            append_metrics_jsonl(metrics_jsonl_path, epoch_row)
-            plot_training_curves(metrics_history, output_dir)
-            write_tensorboard_scalars(writer, "train_epoch", epoch_metrics, epoch)
-            write_tensorboard_scalars(
-                writer,
-                "train_epoch_meta",
-                {"global_step": global_step},
-                epoch,
-            )
-            writer.flush()
+            if is_main_process:
+                metrics_history.append(epoch_row)
+                append_metrics_row(metrics_csv_path, epoch_row)
+                append_metrics_jsonl(metrics_jsonl_path, epoch_row)
+                plot_training_curves(metrics_history, output_dir)
+                write_tensorboard_scalars(writer, "train_epoch", epoch_metrics, epoch)
+                write_tensorboard_scalars(
+                    writer,
+                    "train_epoch_meta",
+                    {"global_step": global_step},
+                    epoch,
+                )
+                writer.flush()
 
-            log_message(
-                f"Epoch {epoch} summary: "
-                f"total={epoch_metrics['train_total_loss']:.4f} "
-                f"clip={epoch_metrics['train_loss']:.4f} "
-                f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}",
-                run_name=run_name,
-            )
+                log_message(
+                    f"Epoch {epoch} summary: "
+                    f"total={epoch_metrics['train_total_loss']:.4f} "
+                    f"clip={epoch_metrics['train_loss']:.4f} "
+                    f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}",
+                    run_name=run_name,
+                )
 
-            latest_path = output_dir / (
-                f"checkpoint_latest_epoch_{epoch:0{epoch_digits}d}.pt"
-            )
-            if previous_latest_path is not None and previous_latest_path.exists():
-                previous_latest_path.unlink()
-            save_checkpoint(
-                save_path=latest_path,
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                scaler=scaler,
-                epoch=epoch,
-                global_step=global_step,
-                args=args,
-                metrics_history=metrics_history,
-            )
-            previous_latest_path = latest_path
-
-            if args.save_every_epoch:
-                epoch_path = output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
+                latest_path = output_dir / (
+                    f"checkpoint_latest_epoch_{epoch:0{epoch_digits}d}.pt"
+                )
+                if previous_latest_path is not None and previous_latest_path.exists():
+                    previous_latest_path.unlink()
                 save_checkpoint(
-                    save_path=epoch_path,
+                    save_path=latest_path,
                     model=model,
                     optimizer=optimizer,
                     scheduler=scheduler,
@@ -763,33 +953,51 @@ def run_training(args: argparse.Namespace) -> None:
                     args=args,
                     metrics_history=metrics_history,
                 )
+                previous_latest_path = latest_path
+
+                if args.save_every_epoch:
+                    epoch_path = output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
+                    save_checkpoint(
+                        save_path=epoch_path,
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        scaler=scaler,
+                        epoch=epoch,
+                        global_step=global_step,
+                        args=args,
+                        metrics_history=metrics_history,
+                    )
 
         final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
-        torch.save(model.state_dict(), final_weights_path)
-        run_config["finished_at"] = current_timestamp()
-        run_config["final_weights_path"] = str(final_weights_path.resolve())
-        save_run_config(config_json_path, run_config)
-        writer.add_text(
-            "run/final_weights_path",
-            str(final_weights_path.resolve()),
-            global_step,
-        )
-        writer.flush()
-        log_message(
-            f"Training complete. Final weights saved to {final_weights_path}",
-            run_name=run_name,
-        )
-        log_message(
-            f"Metrics saved to {metrics_csv_path} and {metrics_jsonl_path}",
-            run_name=run_name,
-        )
-        log_message(
-            f"Training curves saved to {output_dir / 'training_curves.png'}",
-            run_name=run_name,
-        )
+        if is_main_process:
+            torch.save(unwrap_model(model).state_dict(), final_weights_path)
+            run_config["finished_at"] = current_timestamp()
+            run_config["final_weights_path"] = str(final_weights_path.resolve())
+            save_run_config(config_json_path, run_config)
+            writer.add_text(
+                "run/final_weights_path",
+                str(final_weights_path.resolve()),
+                global_step,
+            )
+            writer.flush()
+            log_message(
+                f"Training complete. Final weights saved to {final_weights_path}",
+                run_name=run_name,
+            )
+            log_message(
+                f"Metrics saved to {metrics_csv_path} and {metrics_jsonl_path}",
+                run_name=run_name,
+            )
+            log_message(
+                f"Training curves saved to {output_dir / 'training_curves.png'}",
+                run_name=run_name,
+            )
     finally:
-        writer.close()
+        if writer is not None:
+            writer.close()
         TRAIN_LOG_PATH = previous_log_path
+        cleanup_distributed()
 
 
 if __name__ == "__main__":
