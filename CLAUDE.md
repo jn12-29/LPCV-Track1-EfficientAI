@@ -69,13 +69,20 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
 ### Training (`train/`)
 
-- **`train/record_utils.py`** — `dedupe_keep_order`, `normalize_record` (flat contrastive format only), `resolve_image_path`.
-- **`train/finetune_mobileclip2_jsonl.py`** — fine-tunes MobileCLIP2 on contrastive JSONL from `build_datasets/`.
+- **`train/finetune.py`** — fine-tunes MobileCLIP2 on flat contrastive JSONL from `build_datasets/`.
 - **`train/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
 
 ### Dataset builder (`build_datasets/`)
 
-Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs `dataset_raw_contrastive.jsonl` consumed by `train/`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
+Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs flat contrastive JSONL records consumed directly by `train/finetune.py` and `train/analyze_hard_negatives.py`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
+
+Expected flat training record format:
+
+```json
+{"image_path": "build_datasets/data/VG_100K/107914.jpg", "positives": ["..."], "hard_negatives": ["..."]}
+```
+
+Training and analysis scripts are expected to run from the repository root so `image_path` can be opened directly.
 
 ### Samples Dataset layout expected
 

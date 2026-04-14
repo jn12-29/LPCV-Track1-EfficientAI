@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -17,7 +17,6 @@ import torch.nn.functional as F
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched
 from utils.preprocess import preprocess_image
-from train.record_utils import normalize_record, resolve_image_path
 
 
 @torch.no_grad()
@@ -47,7 +46,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="./build_datasets/data/dataset_raw_contrastive.jsonl",
     )
-    parser.add_argument("--repo-root", type=str, default=".")
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
@@ -65,7 +63,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     jsonl_path = Path(args.jsonl_path).resolve()
-    repo_root = Path(args.repo_root).resolve() if args.repo_root else None
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -82,13 +79,12 @@ def main() -> None:
     per_record_stats: List[Dict[str, object]] = []
 
     with jsonl_path.open("r", encoding="utf-8") as f:
-        for idx, line in enumerate(f, start=1):
-            raw_record = json.loads(line)
-            record = normalize_record(raw_record)
-            if record is None or not record["hard_negatives"]:
+        for line in f:
+            record = json.loads(line)
+            if not record["hard_negatives"]:
                 continue
 
-            image_path = resolve_image_path(record["image_path"], jsonl_path, repo_root)
+            image_path = Path(record["image_path"])
             image_feature = encode_image(model, image_path, device)
 
             pos_features = encode_texts(
@@ -115,7 +111,7 @@ def main() -> None:
 
             per_record_stats.append(
                 {
-                    "image_id": record["image_id"],
+                    "image_id": image_path.name,
                     "image_path": str(image_path),
                     "num_positives": len(record["positives"]),
                     "num_hard_negatives": len(record["hard_negatives"]),
