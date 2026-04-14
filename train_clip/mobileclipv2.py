@@ -1,0 +1,176 @@
+import argparse
+import os
+from pathlib import Path
+
+import numpy as np
+import onnxruntime as ort
+import torch
+import torch.nn as nn
+from timm.utils import reparameterize_model
+
+import open_clip
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--checkpoint-path", type=str, default=None)
+    parser.add_argument(
+        "--output-postfix",
+        type=str,
+        default="",
+        help="Suffix appended to exported ONNX filenames and output directory.",
+    )
+    return parser.parse_args()
+
+
+class OpenClipVisionEncoder(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
+        return self.model.encode_image(image)
+
+
+class OpenClipTextEncoder(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        token_ids = token_ids.to(dtype=torch.int64)
+        eot_pos = token_ids.argmax(dim=-1, keepdim=True)
+        positions = torch.arange(token_ids.shape[-1], device=token_ids.device).unsqueeze(0)
+        mask = (positions <= eot_pos).to(token_ids.dtype)
+        return self.model.encode_text(token_ids * mask)
+
+
+def _load_clip(
+    model_name: str,
+    device: torch.device,
+    checkpoint_path: str | None = None,
+):
+    print(f"Loading CLIP model '{model_name}'...")
+    available_models_tuple = open_clip.list_pretrained()
+    available_models_dict = {}
+    for name, ckpt in available_models_tuple:
+        if name not in available_models_dict:
+            available_models_dict[name] = ckpt
+
+    if model_name not in available_models_dict:
+        raise ValueError(f"Available models: {open_clip.list_pretrained()}")
+
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        model_name,
+        pretrained=available_models_dict[model_name],
+    )
+
+    if checkpoint_path:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+        print(f"Loaded checkpoint from {checkpoint_path}")
+        if missing_keys:
+            print(f"Missing keys: {len(missing_keys)}")
+        if unexpected_keys:
+            print(f"Unexpected keys: {len(unexpected_keys)}")
+
+    model.eval().to(device)
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    return model, preprocess, tokenizer
+
+
+def verify_onnx(
+    onnx_path: str,
+    input_dict: dict,
+    pt_output: torch.Tensor,
+    rtol: float = 1e-3,
+    atol: float = 1e-4,
+) -> None:
+    sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    ort_inputs = {k: v.numpy() for k, v in input_dict.items()}
+    ort_out = sess.run(None, ort_inputs)[0]
+    pt_out = pt_output.numpy()
+    max_diff = np.abs(ort_out - pt_out).max()
+    status = "PASS" if np.allclose(ort_out, pt_out, rtol=rtol, atol=atol) else "FAIL"
+    print(f"  Max abs diff (ONNX vs PyTorch): {max_diff:.6f}  {status}")
+    if status == "FAIL":
+        raise RuntimeError(f"ONNX output mismatch for {onnx_path}. Max diff={max_diff:.6f}")
+
+
+def main() -> None:
+    args = parse_args()
+
+    output_dir_name = f"exported_{args.model_name}_onnx"
+    if args.output_postfix:
+        output_dir_name += args.output_postfix
+    os.makedirs(output_dir_name, exist_ok=True)
+    print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
+
+    device = torch.device("cpu")
+    clip_model, _, _ = _load_clip(
+        model_name=args.model_name,
+        device=device,
+        checkpoint_path=args.checkpoint_path,
+    )
+    clip_model.eval()
+    clip_model = reparameterize_model(clip_model)
+
+    image_encoder = OpenClipVisionEncoder(clip_model)
+    text_encoder = OpenClipTextEncoder(clip_model)
+    image_encoder.eval()
+    text_encoder.eval()
+
+    dummy_image_input = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
+    dummy_text_input = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
+
+    print("\nCalculating PyTorch baseline outputs for validation...")
+    with torch.no_grad():
+        pt_img_feat = image_encoder(dummy_image_input)
+        pt_txt_feat = text_encoder(dummy_text_input)
+
+    image_onnx_path = os.path.join(output_dir_name, "image_encoder.onnx")
+    text_onnx_path = os.path.join(output_dir_name, "text_encoder.onnx")
+
+    print(f"\nExporting Image Encoder to {image_onnx_path}...")
+    torch.onnx.export(
+        image_encoder,
+        dummy_image_input,
+        image_onnx_path,
+        input_names=["image"],
+        output_names=["embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+        dynamo=True,
+    )
+    verify_onnx(image_onnx_path, {"image": dummy_image_input}, pt_img_feat)
+
+    print(f"\nExporting Text Encoder to {text_onnx_path}...")
+    torch.onnx.export(
+        text_encoder,
+        dummy_text_input,
+        text_onnx_path,
+        input_names=["text"],
+        output_names=["text_embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+        dynamo=True,
+    )
+    verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
+
+    print("\nExport and verification complete.")
+    if args.checkpoint_path:
+        print(f"Exported fine-tuned checkpoint: {Path(args.checkpoint_path).resolve()}")
+
+
+if __name__ == "__main__":
+    main()
