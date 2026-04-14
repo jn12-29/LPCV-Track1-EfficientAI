@@ -443,7 +443,7 @@ def parse_args() -> argparse.Namespace:
         default="./build_datasets/data/dataset_raw_contrastive.jsonl",
     )
     parser.add_argument("--repo-root", type=str, default=".")
-    parser.add_argument("--output-dir", type=str, default="./checkpoints_jsonl")
+    parser.add_argument("--output-dir", type=str, default="./checkpoints")
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--pretrained", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
