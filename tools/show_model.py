@@ -1,4 +1,4 @@
-from eval_local import _load_clip
+from utils.clip_utils import _load_clip
 import torch
 import torch.nn as nn
 import os

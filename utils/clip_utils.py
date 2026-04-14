@@ -26,22 +26,22 @@ def _load_clip(
     available_models_tuple = open_clip.list_pretrained()
     available_model_names = {name for name, _ in available_models_tuple}
     if model_name not in available_model_names:
-        raise ValueError(f"Model '{model_name}' not found. Available: {open_clip.list_pretrained()}")
+        raise ValueError(
+            f"Model '{model_name}' not found. Available: {open_clip.list_pretrained()}"
+        )
 
     if pretrained:
         pretrained_tag = pretrained
     else:
-        available_tags = [ckpt for name, ckpt in available_models_tuple if name == model_name]
-        if model_name.startswith("MobileCLIP2") and "dfndr2b" in available_tags:
-            pretrained_tag = "dfndr2b"
-        else:
-            pretrained_tag = available_tags[0]
+        available_tags = [
+            ckpt for name, ckpt in available_models_tuple if name == model_name
+        ]
+        pretrained_tag = available_tags[0]
 
     # MobileCLIP2 variants expect [0, 1] RGB — disable internal normalization so
     # the competition-style preprocessing (resize + /255 only) passes through unchanged.
     model_kwargs: dict = {}
-    if model_name in {"MobileCLIP2-S0", "MobileCLIP2-S2", "MobileCLIP2-S3", "MobileCLIP2-B"}:
-        model_kwargs = {"image_mean": (0.0, 0.0, 0.0), "image_std": (1.0, 1.0, 1.0)}
+    model_kwargs = {"image_mean": (0.0, 0.0, 0.0), "image_std": (1.0, 1.0, 1.0)}
 
     model, _, preprocess = open_clip.create_model_and_transforms(
         model_name, pretrained=pretrained_tag, **model_kwargs
@@ -59,9 +59,6 @@ def _load_clip(
 
     model.eval().to(device)
 
-    try:
-        tokenizer = open_clip.get_tokenizer(model_name)
-    except Exception:
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
     return model, preprocess, tokenizer
