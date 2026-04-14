@@ -26,7 +26,7 @@ import open_clip
 
 from utils.clip_utils import _load_clip
 from utils.preprocess import preprocess_image
-from train_clip.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
+from train.record_utils import dedupe_keep_order, normalize_record, resolve_image_path
 
 
 def set_seed(seed: int) -> None:
