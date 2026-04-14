@@ -9,3 +9,5 @@
 .env
 **/*.zip
 .worktrees/
+checkpoints/
+docs/
