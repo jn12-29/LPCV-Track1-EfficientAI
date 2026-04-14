@@ -9,14 +9,20 @@ pip install -r requirements.txt
 qai-hub configure  # requires API token from QAI Hub
 ```
 
-Required environment variables:
+Recommended environment variables:
 
 ```bash
-export CUDA_VISIBLE_DEVICES=<gpu_id>
+export OMP_NUM_THREADS=1
 export HF_HOME=/mnt/sada1/data
 export HF_ENDPOINT="https://hf-mirror.com"
 export PYTHONNOUSERSITE=1
 export LD_PRELOAD=$CONDA_PREFIX/lib/libstdc++.so.6
+```
+
+Optional GPU visibility override:
+
+```bash
+export CUDA_VISIBLE_DEVICES=<gpu_id_or_gpu_list>
 ```
 
 ## End-to-End Pipeline
@@ -59,10 +65,15 @@ The builder writes flat contrastive JSONL records consumed directly by `train/`:
 ```
 
 ```bash
-# fine-tune MobileCLIP2 on builder output
+# fine-tune MobileCLIP2 on builder output (single GPU)
 python train/finetune.py \
     --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --batch-size 256 --epochs 20
+    --model-name MobileCLIP2-S2 --gpu-ids 0 --batch-size 256 --epochs 20
+
+# fine-tune with DDP on multiple GPUs selected by --gpu-ids
+OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --gpu-ids 0,1 --batch-size 256 --epochs 20
 
 # analyze positive vs hard-negative similarity distributions
 python train/analyze_hard_negatives.py \
@@ -71,6 +82,10 @@ python train/analyze_hard_negatives.py \
 ```
 
 `train/finetune.py` reads the JSONL records as-is, samples one positive text and `--num-hard-negatives` hard negatives per image, and optimizes `CLIP loss + hard negative loss`.
+
+`--batch-size` is per-GPU batch size. The effective global batch size is `batch_size * world_size * accum_freq`.
+
+For multi-GPU runs, prefer `torchrun --nnodes=1 --master_addr=127.0.0.1 --master_port=<port>` plus `--gpu-ids`. On this environment, `torchrun --standalone` may resolve the host name in a way that breaks local rendezvous. If `CUDA_VISIBLE_DEVICES` is also set, `--gpu-ids` refers to the GPUs visible to the current process.
 
 Each training run now writes into a structured subdirectory under `--output-dir`, for example `checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260414_153000/`. The run directory includes `train.log`, `metrics.csv`, `metrics.jsonl`, `training_curves.png`, checkpoints named with epoch information such as `checkpoint_latest_epoch_03.pt` and `checkpoint_epoch_03.pt`, `run_config.json`, and TensorBoard event files under `tensorboard/`.
 
