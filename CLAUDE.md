@@ -32,41 +32,50 @@ export LD_PRELOAD=$CONDA_PREFIX/lib/libstdc++.so.6
 
 ```bash
 # 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
-python mobileclipv2.py --model-name MobileCLIP2-S0
-
-# 1b. (Optional) Export quantized ONNX
-python mobileclipv2_quant.py --model-name MobileCLIP2-S0
+python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 
 # 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
-python compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
-
-# 2b. (Alternative) Remote quantization via QAI Hub
-python qai_quant_compile_profile.py
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
 
 # 3. Evaluate
-python eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
-python eval_onnx_local.py --model-name MobileCLIP2-S0 --k 10   # ONNX, local
-python eval_remote.py --image-compiled-id <id> --text-compiled-id <id> --k 10  # QAI Hub cloud
-python eval_remote_eval_inference.py --inference-job-id <id>    # from existing inference job
+python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
 
-# 4. (Optional) Fine-tune (not done infact, just demo)
-python finetune.py --model-name MobileCLIP2-S0 --root-dir ./sample_data ...
+# Remote evaluation (three modes):
+python pipeline/eval_remote.py --upload-dataset \
+    --image-compiled-id <id> --text-compiled-id <id>            # Mode A: upload + infer
+python pipeline/eval_remote.py \
+    --image-compiled-id <id> --text-compiled-id <id>            # Mode B: infer, existing dataset
+python pipeline/eval_remote.py \
+    --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
 ```
 
 Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
 ## Architecture
 
-### Core modules
+### Shared utilities (`utils/`)
 
-- **`eval_local.py`** — defines `_load_clip()` (shared by all scripts), runs Recall@K evaluation with PyTorch. Also exports `encode_images`, `encode_texts`, `evaluate_image_to_text_recall_at_k`.
-- **`mobileclipv2.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder` nn.Module subclasses, exports to ONNX opset 18, and verifies ONNX outputs against PyTorch.
-- **`dataset.py`** — two Dataset classes:
-  - `ImageTextRetrievalDataset` — positive (image, text) pairs for training.
-  - `RetrievalEvalDataset` — per-image or per-text iteration for evaluation; `get_image_to_text_eval_data()` returns all texts + per-image positive indices.
-- **`utils.py`** — `calculate_recall_at_k`.
-- **`compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results with `lowpowervision@gmail.com`.
-- **`Token.py`** — hardcoded QAI Hub token and dataset IDs (`d2qe36jl2` images, `d95k6jwm9` texts).
+- **`utils/clip_utils.py`** — `_load_clip()`: canonical model loader shared by all scripts. Includes MobileCLIP2-specific `image_mean/std=(0,0,0)/(1,1,1)` kwargs and tokenizer fallback.
+- **`utils/preprocess.py`** — `preprocess_image()`: resize 224×224, divide by 255, return `(3,224,224)` float32 tensor. No mean/std normalization (competition requirement).
+- **`utils/data_utils.py`** — `_batched`, `recall_at_k`, CSV loaders (`load_image_to_textnums`, `load_textnums_to_texts`), `load_ground_truth`.
+
+### Pipeline (`pipeline/`)
+
+- **`pipeline/dataset.py`** — `RetrievalEvalDataset` (per-image or per-text iteration; `get_image_to_text_eval_data()` returns all texts + per-image positive indices) and `ImageTextRetrievalDataset` (positive pairs).
+- **`pipeline/export_onnx.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder`, exports to ONNX opset 18, verifies outputs against PyTorch.
+- **`pipeline/compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results with `lowpowervision@gmail.com`.
+- **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
+- **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference submission, and Recall@K. Three modes: (A) upload + infer, (B) infer with existing dataset IDs, (C) reuse inference job outputs.
+
+### Training (`train_clip/`)
+
+- **`train_clip/record_utils.py`** — `dedupe_keep_order`, `normalize_record` (flat contrastive format only), `resolve_image_path`.
+- **`train_clip/finetune_mobileclip2_jsonl.py`** — fine-tunes MobileCLIP2 on contrastive JSONL from `build_datasets/`.
+- **`train_clip/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
+
+### Dataset builder (`build_datasets/`)
+
+Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs `dataset_raw_contrastive.jsonl` consumed by `train_clip/`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
 
 ### Samples Dataset layout expected
 

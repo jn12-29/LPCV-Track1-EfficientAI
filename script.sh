@@ -1,33 +1,35 @@
-sudo rm -rf ./LPCV
-sudo cp -r /home/gxz/LPCV ./
-
 # export onnx
-python mobileclipv2.py --model-name MobileCLIP2-S0
-python mobileclipv2.py --model-name MobileCLIP2-S2
-python mobileclipv2.py --model-name MobileCLIP2-S3
-python mobileclipv2_fp16.py --model-name MobileCLIP2-S0
-python mobileclipv2_fp16.py --model-name MobileCLIP2-S2
-python mobileclipv2_fp16.py --model-name MobileCLIP2-S3
-
-# eval local onnx
-python eval_onnx_local.py --model-name MobileCLIP2-S0 --k 7
-python eval_onnx_local.py --model-name MobileCLIP2-S0 --k 7 --postfix _fp16
-python eval_onnx_local.py --model-name MobileCLIP2-S2 --k 7
-python eval_onnx_local.py --model-name MobileCLIP2-S3 --k 7 --postfix _fp16
+python pipeline/export_onnx.py --model-name MobileCLIP2-S0
+python pipeline/export_onnx.py --model-name MobileCLIP2-S2
+python pipeline/export_onnx.py --model-name MobileCLIP2-S3
 
 # compile and profile
-python compile_and_profile.py --model-name MobileCLIP2-S0
-python compile_and_profile.py --model-name MobileCLIP2-S0 --postfix _fp16
-python compile_and_profile.py --model-name MobileCLIP2-S2
-python compile_and_profile.py --model-name MobileCLIP2-S3 --postfix _fp16
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 --postfix _fp16
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3 --postfix _fp16
 
+# eval local (torch)
+python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 
+# eval remote (Mode A: upload + infer)
+python pipeline/eval_remote.py --upload-dataset \
+    --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
 
-# eval remote
-python eval_remote.py --k 7 --image-compiled-id jp34ml4mg --text-compiled-id jgzx7q2o5 --model-name MobileCLIP2-S0
+# eval remote (Mode B: existing dataset)
+python pipeline/eval_remote.py \
+    --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
 
-python eval_remote.py --k 7 --image-compiled-id j5wd90qmg --text-compiled-id jg9347w8g --model-name MobileCLIP2-S3
+# eval remote (Mode C: reuse inference)
+python pipeline/eval_remote.py \
+    --image-inference-id <image_inference_job_id> --text-inference-id <text_inference_job_id>
 
-python eval_remote_eval_inference.py --k 7 --image-inference-id jp27mzwx5 --text-inference-id jgklyk8y5
+# fine-tune
+CUDA_VISIBLE_DEVICES=0 python train_clip/finetune_mobileclip2_jsonl.py \
+    --jsonl-path ./build_datasets/data/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S0
 
-CUDA_VISIBLE_DEVICES=1 python finetune.py
+# analyze hard negatives
+python train_clip/analyze_hard_negatives.py \
+    --jsonl-path ./build_datasets/data/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S0
