@@ -2,22 +2,35 @@ BASE_URL = "https://openrouter.ai/api/v1"
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 
 ALLOWED_TAGS = [
-    "small_object", "multi_object_scene", "fine_grained_attribute",
-    "spatial_relation", "visible_text", "occlusion", "cluttered_background",
-    "low_contrast", "similar_objects", "dominant_distractor",
+    "small_object",
+    "multi_object_scene",
+    "fine_grained_attribute",
+    "spatial_relation",
+    "visible_text",
+    "occlusion",
+    "cluttered_background",
+    "low_contrast",
+    "similar_objects",
+    "dominant_distractor",
     "attribute_ambiguity",
 ]
 
 # Fixed attribute axes — enforces LPCV-style discrimination.
 # Derived from analysis of the official 222-text corpus.
 ATTRIBUTE_AXES = [
-    "color", "size", "state", "position", "material",
-    "shape", "visible_text", "distinctive_part",
+    "color",
+    "size",
+    "state",
+    "position",
+    "material",
+    "shape",
+    "visible_text",
+    "distinctive_part",
 ]
 
-SYSTEM_PROMPT = """You are an expert computer vision dataset annotator for fine-grained image-text retrieval (LPCV 2026 Track 1).
+SYSTEM_PROMPT = """You are an expert computer vision dataset annotator for fine-grained image-text retrieval.
 
-TASK: Analyze ONE image and generate structured object-centric retrieval annotations that mimic the official corpus style — ultra-short referring expressions such as:
+TASK: Analyze ONE image and generate structured object-centric retrieval annotations that mimic the official corpus style — short referring expressions such as:
   "the white ping pong ball", "the tilted monitor", "the round mouse",
   "the airplane with red tail", "the pig facing left",
   "the rabbit with one ear up",
@@ -95,142 +108,278 @@ FEW_SHOT_EXAMPLES = [
     {
         "image_id": "example_ping_pong_balls.jpg",
         "global_texts": ["three ping pong balls on a dark scratched surface"],
-        "challenge_tags": ["multi_object_scene", "fine_grained_attribute",
-                           "spatial_relation", "similar_objects", "visible_text"],
+        "challenge_tags": [
+            "multi_object_scene",
+            "fine_grained_attribute",
+            "spatial_relation",
+            "similar_objects",
+            "visible_text",
+        ],
         "objects": [
-            {"object_name": "ping pong ball", "salience": "primary",
-             "positive_texts": [
-                 {"text": "the white ping pong ball", "attribute_axis": "color"},
-                 {"text": "the ball at the upper left", "attribute_axis": "position"}],
-             "weak_positives": [],
-             "hard_negatives_attribute": [
-                 {"text": "the blue ping pong ball", "edit_type": "axis_flip",
-                  "rationale": "no blue ball present"},
-                 {"text": "the cube-shaped ping pong ball", "edit_type": "axis_swap",
-                  "rationale": "all balls are round"}],
-             "hard_negatives_scene": [
-                 {"text": "the white ping pong ball on a wooden table",
-                  "rationale": "surface is scratched dark metal, not wood"}],
-             "relational_texts": ["the white ping pong ball left of the orange ball"],
-             "text_on_object": ["the ping pong ball with black text"]},
-            {"object_name": "ping pong ball", "salience": "primary",
-             "positive_texts": [
-                 {"text": "the orange ping pong ball", "attribute_axis": "color"},
-                 {"text": "the ball at the upper right", "attribute_axis": "position"}],
-             "weak_positives": [],
-             "hard_negatives_attribute": [
-                 {"text": "the purple ping pong ball", "edit_type": "axis_flip",
-                  "rationale": "no purple ball present"}],
-             "hard_negatives_scene": [],
-             "relational_texts": ["the orange ping pong ball right of the white ball"],
-             "text_on_object": ["the ping pong ball with no text"]},
-            {"object_name": "ping pong ball", "salience": "primary",
-             "positive_texts": [
-                 {"text": "the light green ping pong ball", "attribute_axis": "color"},
-                 {"text": "the bottom ping pong ball", "attribute_axis": "position"}],
-             "weak_positives": [],
-             "hard_negatives_attribute": [
-                 {"text": "the black ping pong ball", "edit_type": "axis_flip",
-                  "rationale": "no black ball present"}],
-             "hard_negatives_scene": [],
-             "relational_texts": ["the green ping pong ball below the white ball"],
-             "text_on_object": ["the ping pong ball with blue text"]},
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    {"text": "the white ping pong ball", "attribute_axis": "color"},
+                    {
+                        "text": "the ball at the upper left",
+                        "attribute_axis": "position",
+                    },
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the blue ping pong ball",
+                        "edit_type": "axis_flip",
+                        "rationale": "no blue ball present",
+                    },
+                    {
+                        "text": "the cube-shaped ping pong ball",
+                        "edit_type": "axis_swap",
+                        "rationale": "all balls are round",
+                    },
+                ],
+                "hard_negatives_scene": [
+                    {
+                        "text": "the white ping pong ball on a wooden table",
+                        "rationale": "surface is scratched dark metal, not wood",
+                    }
+                ],
+                "relational_texts": [
+                    "the white ping pong ball left of the orange ball"
+                ],
+                "text_on_object": ["the ping pong ball with black text"],
+            },
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    {"text": "the orange ping pong ball", "attribute_axis": "color"},
+                    {
+                        "text": "the ball at the upper right",
+                        "attribute_axis": "position",
+                    },
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the purple ping pong ball",
+                        "edit_type": "axis_flip",
+                        "rationale": "no purple ball present",
+                    }
+                ],
+                "hard_negatives_scene": [],
+                "relational_texts": [
+                    "the orange ping pong ball right of the white ball"
+                ],
+                "text_on_object": ["the ping pong ball with no text"],
+            },
+            {
+                "object_name": "ping pong ball",
+                "salience": "primary",
+                "positive_texts": [
+                    {
+                        "text": "the light green ping pong ball",
+                        "attribute_axis": "color",
+                    },
+                    {"text": "the bottom ping pong ball", "attribute_axis": "position"},
+                ],
+                "weak_positives": [],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the black ping pong ball",
+                        "edit_type": "axis_flip",
+                        "rationale": "no black ball present",
+                    }
+                ],
+                "hard_negatives_scene": [],
+                "relational_texts": ["the green ping pong ball below the white ball"],
+                "text_on_object": ["the ping pong ball with blue text"],
+            },
         ],
     },
     {
         "image_id": "example_desk_multi_monitor.jpg",
         "global_texts": ["a desk with three monitors, keyboard and mouse"],
-        "challenge_tags": ["multi_object_scene", "small_object",
-                           "similar_objects", "dominant_distractor"],
+        "challenge_tags": [
+            "multi_object_scene",
+            "small_object",
+            "similar_objects",
+            "dominant_distractor",
+        ],
         "objects": [
-            {"object_name": "monitor", "salience": "primary",
-             "positive_texts": [
-                 {"text": "the tilted monitor", "attribute_axis": "state"},
-                 {"text": "the black crt monitor", "attribute_axis": "color"}],
-             "weak_positives": ["crt monitor"],
-             "hard_negatives_attribute": [
-                 {"text": "the white monitor", "edit_type": "axis_flip",
-                  "rationale": "all monitors are black"},
-                 {"text": "the glowing monitor", "edit_type": "axis_swap",
-                  "rationale": "all monitors are off"}],
-             "hard_negatives_scene": [
-                 {"text": "monitor mounted on the wall",
-                  "rationale": "monitors stand on the desk"}],
-             "relational_texts": ["the monitor behind the keyboard"],
-             "text_on_object": ["the monitor with a white brand logo"]},
-            {"object_name": "keyboard", "salience": "secondary",
-             "positive_texts": [
-                 {"text": "the black keyboard", "attribute_axis": "color"},
-                 {"text": "the rectangular keyboard", "attribute_axis": "shape"}],
-             "weak_positives": ["wired keyboard"],
-             "hard_negatives_attribute": [
-                 {"text": "the white keyboard", "edit_type": "axis_flip",
-                  "rationale": "keyboard is black"},
-                 {"text": "the rounded keyboard", "edit_type": "axis_swap",
-                  "rationale": "keyboard is rectangular not rounded"}],
-             "hard_negatives_scene": [],
-             "relational_texts": ["the keyboard in front of the monitors"],
-             "text_on_object": ["the keyboard with white key labels"]},
-            {"object_name": "mouse", "salience": "secondary",
-             "positive_texts": [
-                 {"text": "the round mouse", "attribute_axis": "shape"},
-                 {"text": "the black mouse on the mousepad", "attribute_axis": "color"}],
-             "weak_positives": ["wired mouse"],
-             "hard_negatives_attribute": [
-                 {"text": "the white mouse", "edit_type": "axis_flip",
-                  "rationale": "mouse is black"},
-                 {"text": "the rectangular mouse", "edit_type": "axis_swap",
-                  "rationale": "mouse is rounded"}],
-             "hard_negatives_scene": [],
-             "relational_texts": ["the mouse right of the keyboard"],
-             "text_on_object": []},
+            {
+                "object_name": "monitor",
+                "salience": "primary",
+                "positive_texts": [
+                    {"text": "the tilted monitor", "attribute_axis": "state"},
+                    {"text": "the black crt monitor", "attribute_axis": "color"},
+                ],
+                "weak_positives": ["crt monitor"],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the white monitor",
+                        "edit_type": "axis_flip",
+                        "rationale": "all monitors are black",
+                    },
+                    {
+                        "text": "the glowing monitor",
+                        "edit_type": "axis_swap",
+                        "rationale": "all monitors are off",
+                    },
+                ],
+                "hard_negatives_scene": [
+                    {
+                        "text": "monitor mounted on the wall",
+                        "rationale": "monitors stand on the desk",
+                    }
+                ],
+                "relational_texts": ["the monitor behind the keyboard"],
+                "text_on_object": ["the monitor with a white brand logo"],
+            },
+            {
+                "object_name": "keyboard",
+                "salience": "secondary",
+                "positive_texts": [
+                    {"text": "the black keyboard", "attribute_axis": "color"},
+                    {"text": "the rectangular keyboard", "attribute_axis": "shape"},
+                ],
+                "weak_positives": ["wired keyboard"],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the white keyboard",
+                        "edit_type": "axis_flip",
+                        "rationale": "keyboard is black",
+                    },
+                    {
+                        "text": "the rounded keyboard",
+                        "edit_type": "axis_swap",
+                        "rationale": "keyboard is rectangular not rounded",
+                    },
+                ],
+                "hard_negatives_scene": [],
+                "relational_texts": ["the keyboard in front of the monitors"],
+                "text_on_object": ["the keyboard with white key labels"],
+            },
+            {
+                "object_name": "mouse",
+                "salience": "secondary",
+                "positive_texts": [
+                    {"text": "the round mouse", "attribute_axis": "shape"},
+                    {
+                        "text": "the black mouse on the mousepad",
+                        "attribute_axis": "color",
+                    },
+                ],
+                "weak_positives": ["wired mouse"],
+                "hard_negatives_attribute": [
+                    {
+                        "text": "the white mouse",
+                        "edit_type": "axis_flip",
+                        "rationale": "mouse is black",
+                    },
+                    {
+                        "text": "the rectangular mouse",
+                        "edit_type": "axis_swap",
+                        "rationale": "mouse is rounded",
+                    },
+                ],
+                "hard_negatives_scene": [],
+                "relational_texts": ["the mouse right of the keyboard"],
+                "text_on_object": [],
+            },
         ],
     },
 ]
 
 RESPONSE_SCHEMA = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "properties": {
         "image_id": {"type": "string"},
         "global_texts": {"type": "array", "items": {"type": "string"}},
-        "challenge_tags": {"type": "array",
-            "items": {"type": "string", "enum": ALLOWED_TAGS}},
-        "objects": {"type": "array", "items": {
-            "type": "object", "additionalProperties": False,
-            "properties": {
-                "object_name": {"type": "string"},
-                "salience": {"type": "string", "enum": ["primary", "secondary"]},
-                "positive_texts": {"type": "array", "items": {
-                    "type": "object", "additionalProperties": False,
-                    "properties": {
-                        "text": {"type": "string"},
-                        "attribute_axis": {"type": "string", "enum": ATTRIBUTE_AXES},
-                    }, "required": ["text", "attribute_axis"]}},
-                "weak_positives": {"type": "array", "items": {"type": "string"}},
-                "hard_negatives_attribute": {"type": "array", "items": {
-                    "type": "object", "additionalProperties": False,
-                    "properties": {
-                        "text": {"type": "string"},
-                        "edit_type": {"type": "string",
-                            "enum": ["axis_flip", "axis_swap", "cross_object", "sibling"]},
-                        "rationale": {"type": "string"},
-                    }, "required": ["text", "edit_type", "rationale"]}},
-                "hard_negatives_scene": {"type": "array", "items": {
-                    "type": "object", "additionalProperties": False,
-                    "properties": {
-                        "text": {"type": "string"},
-                        "rationale": {"type": "string"},
-                    }, "required": ["text", "rationale"]}},
-                "relational_texts": {"type": "array", "items": {"type": "string"}},
-                "text_on_object": {"type": "array", "items": {"type": "string"},
-                    "description": "Text-awareness descriptions: 'with [color] text', "
-                                   "'with white lettering', 'with no text', or "
-                                   "'the logo says [X]' (≤4 words, clearly legible only)."},
+        "challenge_tags": {
+            "type": "array",
+            "items": {"type": "string", "enum": ALLOWED_TAGS},
+        },
+        "objects": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "object_name": {"type": "string"},
+                    "salience": {"type": "string", "enum": ["primary", "secondary"]},
+                    "positive_texts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "text": {"type": "string"},
+                                "attribute_axis": {
+                                    "type": "string",
+                                    "enum": ATTRIBUTE_AXES,
+                                },
+                            },
+                            "required": ["text", "attribute_axis"],
+                        },
+                    },
+                    "weak_positives": {"type": "array", "items": {"type": "string"}},
+                    "hard_negatives_attribute": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "text": {"type": "string"},
+                                "edit_type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "axis_flip",
+                                        "axis_swap",
+                                        "cross_object",
+                                        "sibling",
+                                    ],
+                                },
+                                "rationale": {"type": "string"},
+                            },
+                            "required": ["text", "edit_type", "rationale"],
+                        },
+                    },
+                    "hard_negatives_scene": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "text": {"type": "string"},
+                                "rationale": {"type": "string"},
+                            },
+                            "required": ["text", "rationale"],
+                        },
+                    },
+                    "relational_texts": {"type": "array", "items": {"type": "string"}},
+                    "text_on_object": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Text-awareness descriptions: 'with [color] text', "
+                        "'with white lettering', 'with no text', or "
+                        "'the logo says [X]' (≤4 words, clearly legible only).",
+                    },
+                },
+                "required": [
+                    "object_name",
+                    "salience",
+                    "positive_texts",
+                    "weak_positives",
+                    "hard_negatives_attribute",
+                    "hard_negatives_scene",
+                    "relational_texts",
+                    "text_on_object",
+                ],
             },
-            "required": ["object_name", "salience", "positive_texts",
-                "weak_positives", "hard_negatives_attribute",
-                "hard_negatives_scene", "relational_texts", "text_on_object"],
-        }},
+        },
     },
     "required": ["image_id", "global_texts", "challenge_tags", "objects"],
 }
@@ -259,14 +408,16 @@ The output "results" array MUST have the same length and order as the input list
 """
 
 BATCH_VERIFY_SCHEMA = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "properties": {
         "results": {
             "type": "array",
             "items": {
-                "type": "object", "additionalProperties": False,
+                "type": "object",
+                "additionalProperties": False,
                 "properties": {
-                    "text":  {"type": "string"},
+                    "text": {"type": "string"},
                     "match": {"type": "string", "enum": ["yes", "no", "unsure"]},
                 },
                 "required": ["text", "match"],
@@ -275,4 +426,3 @@ BATCH_VERIFY_SCHEMA = {
     },
     "required": ["results"],
 }
-
