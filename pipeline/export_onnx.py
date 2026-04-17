@@ -105,7 +105,7 @@ def main() -> None:
     clip_model.eval()
     clip_model = reparameterize_model(clip_model)
 
-    # replace_gelu_with_tanh_approx(clip_model)
+    # replace_gelu_with_tanh_approx(clip_model) # will make inference very slow
 
     image_encoder = OpenClipVisionEncoder(clip_model)
     text_encoder = OpenClipTextEncoder(clip_model)

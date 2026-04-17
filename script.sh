@@ -29,8 +29,8 @@ python pipeline/eval_remote.py --upload-dataset \
 python pipeline/eval_remote.py \
     --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
 
-python pipeline/eval_remote.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0 \
-    --image-compiled-id jgj08q2xp --text-compiled-id jpernyw1g
+python pipeline/eval_remote.py --model-name MobileCLIP2-S2_260418 \
+    --image-compiled-id jpx7z411g --text-compiled-id j5mwlmzwp
 
 python pipeline/eval_remote.py --model-name MobileCLIP2-S2 \
     --image-compiled-id j57je47v5 --text-compiled-id jp27rwvr5
