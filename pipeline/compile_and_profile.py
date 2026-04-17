@@ -82,20 +82,25 @@ def main():
 
     target_device = qai_hub.Device("XR2 Gen 2 (Proxy)")
 
-    # Submit compilation jobs
+    # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")
-    img_id = compile_model(
-        model=onnx_img_model,
-        name=model_name + f"_image_encoder{postfix}",
-        device=target_device,
-        input_specs={"image": (1, 3, 224, 224)},
-    )
-    txt_id = compile_model(
-        model=onnx_txt_model,
-        name=model_name + f"_text_encoder{postfix}",
-        device=target_device,
-        input_specs={"text": ((1, 77), "int64")},
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        img_compile_future = executor.submit(
+            compile_model,
+            onnx_img_model,
+            model_name + f"_image_encoder{postfix}",
+            target_device,
+            {"image": (1, 3, 224, 224)},
+        )
+        txt_compile_future = executor.submit(
+            compile_model,
+            onnx_txt_model,
+            model_name + f"_text_encoder{postfix}",
+            target_device,
+            {"text": ((1, 77), "int64")},
+        )
+        img_id = img_compile_future.result()
+        txt_id = txt_compile_future.result()
 
     print(f"Image compilation job ID: {img_id}")
     print(f"Text compilation job ID: {txt_id}")

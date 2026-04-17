@@ -673,7 +673,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=1e-6)
     parser.add_argument("--weight-decay", type=float, default=0.2)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--warmup-steps", type=int, default=100)
