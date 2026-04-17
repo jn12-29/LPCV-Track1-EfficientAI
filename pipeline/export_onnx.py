@@ -157,7 +157,7 @@ def main() -> None:
             verbose=False,
             export_params=True,
             training=torch.onnx.TrainingMode.EVAL,
-            dynamo=True,
+            # dynamo=True,
         )
         _simplify(image_onnx_path)
         verify_onnx(image_onnx_path, {"image": dummy_image_input}, pt_img_feat)
@@ -176,7 +176,7 @@ def main() -> None:
             verbose=False,
             export_params=True,
             training=torch.onnx.TrainingMode.EVAL,
-            dynamo=True,
+            # dynamo=True,
         )
         _simplify(text_onnx_path)
         verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
