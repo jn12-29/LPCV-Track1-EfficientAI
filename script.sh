@@ -6,23 +6,20 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2
 python pipeline/export_onnx.py --model-name MobileCLIP2-S3
 
-python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260415_005500/MobileCLIP2-S2_finetuned.pt --output-postfix _bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0
+python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_174031/MobileCLIP2-S2_finetuned.pt --output-postfix _bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0
+
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs64_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260415_012251/MobileCLIP2-S2_finetuned.pt
-
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260415_005500/MobileCLIP2-S2_finetuned.pt
-
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs250_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260415_013254/MobileCLIP2-S2_finetuned.pt
+python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_174031/MobileCLIP2-S2_finetuned.pt
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -32,8 +29,8 @@ python pipeline/eval_remote.py --upload-dataset \
 python pipeline/eval_remote.py \
     --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
 
-python pipeline/eval_remote.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0 \
-    --image-compiled-id j5q7ly0mg --text-compiled-id jgl0yx4lg
+python pipeline/eval_remote.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0 \
+    --image-compiled-id jgj08q2xp --text-compiled-id jpernyw1g
 
 python pipeline/eval_remote.py --model-name MobileCLIP2-S2 \
     --image-compiled-id j57je47v5 --text-compiled-id jp27rwvr5
@@ -50,13 +47,13 @@ python pipeline/eval_remote.py \
 
 # fine-tune
 python train/finetune.py \
-    --jsonl-path ./build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 0 --batch-size 256 --epochs 20
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --gpu-ids 5 --batch-size 256 --accum-freq 50 --epochs 20 --lr 1e-6
 
 # fine-tune (multi-GPU DDP)
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
-    --jsonl-path ./build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 0,1,2,3 --batch-size 250 --epochs 20
+OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --gpu-ids 5,7 --batch-size 256 --accum-freq 32  --epochs 400 --lr 1e-6
 
 # analyze hard negatives
 python train/analyze_hard_negatives.py \

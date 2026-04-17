@@ -5,6 +5,9 @@ numpy
 scikit-learn
 qai_hub
 qai_hub_models
+onnx<1.19
+onnxruntime<1.23
+onnxsim
 onnxscript
 open_clip_torch
 matplotlib

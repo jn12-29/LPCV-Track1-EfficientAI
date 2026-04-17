@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -9,7 +10,9 @@ import argparse
 import os
 
 import numpy as np
+import onnx
 import onnxruntime as ort
+import onnxsim
 import torch
 import torch.nn as nn
 from timm.utils import reparameterize_model
@@ -74,6 +77,13 @@ def verify_onnx(
         )
 
 
+def replace_gelu_with_tanh_approx(model: nn.Module) -> None:
+    for parent in model.modules():
+        for name, child in parent.named_children():
+            if isinstance(child, nn.GELU) and child.approximate == "none":
+                setattr(parent, name, nn.GELU(approximate="tanh"))
+
+
 def main() -> None:
     args = parse_args()
 
@@ -96,6 +106,8 @@ def main() -> None:
     clip_model.eval()
     clip_model = reparameterize_model(clip_model)
 
+    replace_gelu_with_tanh_approx(clip_model)
+
     image_encoder = OpenClipVisionEncoder(clip_model)
     text_encoder = OpenClipTextEncoder(clip_model)
     image_encoder.eval()
@@ -114,39 +126,58 @@ def main() -> None:
     image_onnx_path = os.path.join(output_dir_name, "image_encoder.onnx")
     text_onnx_path = os.path.join(output_dir_name, "text_encoder.onnx")
 
-    print(f"\nExporting Image Encoder to {image_onnx_path}...")
-    torch.onnx.export(
-        image_encoder,
-        dummy_image_input,
-        image_onnx_path,
-        input_names=["image"],
-        output_names=["embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-        dynamo=True,
-    )
-    verify_onnx(image_onnx_path, {"image": dummy_image_input}, pt_img_feat)
+    def _simplify(onnx_path: str) -> None:
+        model = onnx.load(onnx_path)
+        simplified, ok = onnxsim.simplify(model)
+        if ok:
+            onnx.save(simplified, onnx_path)
+            print(f"  Simplified: {onnx_path}")
+        else:
+            print(f"  Simplification failed (kept original): {onnx_path}")
 
-    print(f"\nExporting Text Encoder to {text_onnx_path}...")
-    torch.onnx.export(
-        text_encoder,
-        dummy_text_input,
-        text_onnx_path,
-        input_names=["text"],
-        output_names=["text_embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-        dynamo=True,
-    )
-    verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
+    def export_image():
+        print(f"\nExporting Image Encoder to {image_onnx_path}...")
+        torch.onnx.export(
+            image_encoder,
+            dummy_image_input,
+            image_onnx_path,
+            input_names=["image"],
+            output_names=["embedding"],
+            opset_version=18,
+            do_constant_folding=True,
+            dynamic_axes=None,
+            verbose=False,
+            export_params=True,
+            training=torch.onnx.TrainingMode.EVAL,
+            dynamo=True,
+        )
+        _simplify(image_onnx_path)
+        verify_onnx(image_onnx_path, {"image": dummy_image_input}, pt_img_feat)
+
+    def export_text():
+        print(f"\nExporting Text Encoder to {text_onnx_path}...")
+        torch.onnx.export(
+            text_encoder,
+            dummy_text_input,
+            text_onnx_path,
+            input_names=["text"],
+            output_names=["text_embedding"],
+            opset_version=18,
+            do_constant_folding=True,
+            dynamic_axes=None,
+            verbose=False,
+            export_params=True,
+            training=torch.onnx.TrainingMode.EVAL,
+            dynamo=True,
+        )
+        _simplify(text_onnx_path)
+        verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        img_future = executor.submit(export_image)
+        txt_future = executor.submit(export_text)
+        img_future.result()
+        txt_future.result()
 
     print("\nExport and verification complete.")
     if args.checkpoint_path:

@@ -334,7 +334,7 @@ def main():
         help="Skip image input — use annotations only (for non-vision models)",
     )
     ap.add_argument("--max_images", type=int, default=None)
-    ap.add_argument("--max_workers", type=int, default=16)
+    ap.add_argument("--max_workers", type=int, default=30)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--max_objects", type=int, default=40)
     ap.add_argument("--max_rels", type=int, default=30)
