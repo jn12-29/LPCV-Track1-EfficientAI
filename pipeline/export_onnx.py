@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -106,7 +105,7 @@ def main() -> None:
     clip_model.eval()
     clip_model = reparameterize_model(clip_model)
 
-    replace_gelu_with_tanh_approx(clip_model)
+    # replace_gelu_with_tanh_approx(clip_model)
 
     image_encoder = OpenClipVisionEncoder(clip_model)
     text_encoder = OpenClipTextEncoder(clip_model)
@@ -128,10 +127,19 @@ def main() -> None:
 
     def _simplify(onnx_path: str) -> None:
         model = onnx.load(onnx_path)
+        before_nodes = len(model.graph.node)
+        before_size = os.path.getsize(onnx_path) / 1024 / 1024
         simplified, ok = onnxsim.simplify(model)
         if ok:
             onnx.save(simplified, onnx_path)
-            print(f"  Simplified: {onnx_path}")
+            after_nodes = len(simplified.graph.node)
+            after_size = os.path.getsize(onnx_path) / 1024 / 1024
+            print(
+                f"  Simplified: nodes {before_nodes} → {after_nodes} "
+                f"({before_nodes - after_nodes:+d}), "
+                f"size {before_size:.2f} → {after_size:.2f} MB "
+                f"({after_size - before_size:+.2f} MB)"
+            )
         else:
             print(f"  Simplification failed (kept original): {onnx_path}")
 
@@ -173,11 +181,8 @@ def main() -> None:
         _simplify(text_onnx_path)
         verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        img_future = executor.submit(export_image)
-        txt_future = executor.submit(export_text)
-        img_future.result()
-        txt_future.result()
+    export_image()
+    export_text()
 
     print("\nExport and verification complete.")
     if args.checkpoint_path:
