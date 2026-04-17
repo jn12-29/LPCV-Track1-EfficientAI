@@ -322,6 +322,7 @@ def choose_texts(
 
 
 def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
+    # num_hard_negatives == 0: use all hard negatives in the record (dynamic per batch)
     def collate_fn(batch):
         images = torch.stack([item["image"] for item in batch], dim=0)
 
@@ -330,19 +331,21 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
         ]
         positive_tokens = tokenizer(positive_texts)
 
+        use_all = num_hard_negatives == 0
+        effective_count = (
+            max(len(item["hard_negatives"]) for item in batch)
+            if use_all
+            else num_hard_negatives
+        )
+
         hard_negative_texts = []
         hard_negative_mask = []
         for item in batch:
             negatives = item["hard_negatives"]
-            sampled = (
-                choose_texts(
-                    negatives,
-                    num_hard_negatives,
-                    text_sampling,
-                )
-                if negatives
-                else []
-            )
+            if use_all:
+                sampled = list(negatives)
+            else:
+                sampled = choose_texts(negatives, num_hard_negatives, text_sampling) if negatives else []
 
             row_texts = []
             row_mask = []
@@ -350,17 +353,17 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
                 row_texts.append(text)
                 row_mask.append(1.0)
 
-            while len(row_texts) < num_hard_negatives:
+            while len(row_texts) < effective_count:
                 row_texts.append("")
                 row_mask.append(0.0)
 
             hard_negative_texts.extend(row_texts)
             hard_negative_mask.append(row_mask)
 
-        if num_hard_negatives > 0:
+        if effective_count > 0:
             flat_negative_tokens = tokenizer(hard_negative_texts)
             negative_tokens = flat_negative_tokens.view(
-                len(batch), num_hard_negatives, -1
+                len(batch), effective_count, -1
             )
             negative_mask = torch.tensor(hard_negative_mask, dtype=torch.float32)
         else:
@@ -454,27 +457,57 @@ def plot_training_curves(
     hard_neg_loss = [row["train_hard_negative_loss"] for row in metrics_history]
     lr = [row["lr"] for row in metrics_history]
 
-    plt.figure(figsize=(12, 8))
+    C_CLIP = "#2563EB"
+    C_TOTAL = "#7C3AED"
+    C_HN = "#DC2626"
+    C_LR = "#D97706"
 
-    ax1 = plt.subplot(2, 1, 1)
-    ax1.plot(steps, total_loss, label="total_loss")
-    ax1.plot(steps, clip_loss, label="clip_loss")
-    ax1.plot(steps, hard_neg_loss, label="hard_negative_loss")
-    ax1.set_xlabel("global_step")
-    ax1.set_ylabel("loss")
-    ax1.set_title("Training Loss")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 9))
+    fig.patch.set_facecolor("#F8FAFC")
+    for ax in (ax1, ax2):
+        ax.set_facecolor("#F1F5F9")
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.spines[["left", "bottom"]].set_color("#CBD5E1")
+        ax.tick_params(colors="#475569", labelsize=10)
+        ax.grid(True, color="white", linewidth=1.2, alpha=0.9)
 
-    ax2 = plt.subplot(2, 1, 2)
-    ax2.plot(steps, lr, label="lr", color="tab:orange")
-    ax2.set_xlabel("global_step")
-    ax2.set_ylabel("learning_rate")
-    ax2.set_title("Learning Rate")
-    ax2.grid(True, alpha=0.3)
+    # --- Loss panel: clip/total on left axis, hard_neg on right axis ---
+    lns1 = ax1.plot(steps, clip_loss, color=C_CLIP, linewidth=1.8, label="CLIP loss")
+    lns2 = ax1.plot(steps, total_loss, color=C_TOTAL, linewidth=1.8,
+                    linestyle="--", label="Total loss")
+    ax1.set_ylabel("CLIP / Total loss", color="#334155", fontsize=11, labelpad=8)
+    ax1.tick_params(axis="y", colors="#334155")
 
-    plt.tight_layout()
-    plt.savefig(output_dir / "training_curves.png", dpi=160)
+    ax1r = ax1.twinx()
+    ax1r.set_facecolor("#F1F5F9")
+    lns3 = ax1r.plot(steps, hard_neg_loss, color=C_HN, linewidth=1.8,
+                     alpha=0.85, label="Hard-neg loss")
+    ax1r.set_ylabel("Hard-neg loss", color=C_HN, fontsize=11, labelpad=8)
+    ax1r.tick_params(axis="y", colors=C_HN, labelsize=10)
+    ax1r.spines[["top", "left"]].set_visible(False)
+    ax1r.spines["right"].set_color(C_HN)
+
+    all_lines = lns1 + lns2 + lns3
+    ax1.legend(all_lines, [l.get_label() for l in all_lines],
+               loc="upper right", framealpha=0.85, fontsize=10,
+               edgecolor="#CBD5E1")
+    ax1.set_title("Training Loss", fontsize=13, fontweight="bold",
+                  color="#1E293B", pad=10)
+    ax1.set_xlabel("Epoch", color="#475569", fontsize=11)
+
+    # --- LR panel ---
+    ax2.plot(steps, lr, color=C_LR, linewidth=1.8)
+    ax2.set_ylabel("Learning rate", color="#334155", fontsize=11, labelpad=8)
+    ax2.set_xlabel("Epoch", color="#475569", fontsize=11)
+    ax2.set_title("Learning Rate Schedule", fontsize=13, fontweight="bold",
+                  color="#1E293B", pad=10)
+    ax2.yaxis.set_major_formatter(
+        plt.FuncFormatter(lambda v, _: f"{v:.2e}")
+    )
+
+    plt.tight_layout(pad=2.5)
+    plt.savefig(output_dir / "training_curves.png", dpi=180, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
     plt.close()
 
 
@@ -694,7 +727,12 @@ def parse_args() -> argparse.Namespace:
         choices=["random", "first"],
     )
 
-    parser.add_argument("--num-hard-negatives", type=int, default=4)
+    parser.add_argument(
+        "--num-hard-negatives",
+        type=int,
+        default=0,
+        help="Hard negatives per image per iter. 0 = use all (dynamic per batch).",
+    )
     parser.add_argument("--hard-negative-weight", type=float, default=0.5)
     parser.add_argument("--hard-negative-margin", type=float, default=0.2)
     parser.add_argument(
