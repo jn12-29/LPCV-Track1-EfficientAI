@@ -6,20 +6,20 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2
 python pipeline/export_onnx.py --model-name MobileCLIP2-S3
 
-python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_174031/MobileCLIP2-S2_finetuned.pt --output-postfix _bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0
+python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt --output-postfix _260418  
 
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260418
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_174031/MobileCLIP2-S2_finetuned.pt
+python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
