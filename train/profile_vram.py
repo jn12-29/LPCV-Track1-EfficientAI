@@ -19,7 +19,7 @@ import open_clip
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.clip_utils import _load_clip
-from train.finetune import SigLipLoss
+from train.loss import SigLipLoss
 
 
 def make_fake_batch(batch_size: int, num_hard_negatives: int, device: torch.device):
