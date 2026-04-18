@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.amp import GradScaler, autocast
@@ -248,7 +249,9 @@ class ContrastiveRecordDataset(Dataset):
 
     def _load_records(self) -> List[Dict[str, object]]:
         records = []
-        rng = random.Random(self.shuffle_seed) if self.shuffle_seed is not None else None
+        rng = (
+            random.Random(self.shuffle_seed) if self.shuffle_seed is not None else None
+        )
         with self.jsonl_path.open("r", encoding="utf-8") as f:
             for line_idx, line in enumerate(f, start=1):
                 record = json.loads(line)
@@ -345,7 +348,11 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
             if use_all:
                 sampled = list(negatives)
             else:
-                sampled = choose_texts(negatives, num_hard_negatives, text_sampling) if negatives else []
+                sampled = (
+                    choose_texts(negatives, num_hard_negatives, text_sampling)
+                    if negatives
+                    else []
+                )
 
             row_texts = []
             row_mask = []
@@ -362,9 +369,7 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
 
         if effective_count > 0:
             flat_negative_tokens = tokenizer(hard_negative_texts)
-            negative_tokens = flat_negative_tokens.view(
-                len(batch), effective_count, -1
-            )
+            negative_tokens = flat_negative_tokens.view(len(batch), effective_count, -1)
             negative_mask = torch.tensor(hard_negative_mask, dtype=torch.float32)
         else:
             negative_tokens = torch.empty((len(batch), 0, 77), dtype=torch.long)
@@ -429,6 +434,59 @@ def compute_hard_negative_loss(
     raise ValueError(f"Unsupported hard negative loss strategy: {strategy}")
 
 
+class SigLipLoss(nn.Module):
+    """Sigmoid pairwise loss (SigLIP). Hard negatives are included directly in the
+    text feature matrix as additional negative targets — no separate loss term needed.
+    """
+
+    def __init__(self, rank: int = 0, world_size: int = 1):
+        super().__init__()
+        self.rank = rank
+        self.world_size = world_size
+        # Bias initialized to -10 per original SigLIP paper
+        self.logit_bias = nn.Parameter(torch.tensor(-10.0))
+
+    def forward(
+        self,
+        image_features: torch.Tensor,
+        text_features: torch.Tensor,
+        logit_scale: torch.Tensor,
+        extra_text_features: Optional[torch.Tensor] = None,
+        extra_text_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        img = F.normalize(image_features, dim=-1)
+        txt = F.normalize(text_features, dim=-1)
+        n = img.shape[0]
+
+        if extra_text_features is not None and extra_text_mask is not None:
+            # extra_text_features: (N, K, D), extra_text_mask: (N, K) float 1/0
+            extra = F.normalize(extra_text_features, dim=-1)
+            K = extra.shape[1]
+            flat_extra = extra.view(-1, extra.shape[-1])  # (N*K, D)
+            all_txt = torch.cat([txt, flat_extra], dim=0)  # (N+N*K, D)
+
+            logits = logit_scale * img @ all_txt.T + self.logit_bias  # (N, N+N*K)
+
+            # Positive pairs: diagonal of the first N columns
+            labels_sq = torch.full((n, n), -1.0, device=img.device)
+            labels_sq.fill_diagonal_(1.0)
+            labels_hn = torch.full((n, n * K), -1.0, device=img.device)
+            labels = torch.cat([labels_sq, labels_hn], dim=1)
+
+            # Exclude padding hard negatives from loss
+            flat_mask = extra_text_mask.view(1, -1).expand(n, -1)  # (N, N*K)
+            loss_mask = torch.cat(
+                [torch.ones(n, n, device=img.device), flat_mask], dim=1
+            )
+
+            loss = -F.logsigmoid(labels * logits)
+            return (loss * loss_mask).sum() / loss_mask.sum().clamp_min(1.0)
+
+        logits = logit_scale * img @ txt.T + self.logit_bias
+        labels = 2 * torch.eye(n, device=img.device) - 1
+        return -F.logsigmoid(labels * logits).mean()
+
+
 def append_metrics_row(csv_path: Path, row: MetricsRow) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     file_exists = csv_path.exists()
@@ -445,9 +503,7 @@ def append_metrics_jsonl(jsonl_path: Path, row: MetricsRow) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def plot_training_curves(
-    metrics_history: List[MetricsRow], output_dir: Path
-) -> None:
+def plot_training_curves(metrics_history: List[MetricsRow], output_dir: Path) -> None:
     if not metrics_history:
         return
 
@@ -473,41 +529,66 @@ def plot_training_curves(
 
     # --- Loss panel: clip/total on left axis, hard_neg on right axis ---
     lns1 = ax1.plot(steps, clip_loss, color=C_CLIP, linewidth=1.8, label="CLIP loss")
-    lns2 = ax1.plot(steps, total_loss, color=C_TOTAL, linewidth=1.8,
-                    linestyle="--", label="Total loss")
+    lns2 = ax1.plot(
+        steps,
+        total_loss,
+        color=C_TOTAL,
+        linewidth=1.8,
+        linestyle="--",
+        label="Total loss",
+    )
     ax1.set_ylabel("CLIP / Total loss", color="#334155", fontsize=11, labelpad=8)
     ax1.tick_params(axis="y", colors="#334155")
 
     ax1r = ax1.twinx()
     ax1r.set_facecolor("#F1F5F9")
-    lns3 = ax1r.plot(steps, hard_neg_loss, color=C_HN, linewidth=1.8,
-                     alpha=0.85, label="Hard-neg loss")
+    lns3 = ax1r.plot(
+        steps,
+        hard_neg_loss,
+        color=C_HN,
+        linewidth=1.8,
+        alpha=0.85,
+        label="Hard-neg loss",
+    )
     ax1r.set_ylabel("Hard-neg loss", color=C_HN, fontsize=11, labelpad=8)
     ax1r.tick_params(axis="y", colors=C_HN, labelsize=10)
     ax1r.spines[["top", "left"]].set_visible(False)
     ax1r.spines["right"].set_color(C_HN)
 
     all_lines = lns1 + lns2 + lns3
-    ax1.legend(all_lines, [l.get_label() for l in all_lines],
-               loc="upper right", framealpha=0.85, fontsize=10,
-               edgecolor="#CBD5E1")
-    ax1.set_title("Training Loss", fontsize=13, fontweight="bold",
-                  color="#1E293B", pad=10)
+    ax1.legend(
+        all_lines,
+        [l.get_label() for l in all_lines],
+        loc="upper right",
+        framealpha=0.85,
+        fontsize=10,
+        edgecolor="#CBD5E1",
+    )
+    ax1.set_title(
+        "Training Loss", fontsize=13, fontweight="bold", color="#1E293B", pad=10
+    )
     ax1.set_xlabel("Epoch", color="#475569", fontsize=11)
 
     # --- LR panel ---
     ax2.plot(steps, lr, color=C_LR, linewidth=1.8)
     ax2.set_ylabel("Learning rate", color="#334155", fontsize=11, labelpad=8)
     ax2.set_xlabel("Epoch", color="#475569", fontsize=11)
-    ax2.set_title("Learning Rate Schedule", fontsize=13, fontweight="bold",
-                  color="#1E293B", pad=10)
-    ax2.yaxis.set_major_formatter(
-        plt.FuncFormatter(lambda v, _: f"{v:.2e}")
+    ax2.set_title(
+        "Learning Rate Schedule",
+        fontsize=13,
+        fontweight="bold",
+        color="#1E293B",
+        pad=10,
     )
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.2e}"))
 
     plt.tight_layout(pad=2.5)
-    plt.savefig(output_dir / "training_curves.png", dpi=180, bbox_inches="tight",
-                facecolor=fig.get_facecolor())
+    plt.savefig(
+        output_dir / "training_curves.png",
+        dpi=180,
+        bbox_inches="tight",
+        facecolor=fig.get_facecolor(),
+    )
     plt.close()
 
 
@@ -544,7 +625,8 @@ def train_one_epoch(
     optimizer,
     scheduler,
     scaler,
-    clip_loss_fn,
+    loss_fn,
+    loss_type: str,
     device: torch.device,
     epoch: int,
     global_step: int,
@@ -579,35 +661,62 @@ def train_one_epoch(
             image_features, positive_features, logit_scale = model(
                 images, positive_tokens
             )
-            clip_loss = clip_loss_fn(image_features, positive_features, logit_scale)
 
-            image_features = F.normalize(image_features, dim=-1)
-            positive_features = F.normalize(positive_features, dim=-1)
-            positive_scores = (image_features * positive_features).sum(dim=-1)
-
-            if negative_tokens.numel() > 0:
-                flat_negative_tokens = negative_tokens.view(
-                    -1, negative_tokens.shape[-1]
+            if loss_type == "siglip":
+                negative_features_3d: Optional[torch.Tensor] = None
+                if negative_tokens.numel() > 0:
+                    flat_negative_tokens = negative_tokens.view(
+                        -1, negative_tokens.shape[-1]
+                    )
+                    _, flat_negative_features, _ = model(text=flat_negative_tokens)
+                    negative_features_3d = flat_negative_features.view(
+                        negative_tokens.shape[0],
+                        negative_tokens.shape[1],
+                        -1,
+                    )
+                main_loss = loss_fn(
+                    image_features,
+                    positive_features,
+                    logit_scale,
+                    extra_text_features=negative_features_3d,
+                    extra_text_mask=(
+                        negative_mask if negative_features_3d is not None else None
+                    ),
                 )
-                _, flat_negative_features, _ = model(text=flat_negative_tokens)
-                flat_negative_features = F.normalize(flat_negative_features, dim=-1)
-                negative_features = flat_negative_features.view(
-                    negative_tokens.shape[0],
-                    negative_tokens.shape[1],
-                    -1,
-                )
-                hard_negative_loss = compute_hard_negative_loss(
-                    image_features=image_features,
-                    negative_features=negative_features,
-                    negative_mask=negative_mask,
-                    positive_scores=positive_scores,
-                    margin=hard_negative_margin,
-                    strategy=hard_negative_loss_type,
-                )
+                clip_loss = main_loss
+                hard_negative_loss = main_loss.new_zeros(())
+                total_loss = main_loss
             else:
-                hard_negative_loss = clip_loss.new_zeros(())
+                clip_loss = loss_fn(image_features, positive_features, logit_scale)
 
-            total_loss = clip_loss + hard_negative_weight * hard_negative_loss
+                image_features = F.normalize(image_features, dim=-1)
+                positive_features = F.normalize(positive_features, dim=-1)
+                positive_scores = (image_features * positive_features).sum(dim=-1)
+
+                if negative_tokens.numel() > 0:
+                    flat_negative_tokens = negative_tokens.view(
+                        -1, negative_tokens.shape[-1]
+                    )
+                    _, flat_negative_features, _ = model(text=flat_negative_tokens)
+                    flat_negative_features = F.normalize(flat_negative_features, dim=-1)
+                    negative_features = flat_negative_features.view(
+                        negative_tokens.shape[0],
+                        negative_tokens.shape[1],
+                        -1,
+                    )
+                    hard_negative_loss = compute_hard_negative_loss(
+                        image_features=image_features,
+                        negative_features=negative_features,
+                        negative_mask=negative_mask,
+                        positive_scores=positive_scores,
+                        margin=hard_negative_margin,
+                        strategy=hard_negative_loss_type,
+                    )
+                else:
+                    hard_negative_loss = clip_loss.new_zeros(())
+
+                total_loss = clip_loss + hard_negative_weight * hard_negative_loss
+
             loss_for_backward = total_loss / accum_freq
 
         scaler.scale(loss_for_backward).backward()
@@ -629,7 +738,9 @@ def train_one_epoch(
         running_clip_loss += clip_loss.item()
         running_hard_negative_loss += hard_negative_loss.item()
 
-        if is_main_process and (batch_idx % log_every_n_steps == 0 or batch_idx == num_batches):
+        if is_main_process and (
+            batch_idx % log_every_n_steps == 0 or batch_idx == num_batches
+        ):
             elapsed = time.time() - start_time
             throughput = (batch_idx * images.shape[0]) / max(elapsed, 1e-6)
             current_lr = scheduler.get_last_lr()[0]
@@ -713,7 +824,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--accum-freq", type=int, default=1)
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--grad-checkpointing", action="store_true")
-    parser.add_argument("--log-every-n-steps", type=int, default=20)
+    parser.add_argument("--log-every-n-steps", type=int, default=10)
     parser.add_argument("--save-every-epoch", action="store_true")
 
     parser.add_argument("--max-records", type=int, default=None)
@@ -733,7 +844,16 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Hard negatives per image per iter. 0 = use all (dynamic per batch).",
     )
-    parser.add_argument("--hard-negative-weight", type=float, default=0.5)
+    parser.add_argument(
+        "--loss-type",
+        type=str,
+        default="clip",
+        choices=["clip", "siglip"],
+        help="clip: InfoNCE + separate hard-negative loss; siglip: sigmoid pairwise loss "
+        "(hard negatives absorbed into the main loss matrix, --hard-negative-weight and "
+        "--hard-negative-margin are ignored).",
+    )
+    parser.add_argument("--hard-negative-weight", type=float, default=1.0)
     parser.add_argument("--hard-negative-margin", type=float, default=0.2)
     parser.add_argument(
         "--hard-negative-loss-type",
@@ -837,7 +957,9 @@ def run_training(args: argparse.Namespace) -> None:
                 run_name=run_name,
             )
         run_config["num_records"] = len(train_dataset)
-        run_config["effective_global_batch_size"] = args.batch_size * max(args.accum_freq, 1) * world_size
+        run_config["effective_global_batch_size"] = (
+            args.batch_size * max(args.accum_freq, 1) * world_size
+        )
         if is_main_process:
             save_run_config(config_json_path, run_config)
             writer.add_text(
@@ -878,8 +1000,19 @@ def run_training(args: argparse.Namespace) -> None:
             ),
         )
 
+        if args.loss_type == "siglip":
+            loss_fn = SigLipLoss(rank=rank, world_size=world_size).to(device)
+            trainable_params = list(model.parameters()) + list(loss_fn.parameters())
+        else:
+            loss_fn = open_clip.ClipLoss(
+                cache_labels=True,
+                rank=rank,
+                world_size=world_size,
+            )
+            trainable_params = list(model.parameters())
+
         optimizer = optim.AdamW(
-            model.parameters(),
+            trainable_params,
             lr=args.lr,
             betas=(0.9, args.beta2),
             weight_decay=args.weight_decay,
@@ -894,11 +1027,6 @@ def run_training(args: argparse.Namespace) -> None:
             warmup_steps=args.warmup_steps,
         )
         scaler = GradScaler(device=device.type, enabled=device.type == "cuda")
-        clip_loss_fn = open_clip.ClipLoss(
-            cache_labels=True,
-            rank=rank,
-            world_size=world_size,
-        )
 
         metrics_history: List[MetricsRow] = []
         global_step = 0
@@ -915,7 +1043,8 @@ def run_training(args: argparse.Namespace) -> None:
                 optimizer=optimizer,
                 scheduler=scheduler,
                 scaler=scaler,
-                clip_loss_fn=clip_loss_fn,
+                loss_fn=loss_fn,
+                loss_type=args.loss_type,
                 device=device,
                 epoch=epoch,
                 global_step=global_step,
@@ -994,7 +1123,9 @@ def run_training(args: argparse.Namespace) -> None:
                 previous_latest_path = latest_path
 
                 if args.save_every_epoch:
-                    epoch_path = output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
+                    epoch_path = (
+                        output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
+                    )
                     save_checkpoint(
                         save_path=epoch_path,
                         model=model,

@@ -51,9 +51,19 @@ python train/finetune.py \
     --model-name MobileCLIP2-S2 --gpu-ids 5 --batch-size 256 --accum-freq 50 --epochs 20 --lr 1e-6
 
 # fine-tune (multi-GPU DDP)
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 5,7 --batch-size 256 --accum-freq 32  --epochs 400 --lr 1e-6
+    --model-name MobileCLIP2-S2 --gpu-ids 5,6 --batch-size 256 --accum-freq 32  --epochs 400 --lr 1e-6
+
+torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --gpu-ids 2,3,5,6 --batch-size 128 --accum-freq 32  --epochs 400 --lr 1e-6
+
+# fine-tune with SigLIP loss (hard negatives absorbed into sigmoid matrix)
+torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-S2 --gpu-ids 5,6 --batch-size 256 --accum-freq 32 --epochs 400 --lr 1e-6 \
+    --loss-type siglip --num-hard-negatives 4
 
 # analyze hard negatives
 python train/analyze_hard_negatives.py \
