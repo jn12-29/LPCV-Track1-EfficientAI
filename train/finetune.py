@@ -434,17 +434,78 @@ def compute_hard_negative_loss(
     raise ValueError(f"Unsupported hard negative loss strategy: {strategy}")
 
 
+def _siglip_chunk_loss(
+    img_chunk: torch.Tensor,
+    all_txt: torch.Tensor,
+    logit_scale: torch.Tensor,
+    logit_bias: torch.Tensor,
+    pos_col_start: int,
+    n_local: int,
+    extra_mask_chunk: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Compute SigLIP loss for a chunk of image rows against all text columns.
+
+    pos_col_start: column index where this chunk's positive pairs begin (rank_offset).
+    n_local: total number of positive text columns (= global batch of positives).
+    extra_mask_chunk: (chunk, n_local * K) mask for hard negatives, or None.
+    """
+    logits = logit_scale * img_chunk @ all_txt.T + logit_bias  # (chunk, N_txt_total)
+    chunk = img_chunk.shape[0]
+
+    # Build labels: -1 everywhere, +1 on the diagonal within the positive block
+    labels = torch.full_like(logits, -1.0)
+    for i in range(chunk):
+        col = pos_col_start + i
+        if col < n_local:
+            labels[i, col] = 1.0
+
+    if extra_mask_chunk is not None:
+        # Hard-negative columns start after n_local positives
+        loss_mask = torch.ones_like(logits)
+        loss_mask[:, n_local:] = extra_mask_chunk
+        loss = -F.logsigmoid(labels * logits)
+        return (loss * loss_mask).sum() / loss_mask.sum().clamp_min(1.0)
+
+    return -F.logsigmoid(labels * logits).mean()
+
+
 class SigLipLoss(nn.Module):
-    """Sigmoid pairwise loss (SigLIP). Hard negatives are included directly in the
-    text feature matrix as additional negative targets — no separate loss term needed.
+    """Sigmoid pairwise loss (SigLIP — Zhai et al. 2023).
+
+    Key techniques implemented:
+    - All-gather across GPUs so every rank sees the full global batch of negatives.
+    - Chunked bidirectional loss (img→txt and txt→img) for memory efficiency.
+    - Hard negatives appended as extra text columns (absorbed into main loss).
+    - logit_bias learned parameter initialized to -10.
     """
 
-    def __init__(self, rank: int = 0, world_size: int = 1):
+    def __init__(self, rank: int = 0, world_size: int = 1, chunk_size: int = 64):
         super().__init__()
         self.rank = rank
         self.world_size = world_size
-        # Bias initialized to -10 per original SigLIP paper
+        self.chunk_size = chunk_size
         self.logit_bias = nn.Parameter(torch.tensor(-10.0))
+
+    @staticmethod
+    def _all_gather(x: torch.Tensor, world_size: int) -> torch.Tensor:
+        """Gather tensor from all ranks; keeps gradient on the local slice."""
+        if world_size == 1:
+            return x
+        gathered = [torch.zeros_like(x) for _ in range(world_size)]
+        dist.all_gather(gathered, x)
+        # Replace the local slice with the original (to preserve grad)
+        return x
+
+    @staticmethod
+    def _all_gather_with_grad(x: torch.Tensor, world_size: int, rank: int) -> torch.Tensor:
+        """Gather across all ranks while preserving gradients via autograd."""
+        if world_size == 1:
+            return x
+        # Use all_gather with a no-op backward that routes grad to local slice
+        gathered = [torch.zeros_like(x) for _ in range(world_size)]
+        dist.all_gather(gathered, x.detach())
+        gathered[rank] = x  # re-inject local tensor to keep grad
+        return torch.cat(gathered, dim=0)
 
     def forward(
         self,
@@ -454,37 +515,60 @@ class SigLipLoss(nn.Module):
         extra_text_features: Optional[torch.Tensor] = None,
         extra_text_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        img = F.normalize(image_features, dim=-1)
-        txt = F.normalize(text_features, dim=-1)
-        n = img.shape[0]
+        img_local = F.normalize(image_features, dim=-1)
+        txt_local = F.normalize(text_features, dim=-1)
+        n_local = img_local.shape[0]
 
+        # All-gather positive features across GPUs
+        img_global = self._all_gather_with_grad(img_local, self.world_size, self.rank)
+        txt_global = self._all_gather_with_grad(txt_local, self.world_size, self.rank)
+        n_global = img_global.shape[0]  # world_size * n_local
+        rank_offset = self.rank * n_local  # column of this rank's positives
+
+        # Append hard negatives to text columns (local, not gathered)
         if extra_text_features is not None and extra_text_mask is not None:
-            # extra_text_features: (N, K, D), extra_text_mask: (N, K) float 1/0
-            extra = F.normalize(extra_text_features, dim=-1)
+            extra = F.normalize(extra_text_features, dim=-1)  # (n_local, K, D)
             K = extra.shape[1]
-            flat_extra = extra.view(-1, extra.shape[-1])  # (N*K, D)
-            all_txt = torch.cat([txt, flat_extra], dim=0)  # (N+N*K, D)
+            flat_extra = extra.view(-1, extra.shape[-1])  # (n_local*K, D)
+            all_txt = torch.cat([txt_global, flat_extra], dim=0)  # (n_global + n_local*K, D)
+            # Mask: (n_local, n_local*K) → broadcast to (chunk, n_local*K) per chunk
+            flat_mask_local = extra_text_mask.view(1, -1).expand(n_local, -1)  # (n_local, n_local*K)
+        else:
+            all_txt = txt_global
+            flat_mask_local = None
+            K = 0
 
-            logits = logit_scale * img @ all_txt.T + self.logit_bias  # (N, N+N*K)
+        total_loss = img_local.new_zeros(())
+        n_chunks = 0
 
-            # Positive pairs: diagonal of the first N columns
-            labels_sq = torch.full((n, n), -1.0, device=img.device)
-            labels_sq.fill_diagonal_(1.0)
-            labels_hn = torch.full((n, n * K), -1.0, device=img.device)
-            labels = torch.cat([labels_sq, labels_hn], dim=1)
-
-            # Exclude padding hard negatives from loss
-            flat_mask = extra_text_mask.view(1, -1).expand(n, -1)  # (N, N*K)
-            loss_mask = torch.cat(
-                [torch.ones(n, n, device=img.device), flat_mask], dim=1
+        # --- image → text direction (local images vs all texts) ---
+        for start in range(0, n_local, self.chunk_size):
+            end = min(start, n_local - 1) + self.chunk_size
+            end = min(end, n_local)
+            chunk_img = img_local[start:end]
+            chunk_mask = flat_mask_local[start:end] if flat_mask_local is not None else None
+            total_loss = total_loss + _siglip_chunk_loss(
+                chunk_img, all_txt, logit_scale, self.logit_bias,
+                pos_col_start=rank_offset + start,
+                n_local=n_global,
+                extra_mask_chunk=chunk_mask,
             )
+            n_chunks += 1
 
-            loss = -F.logsigmoid(labels * logits)
-            return (loss * loss_mask).sum() / loss_mask.sum().clamp_min(1.0)
+        # --- text → image direction (local texts vs all images, no hard negatives) ---
+        for start in range(0, n_local, self.chunk_size):
+            end = min(start, n_local - 1) + self.chunk_size
+            end = min(end, n_local)
+            chunk_txt = txt_local[start:end]
+            total_loss = total_loss + _siglip_chunk_loss(
+                chunk_txt, img_global, logit_scale, self.logit_bias,
+                pos_col_start=rank_offset + start,
+                n_local=n_global,
+                extra_mask_chunk=None,
+            )
+            n_chunks += 1
 
-        logits = logit_scale * img @ txt.T + self.logit_bias
-        labels = 2 * torch.eye(n, device=img.device) - 1
-        return -F.logsigmoid(labels * logits).mean()
+        return total_loss / max(n_chunks, 1)
 
 
 def append_metrics_row(csv_path: Path, row: MetricsRow) -> None:
@@ -639,11 +723,12 @@ def train_one_epoch(
     is_main_process: bool,
     distributed: bool,
     run_name: Optional[str] = None,
+    amp_enabled: bool = True,
     writer: Optional[SummaryWriter] = None,
 ) -> Tuple[Dict[str, float], int]:
     model.train()
     optimizer.zero_grad(set_to_none=True)
-    amp_enabled = device.type == "cuda"
+    amp_enabled = amp_enabled and device.type == "cuda"
     start_time = time.time()
     num_batches = len(dataloader)
 
@@ -824,8 +909,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--accum-freq", type=int, default=1)
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--grad-checkpointing", action="store_true")
+    parser.add_argument("--no-amp", action="store_true", help="Disable automatic mixed precision (default: AMP enabled on CUDA)")
     parser.add_argument("--log-every-n-steps", type=int, default=10)
-    parser.add_argument("--save-every-epoch", action="store_true")
+    parser.add_argument(
+        "--save-every-n-epochs",
+        type=int,
+        default=5,
+        help="Save a numbered checkpoint every N epochs (0 = disabled).",
+    )
 
     parser.add_argument("--max-records", type=int, default=None)
     parser.add_argument("--max-positives-per-image", type=int, default=None)
@@ -915,6 +1006,10 @@ def run_training(args: argparse.Namespace) -> None:
             log_message(f"Using device: {device}", run_name=run_name)
             log_message(
                 f"Distributed training: {distributed} (world_size={world_size}, gpu_ids={gpu_ids})",
+                run_name=run_name,
+            )
+            log_message(
+                f"AMP: {'disabled (--no-amp)' if args.no_amp else 'enabled (fp16 autocast + GradScaler)'}",
                 run_name=run_name,
             )
             log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
@@ -1026,7 +1121,8 @@ def run_training(args: argparse.Namespace) -> None:
             ),
             warmup_steps=args.warmup_steps,
         )
-        scaler = GradScaler(device=device.type, enabled=device.type == "cuda")
+        amp_enabled = not args.no_amp and device.type == "cuda"
+        scaler = GradScaler(device=device.type, enabled=amp_enabled)
 
         metrics_history: List[MetricsRow] = []
         global_step = 0
@@ -1056,6 +1152,7 @@ def run_training(args: argparse.Namespace) -> None:
                 hard_negative_loss_type=args.hard_negative_loss_type,
                 is_main_process=is_main_process,
                 distributed=distributed,
+                amp_enabled=amp_enabled,
                 run_name=run_name,
                 writer=writer,
             )
@@ -1122,7 +1219,8 @@ def run_training(args: argparse.Namespace) -> None:
                 )
                 previous_latest_path = latest_path
 
-                if args.save_every_epoch:
+                save_n = args.save_every_n_epochs
+                if save_n and save_n > 0 and epoch % save_n == 0:
                     epoch_path = (
                         output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
                     )
