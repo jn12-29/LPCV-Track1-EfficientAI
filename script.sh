@@ -8,18 +8,22 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-S3
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt --output-postfix _260418  
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc16_hn4_hnw1_seed0__20260419_010101/checkpoint_latest_epoch_045.pt --output-postfix _260419
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3
 
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260418
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260419
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt
+
+CUDA_VISIBLE_DEVICES=0 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc16_hn4_hnw1_seed0__20260419_010101/checkpoint_latest_epoch_044.pt
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -60,12 +64,12 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=295
     --model-name MobileCLIP2-S2 --gpu-ids 2,3,5,6 --batch-size 128 --accum-freq 32  --epochs 400 --lr 1e-6
 
 # fine-tune with SigLIP loss (hard negatives absorbed into sigmoid matrix)
-torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 5,6 --batch-size 256 --accum-freq 32 --epochs 400 --lr 1e-6 \
+    --model-name MobileCLIP2-S2 --gpu-ids 2,3,5,6 --batch-size 256 --accum-freq 16 --epochs 400 --lr 1e-6 \
     --loss-type siglip --num-hard-negatives 4
 
 # analyze hard negatives
 python train/analyze_hard_negatives.py \
-    --jsonl-path ./build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S0
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-S2
