@@ -93,12 +93,12 @@ def plot_training_curves(metrics_history: List[MetricsRow], output_dir: Path) ->
     ax1.set_title(
         "Training Loss", fontsize=13, fontweight="bold", color="#1E293B", pad=10
     )
-    ax1.set_xlabel("Epoch", color="#475569", fontsize=11)
+    ax1.set_xlabel("Step", color="#475569", fontsize=11)
 
     # --- LR panel ---
     ax2.plot(steps, lr, color=C_LR, linewidth=1.8)
     ax2.set_ylabel("Learning rate", color="#334155", fontsize=11, labelpad=8)
-    ax2.set_xlabel("Epoch", color="#475569", fontsize=11)
+    ax2.set_xlabel("Step", color="#475569", fontsize=11)
     ax2.set_title(
         "Learning Rate Schedule",
         fontsize=13,
