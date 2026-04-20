@@ -9,6 +9,8 @@ pip install -r requirements.txt
 qai-hub configure  # requires API token from QAI Hub
 ```
 
+AIMET (for QAT) requires a separate wheel matched to your CUDA version — see comments in `requirements.txt`.
+
 Recommended environment variables:
 
 ```bash
@@ -29,93 +31,130 @@ export CUDA_VISIBLE_DEVICES=<gpu_id_or_gpu_list>
 
 ```bash
 # 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
-python mobileclipv2.py --model-name MobileCLIP2-S0
-
-# 1b. (Optional) Export quantized ONNX
-python mobileclipv2_quant.py --model-name MobileCLIP2-S0
+python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 
 # 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
-python compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
-
-# 2b. (Alternative) Remote quantization via QAI Hub
-python qai_quant_compile_profile.py
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
 
 # 3. Evaluate
-python eval_local.py --model-name MobileCLIP2-S0 --k 10   # PyTorch, local
+python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
 
-# Remote evaluation (three modes — see below)
-python eval_remote.py --upload-dataset \
-    --image-compiled-id <id> --text-compiled-id <id>       # Mode A: upload + infer
-python eval_remote.py \
-    --image-compiled-id <id> --text-compiled-id <id>       # Mode B: infer with existing dataset
-python eval_remote.py \
-    --image-inference-id <id> --text-inference-id <id>     # Mode C: reuse inference jobs
+# Remote evaluation (three modes):
+python pipeline/eval_remote.py --upload-dataset \
+    --image-compiled-id <id> --text-compiled-id <id>            # Mode A: upload + infer
+python pipeline/eval_remote.py \
+    --image-compiled-id <id> --text-compiled-id <id>            # Mode B: infer, existing dataset
+python pipeline/eval_remote.py \
+    --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
 ```
 
 Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
-## Training
+## Training (Fine-tuning)
 
-Run training and analysis from the repository root.
-
-The builder writes flat contrastive JSONL records consumed directly by `train/`:
+Run all training commands from the repository root. Flat contrastive JSONL format:
 
 ```json
 {"image_path": "build_datasets/data/VG_100K/107914.jpg", "positives": ["..."], "hard_negatives": ["..."]}
 ```
 
 ```bash
-# fine-tune MobileCLIP2 on builder output (single GPU)
+# Single GPU
 python train/finetune.py \
-    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
     --model-name MobileCLIP2-S2 --gpu-ids 0 --batch-size 256 --epochs 20
 
-# fine-tune with DDP on multiple GPUs selected by --gpu-ids
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
-    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
+# Multi-GPU DDP
+OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 \
+    train/finetune.py \
+    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
     --model-name MobileCLIP2-S2 --gpu-ids 0,1 --batch-size 256 --epochs 20
 
-# analyze positive vs hard-negative similarity distributions
-python train/analyze_hard_negatives.py \
-    --jsonl-path build_datasets/data/VG_100K_GEMINI31FLASHLITE_NEW/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S0
+# Resume from checkpoint
+python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_05.pt
 ```
 
-`train/finetune.py` reads the JSONL records as-is, samples one positive text and `--num-hard-negatives` hard negatives per image, and optimizes `CLIP loss + hard negative loss`.
+`--batch-size` is per-GPU. Effective global batch size = `batch_size × world_size × accum_freq`.
 
-`--batch-size` is per-GPU batch size. The effective global batch size is `batch_size * world_size * accum_freq`.
-
-For multi-GPU runs, prefer `torchrun --nnodes=1 --master_addr=127.0.0.1 --master_port=<port>` plus `--gpu-ids`. On this environment, `torchrun --standalone` may resolve the host name in a way that breaks local rendezvous. If `CUDA_VISIBLE_DEVICES` is also set, `--gpu-ids` refers to the GPUs visible to the current process.
-
-Each training run now writes into a structured subdirectory under `--output-dir`, for example `checkpoints/MobileCLIP2-S2__bs256_ep20_lr1e-05_wd0.2_acc1_hn4_hnw0.5_seed0__20260414_153000/`. The run directory includes `train.log`, `metrics.csv`, `metrics.jsonl`, `training_curves.png`, checkpoints named with epoch information such as `checkpoint_latest_epoch_03.pt` and `checkpoint_epoch_03.pt`, `run_config.json`, and TensorBoard event files under `tensorboard/`.
-
-To inspect TensorBoard logs:
+Each run writes into `checkpoints/<model>__<config>__<timestamp>/` containing `train.log`, `metrics.csv`, `metrics.jsonl`, `training_curves.png`, epoch-tagged checkpoints, `run_config.json`, and TensorBoard logs.
 
 ```bash
 tensorboard --logdir checkpoints
 ```
+
+## QAT (Quantization-Aware Training)
+
+QAT optimizes model weights under simulated int8 quantization using AIMET, reducing accuracy loss when QAI Hub compiles to QNN int8.
+
+```bash
+# QAT from pretrained weights (W8A8)
+python train/finetune.py \
+    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S0 --gpu-ids 0 --batch-size 64 --epochs 5 \
+    --qat-enabled --qat-weight-bw 8 --qat-act-bw 8 --qat-calib-batches 32
+
+# QAT from a regular finetune checkpoint (W8A16)
+python train/finetune.py \
+    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
+    --model-name MobileCLIP2-S0 --gpu-ids 0 --batch-size 64 --epochs 3 \
+    --resume checkpoints/.../checkpoint_epoch_20.pt \
+    --qat-enabled --qat-weight-bw 8 --qat-act-bw 16
+
+# Resume QAT from a QAT checkpoint (auto-detected, calibration skipped)
+python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_02.pt \
+    --qat-enabled
+
+# Also export ONNX at each numbered checkpoint
+python train/finetune.py ... --qat-enabled --export-onnx
+
+# Export ONNX from an existing QAT checkpoint
+python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
+    --checkpoint-path checkpoints/.../MobileCLIP2-S0_finetuned.pt
+```
+
+QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_encodings`) and are auto-detected on `--resume`.
 
 ## `eval_remote.py` Modes
 
 | Mode | Arguments | Description |
 |------|-----------|-------------|
 | **A** | `--upload-dataset` + compiled IDs | Upload local `sample_data` to QAI Hub, then submit inference |
-| **B** | compiled IDs only | Submit inference using existing dataset IDs (defaults: `d2qe36jl2` / `d95k6jwm9`) |
+| **B** | compiled IDs only | Submit inference using existing dataset IDs |
 | **C** | inference IDs | Download outputs from already-completed inference jobs |
-
-Optional overrides for Mode B: `--image-dataset-id`, `--text-dataset-id`.
 
 ## Architecture
 
-### Core modules
+### Shared utilities (`utils/`)
 
-- **`eval_local.py`** — defines `_load_clip()` (shared by all scripts), runs Recall@K evaluation with PyTorch. Exports `encode_images`, `encode_texts`, `evaluate_image_to_text_recall_at_k`.
-- **`eval_remote.py`** — unified remote evaluation: dataset upload, inference submission, and Recall@K computation. Replaces the former `eval_upload_dataset.py` and `eval_remote_eval_inference.py`.
-- **`eval_common.py`** — shared helpers: `load_ground_truth()`, `recall_at_k()`.
-- **`mobileclipv2.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder` nn.Module subclasses, exports to ONNX opset 18, verifies ONNX outputs against PyTorch.
-- **`mobileclipv2_quant.py`** — quantized ONNX export.
-- **`compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs.
-- **`qai_quant_compile_profile.py`** — remote quantization + compile + profile via QAI Hub.
+- **`utils/clip_utils.py`** — `_load_clip()`: canonical model loader. Supports regular and QAT checkpoints via `qat_config` parameter (auto-detects checkpoint type). MobileCLIP2-specific `image_mean/std=(0,0,0)/(1,1,1)`.
+- **`utils/qat_utils.py`** — `QATConfig` dataclass; `wrap_model_for_qat()` (reparameterize + AIMET QuantSim), `calibrate_quantsim()`, `get_qat_encodings_json()`, `extract_base_model_state_dict()`.
+- **`utils/preprocess.py`** — `preprocess_image()`: resize 224×224, divide by 255, return `(3,224,224)` float32. No mean/std normalization.
+- **`utils/data_utils.py`** — `_batched`, `recall_at_k`, CSV loaders, `load_ground_truth`.
+
+### Pipeline (`pipeline/`)
+
+- **`pipeline/export_onnx.py`** — exports image/text encoders to ONNX opset 18; exposes `export_encoders_to_onnx()` for reuse. Supports regular and QAT checkpoints via `--checkpoint-path`.
+- **`pipeline/compile_and_profile.py`** — submits ONNX to QAI Hub (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results.
+- **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
+- **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference, Recall@K. Three modes: A/B/C.
+- **`pipeline/dataset.py`** — `RetrievalEvalDataset` and `ImageTextRetrievalDataset`.
+
+### Training (`train/`)
+
+- **`train/finetune.py`** — CLI entry point. Args: model, data, optimizer, loss, DDP, QAT (`--qat-*`), resume (`--resume`), export (`--export-onnx`).
+- **`train/trainer.py`** — `run_training()`: model load → dataset → QAT calibration → DDP wrap → training loop → export.
+- **`train/train_step.py`** — `train_one_epoch()`.
+- **`train/loss.py`** — CLIP InfoNCE + hard-negative loss; SigLIP loss.
+- **`train/data.py`** — `ContrastiveRecordDataset`, `create_collate_fn()`.
+- **`train/train_utils.py`** — `save_checkpoint()` (QAT-aware), logging, metrics helpers.
+- **`train/optim.py`** — AdamW + cosine scheduler with warmup.
+- **`train/distributed.py`** — DDP init, seed management.
+- **`train/metrics.py`** — CSV/JSONL metrics and training curve plots.
+- **`train/analyze_hard_negatives.py`** — similarity distribution analysis.
+
+### Dataset builder (`build_datasets/`)
+
+Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Config and prompts in `DEFINE.py`; builder in `vlm_dataset_builder.py`. Output: `dataset_raw_contrastive.jsonl`.
 
 ### Sample dataset layout
 
@@ -137,13 +176,10 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 - Image input spec: `(1, 3, 224, 224)` float32
 - Text input spec: `(1, 77)` int64
 
-### Dataset builder (`build_datasets/`)
-
-Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`. The main training artifact is `dataset_raw_contrastive.jsonl`, which is consumed directly by `train/finetune.py` and `train/analyze_hard_negatives.py`.
-
 ## Key Gotchas
 
-- `reparameterize_model()` from `timm.utils` must be called on the model before ONNX export.
-- The `TextEncoder` wrapper in `mobileclipv2.py` normalizes padding: tokens after the EOS position (argmax) are zeroed out to ensure consistent input regardless of tokenizer padding style.
-- QAI Hub auto-converts to fp16; `mobileclipv2_fp16.py` is a dead file.
-- The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` regardless of which MobileCLIP2 variant is used — all variants share the same tokenizer.
+- `reparameterize_model()` from `timm.utils` must be called before ONNX export — this folds multi-branch conv structures. For QAT, it is called automatically inside `wrap_model_for_qat()` before QuantSim creation.
+- For QAT checkpoints, the model must be reparameterized before QuantSim is created so the state dict key names match. `_load_clip()` handles this automatically.
+- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position to ensure consistent input regardless of tokenizer padding.
+- QAI Hub auto-converts to fp16 during compilation.
+- The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` for all MobileCLIP2 variants.

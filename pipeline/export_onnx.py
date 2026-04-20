@@ -83,110 +83,127 @@ def replace_gelu_with_tanh_approx(model: nn.Module) -> None:
                 setattr(parent, name, nn.GELU(approximate="tanh"))
 
 
-def main() -> None:
-    args = parse_args()
-
-    output_dir_name = f"exported_{args.model_name}_onnx"
-    if args.output_postfix:
-        output_dir_name = output_dir_name = (
-            f"exported_{args.model_name}{args.output_postfix}_onnx"
+def _simplify_onnx(onnx_path: str) -> None:
+    model = onnx.load(onnx_path)
+    before_nodes = len(model.graph.node)
+    before_size = os.path.getsize(onnx_path) / 1024 / 1024
+    simplified, ok = onnxsim.simplify(model)
+    if ok:
+        onnx.save(simplified, onnx_path)
+        after_nodes = len(simplified.graph.node)
+        after_size = os.path.getsize(onnx_path) / 1024 / 1024
+        print(
+            f"  Simplified: nodes {before_nodes} → {after_nodes} "
+            f"({before_nodes - after_nodes:+d}), "
+            f"size {before_size:.2f} → {after_size:.2f} MB "
+            f"({after_size - before_size:+.2f} MB)"
         )
     else:
-        output_dir_name = f"exported_{args.model_name}_onnx"
-    os.makedirs(output_dir_name, exist_ok=True)
-    print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
+        print(f"  Simplification failed (kept original): {onnx_path}")
 
-    device = torch.device("cpu")
-    clip_model, _, _ = _load_clip(
-        model_name=args.model_name,
-        device=device,
-        checkpoint_path=args.checkpoint_path,
-    )
-    clip_model.eval()
-    clip_model = reparameterize_model(clip_model)
 
-    # replace_gelu_with_tanh_approx(clip_model) # will make inference very slow
+def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
+    """Export image and text encoders to ONNX.
 
-    image_encoder = OpenClipVisionEncoder(clip_model)
-    text_encoder = OpenClipTextEncoder(clip_model)
-    image_encoder.eval()
-    text_encoder.eval()
+    clip_model must already be reparameterized and in eval mode.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    device = next(clip_model.parameters()).device
 
-    dummy_image_input = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
-    dummy_text_input = torch.randint(
-        0, 49408, (1, 77), dtype=torch.int64, device=device
-    )
+    image_encoder = OpenClipVisionEncoder(clip_model).eval()
+    text_encoder = OpenClipTextEncoder(clip_model).eval()
+
+    dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
+    dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
 
     print("\nCalculating PyTorch baseline outputs for validation...")
     with torch.no_grad():
-        pt_img_feat = image_encoder(dummy_image_input)
-        pt_txt_feat = text_encoder(dummy_text_input)
+        pt_img_feat = image_encoder(dummy_image).cpu()
+        pt_txt_feat = text_encoder(dummy_text).cpu()
 
-    image_onnx_path = os.path.join(output_dir_name, "image_encoder.onnx")
-    text_onnx_path = os.path.join(output_dir_name, "text_encoder.onnx")
+    image_onnx_path = os.path.join(output_dir, "image_encoder.onnx")
+    text_onnx_path = os.path.join(output_dir, "text_encoder.onnx")
 
-    def _simplify(onnx_path: str) -> None:
-        model = onnx.load(onnx_path)
-        before_nodes = len(model.graph.node)
-        before_size = os.path.getsize(onnx_path) / 1024 / 1024
-        simplified, ok = onnxsim.simplify(model)
-        if ok:
-            onnx.save(simplified, onnx_path)
-            after_nodes = len(simplified.graph.node)
-            after_size = os.path.getsize(onnx_path) / 1024 / 1024
-            print(
-                f"  Simplified: nodes {before_nodes} → {after_nodes} "
-                f"({before_nodes - after_nodes:+d}), "
-                f"size {before_size:.2f} → {after_size:.2f} MB "
-                f"({after_size - before_size:+.2f} MB)"
-            )
-        else:
-            print(f"  Simplification failed (kept original): {onnx_path}")
+    print(f"\nExporting Image Encoder to {image_onnx_path}...")
+    torch.onnx.export(
+        image_encoder.cpu(),
+        dummy_image.cpu(),
+        image_onnx_path,
+        input_names=["image"],
+        output_names=["embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+    )
+    _simplify_onnx(image_onnx_path)
+    verify_onnx(image_onnx_path, {"image": dummy_image.cpu()}, pt_img_feat)
 
-    def export_image():
-        print(f"\nExporting Image Encoder to {image_onnx_path}...")
-        torch.onnx.export(
-            image_encoder,
-            dummy_image_input,
-            image_onnx_path,
-            input_names=["image"],
-            output_names=["embedding"],
-            opset_version=18,
-            do_constant_folding=True,
-            dynamic_axes=None,
-            verbose=False,
-            export_params=True,
-            training=torch.onnx.TrainingMode.EVAL,
-            # dynamo=True,
+    print(f"\nExporting Text Encoder to {text_onnx_path}...")
+    torch.onnx.export(
+        text_encoder.cpu(),
+        dummy_text.cpu(),
+        text_onnx_path,
+        input_names=["text"],
+        output_names=["text_embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+    )
+    _simplify_onnx(text_onnx_path)
+    verify_onnx(text_onnx_path, {"text": dummy_text.cpu()}, pt_txt_feat)
+
+    print(f"\nExport complete → {output_dir}")
+
+
+def main() -> None:
+    args = parse_args()
+
+    if args.output_postfix:
+        output_dir_name = f"exported_{args.model_name}{args.output_postfix}_onnx"
+    else:
+        output_dir_name = f"exported_{args.model_name}_onnx"
+    print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
+
+    device = torch.device("cpu")
+
+    checkpoint_path = args.checkpoint_path
+    is_qat_ckpt = False
+    if checkpoint_path:
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        is_qat_ckpt = isinstance(ckpt, dict) and ckpt.get("qat_enabled", False)
+
+    if is_qat_ckpt:
+        # QAT checkpoint: load into reparameterized base model by filtering keys.
+        from utils.qat_utils import extract_base_model_state_dict
+        clip_model, _, _ = _load_clip(model_name=args.model_name, device=device)
+        clip_model = reparameterize_model(clip_model)
+        qat_state_dict = ckpt.get("model_state_dict", ckpt)
+        filtered = extract_base_model_state_dict(qat_state_dict, clip_model)
+        missing, unexpected = clip_model.load_state_dict(filtered, strict=False)
+        print(f"Loaded QAT checkpoint: {checkpoint_path}")
+        if missing:
+            print(f"  Missing keys: {len(missing)}")
+        if unexpected:
+            print(f"  Unexpected keys: {len(unexpected)}")
+    else:
+        clip_model, _, _ = _load_clip(
+            model_name=args.model_name,
+            device=device,
+            checkpoint_path=checkpoint_path,
         )
-        _simplify(image_onnx_path)
-        verify_onnx(image_onnx_path, {"image": dummy_image_input}, pt_img_feat)
+        clip_model = reparameterize_model(clip_model)
 
-    def export_text():
-        print(f"\nExporting Text Encoder to {text_onnx_path}...")
-        torch.onnx.export(
-            text_encoder,
-            dummy_text_input,
-            text_onnx_path,
-            input_names=["text"],
-            output_names=["text_embedding"],
-            opset_version=18,
-            do_constant_folding=True,
-            dynamic_axes=None,
-            verbose=False,
-            export_params=True,
-            training=torch.onnx.TrainingMode.EVAL,
-            # dynamo=True,
-        )
-        _simplify(text_onnx_path)
-        verify_onnx(text_onnx_path, {"text": dummy_text_input}, pt_txt_feat)
+    clip_model.eval()
+    export_encoders_to_onnx(clip_model, output_dir_name)
 
-    export_image()
-    export_text()
-
-    print("\nExport and verification complete.")
-    if args.checkpoint_path:
-        print(f"Exported fine-tuned checkpoint: {Path(args.checkpoint_path).resolve()}")
+    if checkpoint_path:
+        print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
 
 
 if __name__ == "__main__":
