@@ -15,3 +15,7 @@ tensorboard
 httpx[socks]
 openai
 # clip @ git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1
+# AIMET: install the wheel matching your CUDA/torch version, e.g.:
+#   pip install aimet-torch  (CPU or auto-detect CUDA)
+# See https://github.com/quic/aimet/blob/develop/packaging/install.md for GPU wheels.
+aimet-torch

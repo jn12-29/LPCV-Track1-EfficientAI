@@ -85,6 +85,35 @@ def parse_args() -> argparse.Namespace:
         choices=["hinge", "logsigmoid"],
     )
 
+    # --- Resume ---
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to a checkpoint (.pt) to resume from. Supports regular and QAT checkpoints (auto-detected).",
+    )
+
+    # --- QAT ---
+    parser.add_argument("--qat-enabled", action="store_true", help="Enable Quantization-Aware Training via AIMET.")
+    parser.add_argument("--qat-weight-bw", type=int, default=8, choices=[8], help="Weight bit-width for QAT.")
+    parser.add_argument("--qat-act-bw", type=int, default=8, choices=[8, 16], help="Activation bit-width for QAT.")
+    parser.add_argument("--qat-calib-samples", type=int, default=1024, help="Number of samples for QAT calibration.")
+    parser.add_argument(
+        "--qat-quant-scheme",
+        type=str,
+        default="tf_enhanced",
+        choices=["tf_enhanced", "percentile"],
+        help="AIMET quantization scheme.",
+    )
+
+    # --- Export ---
+    parser.add_argument(
+        "--export-onnx",
+        action="store_true",
+        help="Export ONNX (image + text encoder) at each numbered checkpoint and at training end. "
+             ".pt checkpoints are always saved.",
+    )
+
     return parser.parse_args()
 
 

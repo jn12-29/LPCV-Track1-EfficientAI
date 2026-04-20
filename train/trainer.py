@@ -44,6 +44,37 @@ from train.train_utils import (
 )
 
 
+def _export_onnx_checkpoint(
+    model,
+    model_name: str,
+    output_dir: Path,
+    label: str,
+    run_name: str,
+) -> None:
+    """Export image + text ONNX from a QAT-trained (or regular) model."""
+    from timm.utils import reparameterize_model
+    from pipeline.export_onnx import export_encoders_to_onnx
+    from utils.qat_utils import extract_base_model_state_dict
+
+    raw_model = unwrap_model(model)
+    qat_sim = getattr(raw_model, "_qat_sim", None)
+
+    if qat_sim is not None:
+        # Build a fresh reparameterized base model and load QAT-tuned weights.
+        base_model, _, _ = _load_clip(model_name, device=torch.device("cpu"))
+        base_model = reparameterize_model(base_model)
+        qat_sd = raw_model.state_dict()
+        filtered = extract_base_model_state_dict(qat_sd, base_model)
+        base_model.load_state_dict(filtered, strict=False)
+        base_model.eval()
+    else:
+        base_model = raw_model.eval()
+
+    onnx_dir = str(output_dir / f"onnx_{label}")
+    log_message(f"Exporting ONNX to {onnx_dir}", run_name=run_name)
+    export_encoders_to_onnx(base_model, onnx_dir)
+
+
 def run_training(args) -> None:
     dist_ctx = init_distributed_context(args)
     distributed = dist_ctx["distributed"]
@@ -96,10 +127,19 @@ def run_training(args) -> None:
                 f"Distributed training: {distributed} (world_size={world_size}, gpu_ids={gpu_ids})",
                 run_name=run_name,
             )
-            log_message(
-                f"AMP: {'disabled (--no-amp)' if args.no_amp else 'enabled (fp16 autocast + GradScaler)'}",
-                run_name=run_name,
+            _amp_reason = (
+                "disabled (--no-amp)" if args.no_amp
+                else "disabled (QAT requires fp32)" if getattr(args, "qat_enabled", False)
+                else "enabled (fp16 autocast + GradScaler)"
             )
+            log_message(f"AMP: {_amp_reason}", run_name=run_name)
+            qat_enabled = getattr(args, "qat_enabled", False)
+            if qat_enabled:
+                log_message(
+                    f"QAT: enabled (W{args.qat_weight_bw}A{args.qat_act_bw}, "
+                    f"scheme={args.qat_quant_scheme}, calib_samples={args.qat_calib_samples})",
+                    run_name=run_name,
+                )
             log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
             log_message(f"Train log saved to {train_log_path}", run_name=run_name)
             log_message(
@@ -108,23 +148,31 @@ def run_training(args) -> None:
             )
             log_message(f"Run config saved to {config_json_path}", run_name=run_name)
 
+        # --- Build QAT config ---
+        qat_config = None
+        qat_enabled = getattr(args, "qat_enabled", False)
+        if qat_enabled:
+            from utils.qat_utils import QATConfig
+            qat_config = QATConfig(
+                enabled=True,
+                weight_bw=args.qat_weight_bw,
+                act_bw=args.qat_act_bw,
+                quant_scheme=args.qat_quant_scheme,
+                calib_samples=args.qat_calib_samples,
+            )
+
+        # --- Model loading (QAT wrap happens inside _load_clip when qat_config set) ---
         model, _, tokenizer = _load_clip(
             args.model_name,
             device,
+            checkpoint_path=getattr(args, "resume", None),
             pretrained=args.pretrained,
+            qat_config=qat_config,
         )
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
-        if distributed:
-            model = DistributedDataParallel(
-                model,
-                device_ids=[device.index],
-                output_device=device.index,
-                broadcast_buffers=False,
-                find_unused_parameters=False,
-                static_graph=True,
-            )
 
+        # --- Dataset and DataLoader (built before DDP so calibration can use it) ---
         train_dataset = ContrastiveRecordDataset(
             jsonl_path=args.jsonl_path,
             max_records=args.max_records,
@@ -183,6 +231,29 @@ def run_training(args) -> None:
             ),
         )
 
+        # --- QAT calibration (must happen before DDP wrap) ---
+        if qat_config is not None and getattr(model, "_qat_needs_calibration", False):
+            if is_main_process:
+                log_message(
+                    f"Running QAT calibration ({args.qat_calib_samples} samples)...",
+                    run_name=run_name,
+                )
+            from utils.qat_utils import calibrate_quantsim
+            calibrate_quantsim(model._qat_sim, train_dataloader, args.qat_calib_samples, device)
+            if is_main_process:
+                log_message("QAT calibration complete", run_name=run_name)
+
+        # --- DDP wrap (after calibration) ---
+        if distributed:
+            model = DistributedDataParallel(
+                model,
+                device_ids=[device.index],
+                output_device=device.index,
+                broadcast_buffers=False,
+                find_unused_parameters=False,
+                static_graph=True,
+            )
+
         if args.loss_type == "siglip":
             loss_fn = SigLipLoss(rank=rank, world_size=world_size).to(device)
             trainable_params = list(model.parameters()) + list(loss_fn.parameters())
@@ -209,13 +280,17 @@ def run_training(args) -> None:
             ),
             warmup_steps=args.warmup_steps,
         )
-        amp_enabled = not args.no_amp and device.type == "cuda"
+        # QAT uses fp32 fake quantization; AMP fp16 casts conflict and double memory.
+        amp_enabled = not args.no_amp and device.type == "cuda" and not (qat_config is not None)
         scaler = GradScaler(device=device.type, enabled=amp_enabled)
 
         metrics_history: List[MetricsRow] = []
         global_step = 0
         epoch_digits = max(len(str(args.epochs)), 2)
         previous_latest_path: Optional[Path] = None
+
+        # Resolved once for convenience
+        export_onnx = getattr(args, "export_onnx", False)
 
         for epoch in range(1, args.epochs + 1):
             if train_sampler is not None:
@@ -289,6 +364,8 @@ def run_training(args) -> None:
                     run_name=run_name,
                 )
 
+                sim = getattr(unwrap_model(model), "_qat_sim", None)
+
                 latest_path = output_dir / (
                     f"checkpoint_latest_epoch_{epoch:0{epoch_digits}d}.pt"
                 )
@@ -304,6 +381,7 @@ def run_training(args) -> None:
                     global_step=global_step,
                     args=args,
                     metrics_history=metrics_history,
+                    sim=sim,
                 )
                 previous_latest_path = latest_path
 
@@ -322,11 +400,31 @@ def run_training(args) -> None:
                         global_step=global_step,
                         args=args,
                         metrics_history=metrics_history,
+                        sim=sim,
                     )
+                    if export_onnx:
+                        _export_onnx_checkpoint(
+                            model, args.model_name, output_dir,
+                            label=f"epoch_{epoch:0{epoch_digits}d}",
+                            run_name=run_name,
+                        )
 
         final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
         if is_main_process:
-            torch.save(unwrap_model(model).state_dict(), final_weights_path)
+            sim = getattr(unwrap_model(model), "_qat_sim", None)
+            # Save final checkpoint (includes QAT state when applicable).
+            save_checkpoint(
+                save_path=final_weights_path,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                epoch=args.epochs,
+                global_step=global_step,
+                args=args,
+                metrics_history=metrics_history,
+                sim=sim,
+            )
             run_config["finished_at"] = current_timestamp()
             run_config["final_weights_path"] = str(final_weights_path.resolve())
             save_run_config(config_json_path, run_config)
@@ -348,6 +446,12 @@ def run_training(args) -> None:
                 f"Training curves saved to {output_dir / 'training_curves.png'}",
                 run_name=run_name,
             )
+            if export_onnx:
+                _export_onnx_checkpoint(
+                    model, args.model_name, output_dir,
+                    label="final",
+                    run_name=run_name,
+                )
     finally:
         if writer is not None:
             writer.close()

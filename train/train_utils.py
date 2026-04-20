@@ -116,18 +116,23 @@ def save_checkpoint(
     global_step: int,
     args,
     metrics_history: List[MetricsRow],
+    sim=None,
 ) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "epoch": epoch,
-            "global_step": global_step,
-            "model_state_dict": unwrap_model(model).state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "scheduler_state_dict": scheduler.state_dict(),
-            "scaler_state_dict": scaler.state_dict(),
-            "args": vars(args),
-            "metrics_history": metrics_history,
-        },
-        save_path,
-    )
+    payload = {
+        "epoch": epoch,
+        "global_step": global_step,
+        "model_state_dict": unwrap_model(model).state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "scaler_state_dict": scaler.state_dict(),
+        "args": vars(args),
+        "metrics_history": metrics_history,
+    }
+    if sim is not None:
+        from utils.qat_utils import get_qat_encodings_json
+        payload["qat_enabled"] = True
+        payload["qat_weight_bw"] = getattr(args, "qat_weight_bw", 8)
+        payload["qat_act_bw"] = getattr(args, "qat_act_bw", 8)
+        payload["qat_encodings"] = get_qat_encodings_json(sim)
+    torch.save(payload, save_path)
