@@ -106,6 +106,21 @@ def parse_args() -> argparse.Namespace:
         help="AIMET quantization scheme.",
     )
 
+    parser.add_argument(
+        "--qat-exclude-group-conv",
+        action="store_true",
+        help="Exclude all grouped convolutions (groups > 1) from QAT quantization.",
+    )
+    parser.add_argument(
+        "--qat-exclude-names",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated regex patterns. Modules whose name matches any pattern "
+            "are excluded from QAT quantization. Example: --qat-exclude-names 'stem\\.conv,stages\\.3'"
+        ),
+    )
+
     # --- Export ---
     parser.add_argument(
         "--export-onnx",
