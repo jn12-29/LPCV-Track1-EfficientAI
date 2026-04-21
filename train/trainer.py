@@ -135,9 +135,16 @@ def run_training(args) -> None:
             log_message(f"AMP: {_amp_reason}", run_name=run_name)
             qat_enabled = getattr(args, "qat_enabled", False)
             if qat_enabled:
+                _excl_parts = []
+                if getattr(args, "qat_exclude_group_conv", False):
+                    _excl_parts.append("group-conv")
+                if getattr(args, "qat_exclude_names", None):
+                    _excl_parts.append(f"names={args.qat_exclude_names}")
+                _excl_str = f", exclude=[{', '.join(_excl_parts)}]" if _excl_parts else ""
                 log_message(
                     f"QAT: enabled (W{args.qat_weight_bw}A{args.qat_act_bw}, "
-                    f"scheme={args.qat_quant_scheme}, calib_samples={args.qat_calib_samples})",
+                    f"scheme={args.qat_quant_scheme}, calib_samples={args.qat_calib_samples}"
+                    f"{_excl_str})",
                     run_name=run_name,
                 )
             log_message(f"Run outputs will be saved to {output_dir}", run_name=run_name)
@@ -152,13 +159,24 @@ def run_training(args) -> None:
         qat_config = None
         qat_enabled = getattr(args, "qat_enabled", False)
         if qat_enabled:
-            from utils.qat_utils import QATConfig
+            from utils.qat_utils import QATConfig, GroupConvRule, NamePatternRule
+
+            exclusion_rules = []
+            if getattr(args, "qat_exclude_group_conv", False):
+                exclusion_rules.append(GroupConvRule())
+            raw_patterns = getattr(args, "qat_exclude_names", None)
+            if raw_patterns:
+                patterns = [p.strip() for p in raw_patterns.split(",") if p.strip()]
+                if patterns:
+                    exclusion_rules.append(NamePatternRule(patterns))
+
             qat_config = QATConfig(
                 enabled=True,
                 weight_bw=args.qat_weight_bw,
                 act_bw=args.qat_act_bw,
                 quant_scheme=args.qat_quant_scheme,
                 calib_samples=args.qat_calib_samples,
+                exclusion_rules=exclusion_rules,
             )
 
         # --- Model loading (QAT wrap happens inside _load_clip when qat_config set) ---

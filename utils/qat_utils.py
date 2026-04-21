@@ -1,13 +1,62 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Protocol, runtime_checkable
 
 import torch
 import torch.nn as nn
+
+
+# ---------------------------------------------------------------------------
+# Exclusion rule Protocol and concrete implementations
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class ExclusionRule(Protocol):
+    """Structural protocol: any object with should_exclude(name, module) -> bool."""
+
+    def should_exclude(self, name: str, module: nn.Module) -> bool: ...
+
+
+class GroupConvRule:
+    """Exclude nn.Conv2d where groups > 1 (any grouped or depthwise conv)."""
+
+    def should_exclude(self, name: str, module: nn.Module) -> bool:
+        return isinstance(module, nn.Conv2d) and module.groups > 1
+
+
+class DepthwiseConvRule:
+    """Exclude nn.Conv2d where groups == in_channels (pure depthwise conv)."""
+
+    def should_exclude(self, name: str, module: nn.Module) -> bool:
+        return isinstance(module, nn.Conv2d) and module.groups == module.in_channels
+
+
+class NamePatternRule:
+    """Exclude modules whose fully-qualified name matches any of the given regex patterns.
+
+    Uses re.search (partial match): r"stem" matches "visual.trunk.stem.conv_dw".
+    """
+
+    def __init__(self, patterns: List[str]) -> None:
+        self._compiled = [re.compile(p) for p in patterns]
+
+    def should_exclude(self, name: str, module: nn.Module) -> bool:
+        return any(pat.search(name) for pat in self._compiled)
+
+
+class TypeRule:
+    """Exclude modules that are instances of any of the given types."""
+
+    def __init__(self, *types: type) -> None:
+        self._types = tuple(types)
+
+    def should_exclude(self, name: str, module: nn.Module) -> bool:
+        return isinstance(module, self._types)
 
 
 @dataclass
@@ -17,6 +66,7 @@ class QATConfig:
     act_bw: int = 8
     quant_scheme: str = "tf_enhanced"
     calib_samples: int = 1024
+    exclusion_rules: List[ExclusionRule] = field(default_factory=list)
 
 
 def wrap_model_for_qat(
@@ -64,6 +114,8 @@ def wrap_model_for_qat(
         default_param_bw=config.weight_bw,
     )
 
+    apply_exclusion_rules(sim, config.exclusion_rules)
+
     needs_calibration = True
     if qat_encodings is not None:
         try:
@@ -76,6 +128,26 @@ def wrap_model_for_qat(
     sim.model._qat_sim = sim
     sim.model._qat_needs_calibration = needs_calibration
     return sim.model
+
+
+def apply_exclusion_rules(sim, rules: List[ExclusionRule]) -> None:
+    """Remove fake-quant wrappers from modules matching any rule.
+
+    Must be called after QuantizationSimModel creation, before compute_encodings.
+    Empty rules list is a safe no-op.
+    """
+    if not rules:
+        return
+
+    to_exclude = [
+        module
+        for name, module in sim.model.named_modules()
+        if any(rule.should_exclude(name, module) for rule in rules)
+    ]
+
+    if to_exclude:
+        print(f"[QAT] Excluding {len(to_exclude)} module(s) from quantization.")
+        sim.exclude_layers_from_quantization(to_exclude)
 
 
 def calibrate_quantsim(
