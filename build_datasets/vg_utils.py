@@ -44,6 +44,7 @@ _NON_RETRYABLE = {400, 401, 403, 404, 422}
 # VLM call
 # ---------------------------------------------------------------------------
 
+
 def call_model(
     client: OpenAI,
     model: str,
@@ -57,6 +58,7 @@ def call_model(
                 model=model,
                 messages=messages,
                 temperature=temperature,
+                max_tokens=8192,
                 response_format={"type": "json_object"},
             )
             content = resp.choices[0].message.content
@@ -70,21 +72,25 @@ def call_model(
                 raise
             if attempt == retries - 1:
                 raise
-            wait = min(2 ** attempt * 3, 60) * random.uniform(0.75, 1.25)
+            wait = min(2**attempt * 3, 60) * random.uniform(0.75, 1.25)
             log.warning(
                 "API %s (attempt %d/%d), retry in %.1fs",
-                e.status_code, attempt + 1, retries, wait,
+                e.status_code,
+                attempt + 1,
+                retries,
+                wait,
             )
             time.sleep(wait)
         except Exception:
             if attempt == retries - 1:
                 raise
-            time.sleep(2 ** attempt * random.uniform(0.75, 1.25))
+            time.sleep(2**attempt * random.uniform(0.75, 1.25))
 
 
 # ---------------------------------------------------------------------------
 # Image encoding
 # ---------------------------------------------------------------------------
+
 
 def encode_image(image_path: str) -> tuple[str, str]:
     """Return (base64_string, mime_type) for an image file."""
@@ -99,6 +105,7 @@ def encode_image(image_path: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # JSONL I/O
 # ---------------------------------------------------------------------------
+
 
 def load_jsonl(path: Path, max_records: int | None = None) -> list[dict]:
     records: list[dict] = []
@@ -135,6 +142,7 @@ def load_done(output_path: Path) -> set[str]:
 # Logging
 # ---------------------------------------------------------------------------
 
+
 def setup_logging(log_path: Path) -> None:
     fmt = logging.Formatter(
         "%(asctime)s %(levelname)-8s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
@@ -157,6 +165,7 @@ def setup_logging(log_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Parallel runner
 # ---------------------------------------------------------------------------
+
 
 def run_parallel(
     items: list,
@@ -187,7 +196,9 @@ def run_parallel(
     def _handle_sigint(sig, frame):
         nonlocal _stop
         if not _stop:
-            log.warning("Interrupt received — waiting for in-flight requests to finish ...")
+            log.warning(
+                "Interrupt received — waiting for in-flight requests to finish ..."
+            )
             _stop = True
 
     signal.signal(signal.SIGINT, _handle_sigint)
