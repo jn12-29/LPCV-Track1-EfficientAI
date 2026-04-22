@@ -44,6 +44,18 @@ from train.train_utils import (
 )
 
 
+def _log_model_structure(model, label: str, run_name: str) -> None:
+    """Print model structure and parameter counts to the training log."""
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    lines = [
+        f"=== Model structure [{label}] ===",
+        str(model),
+        f"--- Params: total={total:,}  trainable={trainable:,}  frozen={total - trainable:,} ---",
+    ]
+    log_message("\n".join(lines), run_name=run_name)
+
+
 def _export_onnx_checkpoint(
     model,
     model_name: str,
@@ -51,28 +63,26 @@ def _export_onnx_checkpoint(
     label: str,
     run_name: str,
 ) -> None:
-    """Export image + text ONNX from a QAT-trained (or regular) model."""
+    """Export image + text ONNX from a QAT-trained (or regular) model.
+
+    QAT path: uses AIMET sim.export() to produce a proper ONNX with
+    QuantizeLinear / DequantizeLinear nodes, then splits into per-encoder files.
+    Non-QAT path: reparameterizes and exports fp32.
+    """
     from timm.utils import reparameterize_model
-    from pipeline.export_onnx import export_encoders_to_onnx
-    from utils.qat_utils import extract_base_model_state_dict
+    from pipeline.export_onnx import export_encoders_to_onnx, export_quantized_encoders_to_onnx
 
     raw_model = unwrap_model(model)
     qat_sim = getattr(raw_model, "_qat_sim", None)
 
-    if qat_sim is not None:
-        # Build a fresh reparameterized base model and load QAT-tuned weights.
-        base_model, _, _ = _load_clip(model_name, device=torch.device("cpu"))
-        base_model = reparameterize_model(base_model)
-        qat_sd = raw_model.state_dict()
-        filtered = extract_base_model_state_dict(qat_sd, base_model)
-        base_model.load_state_dict(filtered, strict=False)
-        base_model.eval()
-    else:
-        base_model = raw_model.eval()
-
     onnx_dir = str(output_dir / f"onnx_{label}")
     log_message(f"Exporting ONNX to {onnx_dir}", run_name=run_name)
-    export_encoders_to_onnx(base_model, onnx_dir)
+
+    if qat_sim is not None:
+        export_quantized_encoders_to_onnx(qat_sim, onnx_dir)
+    else:
+        base_model = reparameterize_model(raw_model).eval()
+        export_encoders_to_onnx(base_model, onnx_dir)
 
 
 def run_training(args) -> None:
@@ -190,6 +200,38 @@ def run_training(args) -> None:
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
 
+        if is_main_process:
+            _log_model_structure(model, "after _load_clip", run_name)
+
+        # --- Freeze modules by name ---
+        freeze_names_raw = getattr(args, "freeze_modules", None)
+        if freeze_names_raw:
+            freeze_names = [n.strip() for n in freeze_names_raw.split(",") if n.strip()]
+            top_level_names = {name for name, _ in model.named_children()}
+            all_module_names = dict(model.named_modules())
+            frozen_params = 0
+            for name in freeze_names:
+                first_segment = name.split(".")[0]
+                if first_segment not in top_level_names:
+                    raise ValueError(
+                        f"[freeze] '{name}' does not start with a top-level module of the model. "
+                        f"Top-level modules: {sorted(top_level_names)}"
+                    )
+                submodule = all_module_names.get(name)
+                if submodule is None:
+                    raise ValueError(
+                        f"[freeze] Module '{name}' not found in model. "
+                        f"Check the full dotted path (e.g. visual.head, not just head)."
+                    )
+                for param in submodule.parameters():
+                    if param.requires_grad:
+                        param.requires_grad_(False)
+                        frozen_params += param.numel()
+                if is_main_process:
+                    log_message(f"[freeze] Froze module: {name}", run_name=run_name)
+            if is_main_process:
+                _log_model_structure(model, "after freeze", run_name)
+
         # --- Dataset and DataLoader (built before DDP so calibration can use it) ---
         train_dataset = ContrastiveRecordDataset(
             jsonl_path=args.jsonl_path,
@@ -271,17 +313,22 @@ def run_training(args) -> None:
                 find_unused_parameters=False,
                 static_graph=True,
             )
+            if is_main_process:
+                _log_model_structure(model, "after DDP wrap", run_name)
 
         if args.loss_type == "siglip":
             loss_fn = SigLipLoss(rank=rank, world_size=world_size).to(device)
-            trainable_params = list(model.parameters()) + list(loss_fn.parameters())
+            trainable_params = (
+                [p for p in model.parameters() if p.requires_grad]
+                + list(loss_fn.parameters())
+            )
         else:
             loss_fn = open_clip.ClipLoss(
                 cache_labels=True,
                 rank=rank,
                 world_size=world_size,
             )
-            trainable_params = list(model.parameters())
+            trainable_params = [p for p in model.parameters() if p.requires_grad]
 
         optimizer = optim.AdamW(
             trainable_params,

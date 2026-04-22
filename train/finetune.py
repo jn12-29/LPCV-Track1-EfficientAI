@@ -85,6 +85,17 @@ def parse_args() -> argparse.Namespace:
         choices=["hinge", "logsigmoid"],
     )
 
+    # --- Freeze ---
+    parser.add_argument(
+        "--freeze-modules",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated top-level module names to freeze (requires_grad=False). "
+            "Example: --freeze-modules visual  or  --freeze-modules visual,transformer"
+        ),
+    )
+
     # --- Resume ---
     parser.add_argument(
         "--resume",
