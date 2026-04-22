@@ -1,13 +1,13 @@
 """
 Step 1: Integrate VisualGenome annotations into a per-image intermediate JSONL.
 
-Reads six annotation files from a single directory:
-  objects.json            (objects_v1_2)  object names + bboxes
-  attributes.json         (attributes)    same objects + attribute lists
-  relationships.json      (relationships) subject-predicate-object triples (name strings)
-  scene_graphs.json       (scene_graphs)  same objects+rels via object_id references
-  region_descriptions.json               free-text region phrases
-  question_answers.json                  Q&A pairs per image
+Reads six annotation files from VG_Json/ (5 parallel workers; objects+attributes share one worker):
+  objects.json             object names (bbox fields are ignored)
+  attributes.json          same objects + attribute lists
+  relationships.json       subject-predicate-object triples (name strings)
+  scene_graphs.json        same objects+rels via object_id references
+  region_descriptions.json free-text region phrases
+  question_answers.json    Q&A pairs per image
 
 Merges per image_id, keeping only images with a local jpg file.
 scene_graphs relationships are resolved to name strings and merged (deduped) with
@@ -34,9 +34,8 @@ Output (one JSON line per image):
 
 Usage:
   python build_datasets/vg_integrate.py
-  python build_datasets/vg_integrate.py --vg_dir build_datasets/data/VisualGenome
   python build_datasets/vg_integrate.py \\
-    --vg_dir    build_datasets/data/VisualGenome \\
+    --vg_dir    build_datasets/data/VG_Json \\
     --image_dir build_datasets/data/VG_100K \\
     --output    build_datasets/data/vg_integrated.jsonl
 """
@@ -297,6 +296,25 @@ def merge_relationships(base: list, extra: list) -> list:
     return merged
 
 
+def dedup_objects(objects: list) -> list:
+    """Merge object entries that share the same primary name, unioning their attributes."""
+    seen: dict[str, dict] = {}  # first_name.lower() -> working entry
+    for obj in objects:
+        names = obj.get("names", [])
+        attrs = obj.get("attributes", [])
+        if not names:
+            continue
+        key = names[0].lower()
+        if key not in seen:
+            seen[key] = {"names": list(names), "attrs": list(attrs), "attr_set": set(attrs)}
+        else:
+            for a in attrs:
+                if a not in seen[key]["attr_set"]:
+                    seen[key]["attrs"].append(a)
+                    seen[key]["attr_set"].add(a)
+    return [{"names": v["names"], "attributes": v["attrs"]} for v in seen.values()]
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -306,7 +324,7 @@ def main():
         description="Integrate VG annotations into per-image JSONL",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--vg_dir",    default="build_datasets/data/VisualGenome",
+    ap.add_argument("--vg_dir",    default="build_datasets/data/VG_Json",
                     help="Directory containing all VisualGenome JSON files")
     ap.add_argument("--image_dir", default="build_datasets/data/VG_100K",
                     help="Directory of local VG images")
@@ -378,7 +396,7 @@ def main():
         for p in it:
             img_id = int(p.stem)
 
-            objects       = attr_idx.get(img_id, [])
+            objects       = dedup_objects(attr_idx.get(img_id, []))
             relationships = merge_relationships(
                 rel_idx.get(img_id, []),
                 sg_rel_idx.get(img_id, []),
