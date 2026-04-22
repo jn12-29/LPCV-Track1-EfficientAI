@@ -8,7 +8,7 @@ import signal
 import sys
 import time
 import base64
-from concurrent.futures import ThreadPoolExecutor, wait as fut_wait, FIRST_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, wait as fut_wait, FIRST_COMPLETED, ALL_COMPLETED
 from pathlib import Path
 
 from openai import OpenAI, APIStatusError
@@ -217,8 +217,22 @@ def run_parallel(
 
         while pending:
             if _stop:
+                # Cancel futures not yet started
                 for f in list(pending):
-                    f.cancel()
+                    if f.cancel():
+                        pending.pop(f)
+                # Drain still-running in-flight futures and write their results
+                if pending:
+                    done_futs, _ = fut_wait(list(pending), return_when=ALL_COMPLETED)
+                    for fut in done_futs:
+                        item = pending.pop(fut)
+                        try:
+                            result = fut.result()
+                            n_ok += 1
+                            on_result(item, result, n_ok, n_err, total)
+                        except Exception as e:
+                            n_err += 1
+                            on_error(item, e, n_ok, n_err, total)
                 break
 
             done_futs, _ = fut_wait(pending, return_when=FIRST_COMPLETED)
