@@ -5,6 +5,6 @@ python build_datasets/setup_vg_data.py
 python build_datasets/vg_integrate.py
 
 # annotate VisualGenome images with LLM
-python build_datasets/vg_llm_annotate.py --base_url http://localhost:8000/v1 --model google/gemma-4-31B-it --max_workers 240
+python build_datasets/vg_llm_annotate.py --base_url http://localhost:8000/v1 --model google/gemma-4-31B-it --max_workers 100
 
 python build_datasets/vg_llm_annotate.py --base_url http://localhost:8000/v1 --model google/gemma-4-26B-A4B-it --max_workers 240
