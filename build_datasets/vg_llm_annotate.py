@@ -67,7 +67,10 @@ Clean, well-formed descriptions grounded in the provided annotations and the ima
   • Reorganise and merge the raw annotations into natural, fluent phrases.
   • Mix lengths: short noun phrases (3–8 words) and relational phrases (≤15 words).
   • Vary focus: individual objects, attributes, spatial relations, actions, scene/background.
-  • Deduplicate: no two positives should convey the same information.
+  • The same object or relationship may appear in multiple positives with different
+    phrasings, perspectives, or levels of detail — diversity of expression is encouraged.
+  • Deduplicate meaning: no two positives should convey exactly the same information,
+    but rephrasing or zooming in/out on the same subject is fine.
   • All lowercase.
 
 ── hard_negatives ──────────────────────────────────────────────
@@ -75,11 +78,18 @@ Descriptions that look visually plausible but are factually wrong in exactly ONE
   • Study the image carefully — use what you actually see, not just the annotations.
   • Change exactly ONE attribute per item (color / texture / size / count / state /
     spatial relation / action / material). Keep everything else correct.
+  • The same object or relationship may appear in multiple hard_negatives, each flipping
+    a different attribute — generate diverse wrong descriptions, not just one per object.
   • The wrong value must be absent from the entire image — not just wrong for that
     object, but globally false (no instance of it should be visible anywhere).
   • Q&A facts are the most reliable ground truth — prioritise them for flips.
   • Do NOT negate ("no X", "without X"). Always substitute a plausible wrong value.
   • All lowercase.
+
+── quantity ────────────────────────────────────────────────────
+Generate at least 25 positives and at least 25 hard_negatives.
+Cover as many distinct objects, attributes, spatial relations, and scene details
+as possible — exhaust the annotations before stopping.
 
 Return valid JSON only — no markdown, no explanation.
 Schema: {"positives": ["...", ...], "hard_negatives": ["...", ...]}

@@ -125,7 +125,10 @@ def _stream_first_n(path: Path, n: int) -> list:
 def _already_extracted(zip_path: Path, dest_dir: Path, is_images: bool) -> bool:
     """Return True if this zip appears to have been extracted already."""
     if is_images:
-        return dest_dir.is_dir() and any(dest_dir.iterdir())
+        # Both images.zip and images2.zip extract into the same dir, so checking
+        # dir non-empty would cause the second zip to be skipped after the first
+        # is done. Use a per-zip sentinel file stored next to the zip instead.
+        return (zip_path.parent / f".{zip_path.name}.done").exists()
     # foo.json.zip → foo.json (Path.stem strips last suffix)
     return (dest_dir / zip_path.stem).exists()
 
@@ -158,6 +161,9 @@ def extract_zip(zip_path: Path, dest_dir: Path, *, force: bool) -> int:
 
         if not _HAS_TQDM:
             print(f"  Done ({len(members)} files)", flush=True)
+
+    if is_images:
+        (zip_path.parent / f".{zip_path.name}.done").touch()
 
     return len(members)
 
