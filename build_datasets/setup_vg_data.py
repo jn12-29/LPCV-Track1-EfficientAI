@@ -11,10 +11,13 @@ Usage:
   python build_datasets/setup_vg_data.py --skip-images     # skip large image zips
   python build_datasets/setup_vg_data.py --force           # re-extract even if already done
 """
+
 import argparse
 import json as _stdlib_json
+import os
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -56,6 +59,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 try:
     from tqdm import tqdm as _tqdm
+
     _HAS_TQDM = True
 except ImportError:
     _HAS_TQDM = False
@@ -66,6 +70,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 _IMAGE_ZIPS = {"images.zip", "images2.zip"}
+
+_EXTRACT_WORKERS = min(16, os.cpu_count() or 8)
 
 # Skip extremely large files whose schemas overlap with others
 # region_graphs.json (317 MB zip, ~1.5 GB extracted) overlaps with scene_graphs
@@ -82,6 +88,7 @@ _MAX_SAMPLE_MB = 1500
 # Streaming JSON helper (avoids loading multi-hundred-MB files just for N records)
 # ---------------------------------------------------------------------------
 
+
 def _stream_first_n(path: Path, n: int) -> list:
     """Read first n top-level array elements from a JSON file without full load."""
     decoder = _stdlib_json.JSONDecoder()
@@ -96,7 +103,7 @@ def _stream_first_n(path: Path, n: int) -> list:
             if not chunk:
                 return results
             buf += chunk
-        buf = buf[buf.index("[") + 1:]
+        buf = buf[buf.index("[") + 1 :]
 
         while len(results) < n:
             buf = buf.lstrip()
@@ -122,6 +129,7 @@ def _stream_first_n(path: Path, n: int) -> list:
 # Core functions
 # ---------------------------------------------------------------------------
 
+
 def _already_extracted(zip_path: Path, dest_dir: Path, is_images: bool) -> bool:
     """Return True if this zip appears to have been extracted already."""
     if is_images:
@@ -133,9 +141,18 @@ def _already_extracted(zip_path: Path, dest_dir: Path, is_images: bool) -> bool:
     return (dest_dir / zip_path.stem).exists()
 
 
+def _extract_one(zip_path: Path, filename: str, dest_dir: Path) -> None:
+    """Extract a single zip member into dest_dir (flat, no subdirs)."""
+    with zipfile.ZipFile(zip_path) as zf:
+        data = zf.read(filename)
+    (dest_dir / Path(filename).name).write_bytes(data)
+
+
 def extract_zip(zip_path: Path, dest_dir: Path, *, force: bool) -> int:
     """
     Extract zip_path into dest_dir (flattened — no subdirectory nesting).
+    Uses a thread pool so zlib decompression runs on multiple cores (GIL is
+    released during zlib calls, making threads genuinely parallel here).
     Returns number of members extracted, 0 if skipped.
     """
     is_images = zip_path.name in _IMAGE_ZIPS
@@ -145,27 +162,40 @@ def extract_zip(zip_path: Path, dest_dir: Path, *, force: bool) -> int:
         return 0
 
     with zipfile.ZipFile(zip_path) as zf:
-        members = [m for m in zf.infolist()
-                   if not m.filename.startswith("__MACOSX") and not m.is_dir()]
+        members = [
+            m
+            for m in zf.infolist()
+            if not m.filename.startswith("__MACOSX") and not m.is_dir()
+        ]
 
-        if _HAS_TQDM:
-            it = _tqdm(members, desc=f"  {zip_path.name}", unit="file", leave=True)
-        else:
-            print(f"  Extracting {zip_path.name} ({len(members)} files)...", flush=True)
-            it = members
+    n = len(members)
+    workers = min(_EXTRACT_WORKERS, n)
+    print(f"  Extracting {zip_path.name} ({n} files, {workers} threads)...", flush=True)
 
-        for member in it:
-            out_path = dest_dir / Path(member.filename).name
-            with zf.open(member) as src, open(out_path, "wb") as dst:
-                dst.write(src.read())
+    if _HAS_TQDM:
+        bar = _tqdm(total=n, desc=f"  {zip_path.name}", unit="file", leave=True)
+    else:
+        bar = None
 
-        if not _HAS_TQDM:
-            print(f"  Done ({len(members)} files)", flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {
+            pool.submit(_extract_one, zip_path, m.filename, dest_dir): m
+            for m in members
+        }
+        for fut in as_completed(futs):
+            fut.result()
+            if bar:
+                bar.update(1)
+
+    if bar:
+        bar.close()
+    else:
+        print(f"  Done ({n} files)", flush=True)
 
     if is_images:
         (zip_path.parent / f".{zip_path.name}.done").touch()
 
-    return len(members)
+    return n
 
 
 def generate_json_sample(json_path: Path, output_path: Path, n: int = 5) -> bool:
@@ -179,7 +209,10 @@ def generate_json_sample(json_path: Path, output_path: Path, n: int = 5) -> bool
 
     size_mb = json_path.stat().st_size / (1024 * 1024)
     if size_mb > _MAX_SAMPLE_MB:
-        print(f"  [skip sample] {json_path.name} — {size_mb:.0f} MB exceeds limit", flush=True)
+        print(
+            f"  [skip sample] {json_path.name} — {size_mb:.0f} MB exceeds limit",
+            flush=True,
+        )
         return False
 
     print(f"  Sampling {json_path.name} ({size_mb:.0f} MB)...", flush=True)
@@ -196,10 +229,10 @@ def generate_json_sample(json_path: Path, output_path: Path, n: int = 5) -> bool
     return True
 
 
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def parse_args():
     ap = argparse.ArgumentParser(
@@ -207,23 +240,30 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument(
-        "--vg-dir", default="build_datasets/data/VisualGenome",
+        "--vg-dir",
+        default="build_datasets/data/VisualGenome",
         help="Directory containing VisualGenome zip files",
     )
     ap.add_argument(
-        "--out-dir", default="build_datasets/data",
+        "--out-dir",
+        default="build_datasets/data",
         help="Parent directory for VG_100K/ and VG_Json/",
     )
     ap.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Re-extract even if output files already exist",
     )
     ap.add_argument(
-        "--skip-images", action="store_true",
+        "--skip-images",
+        action="store_true",
         help="Skip images.zip / images2.zip (use when VG_100K already populated)",
     )
     ap.add_argument(
-        "--samples", type=int, default=5, metavar="N",
+        "--samples",
+        type=int,
+        default=5,
+        metavar="N",
         help="Number of records per sample JSONL file",
     )
     return ap.parse_args()
@@ -232,9 +272,9 @@ def parse_args():
 def main():
     args = parse_args()
 
-    vg_dir  = Path(args.vg_dir)
+    vg_dir = Path(args.vg_dir)
     out_dir = Path(args.out_dir)
-    vg100k  = out_dir / "VG_100K"
+    vg100k = out_dir / "VG_100K"
     vg_json = out_dir / "VG_Json"
     samples = vg_json / "samples"
 
