@@ -6,20 +6,10 @@ Goal: maximize Recall@K on a Qualcomm XR2 Gen 2 device using MobileCLIP2 (open_c
 
 ```bash
 pip install -r requirements.txt
-qai-hub configure  # requires API token from QAI Hub
+qai-hub configure --api_token <您的TOKEN> # requires API token from QAI Hub
 ```
 
 AIMET (for QAT) requires a separate wheel matched to your CUDA version — see comments in `requirements.txt`.
-
-Recommended environment variables:
-
-```bash
-export OMP_NUM_THREADS=1
-export HF_HOME=/mnt/sada1/data
-export HF_ENDPOINT="https://hf-mirror.com"
-export PYTHONNOUSERSITE=1
-export LD_PRELOAD=$CONDA_PREFIX/lib/libstdc++.so.6
-```
 
 Optional GPU visibility override:
 
@@ -55,7 +45,11 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 Run all training commands from the repository root. Flat contrastive JSONL format:
 
 ```json
-{"image_path": "build_datasets/data/VG_100K/107914.jpg", "positives": ["..."], "hard_negatives": ["..."]}
+{
+  "image_path": "build_datasets/data/VG_100K/107914.jpg",
+  "positives": ["..."],
+  "hard_negatives": ["..."]
+}
 ```
 
 ```bash
@@ -116,11 +110,11 @@ QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_
 
 ## `eval_remote.py` Modes
 
-| Mode | Arguments | Description |
-|------|-----------|-------------|
+| Mode  | Arguments                         | Description                                                  |
+| ----- | --------------------------------- | ------------------------------------------------------------ |
 | **A** | `--upload-dataset` + compiled IDs | Upload local `sample_data` to QAI Hub, then submit inference |
-| **B** | compiled IDs only | Submit inference using existing dataset IDs |
-| **C** | inference IDs | Download outputs from already-completed inference jobs |
+| **B** | compiled IDs only                 | Submit inference using existing dataset IDs                  |
+| **C** | inference IDs                     | Download outputs from already-completed inference jobs       |
 
 ## Architecture
 
