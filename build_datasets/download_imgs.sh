@@ -1,6 +1,6 @@
 modelscope download --dataset leehirwin0215/VisualGenome images.zip --local_dir ./data
 
-hf download --repo-type dataset jn12/VisualGenome images.zip --local-dir ./build_datasets/data/VisualGenome
+hf download --repo-type dataset jn12/VisualGenome --local-dir ./build_datasets/data/VisualGenome
 
 hf upload jn12/VisualGenome . --repo-type=dataset
 
