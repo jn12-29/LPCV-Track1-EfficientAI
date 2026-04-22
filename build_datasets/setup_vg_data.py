@@ -14,7 +14,10 @@ Usage:
 
 import argparse
 import json as _stdlib_json
+import math
 import os
+import shutil
+import threading
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -141,18 +144,38 @@ def _already_extracted(zip_path: Path, dest_dir: Path, is_images: bool) -> bool:
     return (dest_dir / zip_path.stem).exists()
 
 
-def _extract_one(zip_path: Path, filename: str, dest_dir: Path) -> None:
-    """Extract a single zip member into dest_dir (flat, no subdirs)."""
+def _extract_batch(
+    zip_path: Path,
+    filenames: list,
+    dest_dir: Path,
+    progress_cb=None,
+) -> int:
+    """
+    Open zip_path once and extract a batch of files into dest_dir.
+
+    Opening ZipFile parses the central directory in Python (GIL held), so this
+    is done once per thread rather than once per file.  The actual I/O and zlib
+    decompression both release the GIL, giving genuine parallelism across threads.
+
+    Uses shutil.copyfileobj for streaming decompression — avoids loading the full
+    decompressed content into memory (critical for large JSON members, e.g. 500 MB).
+    """
+    _BUF = 4 * 1024 * 1024  # 4 MB copy buffer
     with zipfile.ZipFile(zip_path) as zf:
-        data = zf.read(filename)
-    (dest_dir / Path(filename).name).write_bytes(data)
+        for filename in filenames:
+            out = dest_dir / Path(filename).name
+            with zf.open(filename) as src, open(out, "wb") as dst:
+                shutil.copyfileobj(src, dst, length=_BUF)
+            if progress_cb is not None:
+                progress_cb()
+    return len(filenames)
 
 
 def extract_zip(zip_path: Path, dest_dir: Path, *, force: bool) -> int:
     """
     Extract zip_path into dest_dir (flattened — no subdirectory nesting).
-    Uses a thread pool so zlib decompression runs on multiple cores (GIL is
-    released during zlib calls, making threads genuinely parallel here).
+    Uses a thread pool where each thread opens the zip once and processes its
+    assigned batch, avoiding repeated central-directory parsing under the GIL.
     Returns number of members extracted, 0 if skipped.
     """
     is_images = zip_path.name in _IMAGE_ZIPS
@@ -174,18 +197,28 @@ def extract_zip(zip_path: Path, dest_dir: Path, *, force: bool) -> int:
 
     if _HAS_TQDM:
         bar = _tqdm(total=n, desc=f"  {zip_path.name}", unit="file", leave=True)
+        _lock = threading.Lock()
+        def progress_cb(b=bar, lk=_lock):
+            with lk:
+                b.update(1)
     else:
         bar = None
+        progress_cb = None
+
+    # Distribute files evenly across workers; each worker opens the zip once.
+    batch_size = math.ceil(n / workers)
+    batches = [
+        [m.filename for m in members[i : i + batch_size]]
+        for i in range(0, n, batch_size)
+    ]
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {
-            pool.submit(_extract_one, zip_path, m.filename, dest_dir): m
-            for m in members
-        }
+        futs = [
+            pool.submit(_extract_batch, zip_path, batch, dest_dir, progress_cb)
+            for batch in batches
+        ]
         for fut in as_completed(futs):
             fut.result()
-            if bar:
-                bar.update(1)
 
     if bar:
         bar.close()
@@ -284,24 +317,38 @@ def main():
     t_total = time.monotonic()
 
     # ------------------------------------------------------------------
-    # Step 1: extract zips
+    # Step 1: extract zips (image zips first, then json zips in parallel)
     # ------------------------------------------------------------------
     zip_files = sorted(vg_dir.glob("*.zip"))
     if not zip_files:
         print(f"No .zip files found in {vg_dir}", flush=True)
 
+    image_tasks = []
+    json_tasks = []
     for zp in zip_files:
         if zp.name in _IMAGE_ZIPS:
             if args.skip_images:
                 print(f"  [skip] {zp.name} (--skip-images)", flush=True)
-                continue
-            dest = vg100k
+            else:
+                image_tasks.append((zp, vg100k))
         elif zp.name.endswith(".json.zip"):
-            dest = vg_json
-        else:
-            continue
+            json_tasks.append((zp, vg_json))
+
+    # Image zips share a single output dir and a shared CPU/IO budget — run sequentially.
+    for zp, dest in image_tasks:
         print(f"\nExtracting {zp.name} → {dest.name}/", flush=True)
         extract_zip(zp, dest, force=args.force)
+
+    # JSON zips each produce a single file; extracting them in parallel is safe.
+    if json_tasks:
+        print(f"\nExtracting {len(json_tasks)} JSON zip(s) in parallel ...", flush=True)
+        with ThreadPoolExecutor(max_workers=min(4, len(json_tasks))) as pool:
+            futs = {
+                pool.submit(extract_zip, zp, dest, force=args.force): zp
+                for zp, dest in json_tasks
+            }
+            for fut in as_completed(futs):
+                fut.result()
 
     # ------------------------------------------------------------------
     # Step 2: VG annotation samples
