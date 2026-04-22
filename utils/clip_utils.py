@@ -99,11 +99,23 @@ def _load_clip(
             if unexpected:
                 print(f"  Unexpected keys: {len(unexpected)}")
     elif checkpoint_path and qat_state_dict is not None:
-        # QAT checkpoint loaded without QAT mode: fall back to base model keys.
-        from utils.qat_utils import extract_base_model_state_dict
-        filtered = extract_base_model_state_dict(qat_state_dict, model)
-        model.load_state_dict(filtered, strict=False)
-        print("Loaded base weights from QAT checkpoint (QAT mode disabled)")
+        # QAT checkpoint without explicit qat_config: auto-reconstruct QATConfig from checkpoint.
+        from utils.qat_utils import QATConfig, wrap_model_for_qat
+        saved_args = checkpoint.get("args", {}) if isinstance(checkpoint, dict) else {}
+        auto_qat_config = QATConfig(
+            enabled=True,
+            weight_bw=checkpoint.get("qat_weight_bw", saved_args.get("qat_weight_bw", 8)),
+            act_bw=checkpoint.get("qat_act_bw", saved_args.get("qat_act_bw", 8)),
+            quant_scheme=saved_args.get("qat_quant_scheme", "tf_enhanced"),
+            calib_samples=saved_args.get("qat_calib_samples", 1024),
+        )
+        model = wrap_model_for_qat(model, auto_qat_config, device, qat_encodings)
+        missing, unexpected = model.load_state_dict(qat_state_dict, strict=False)
+        print("Loaded QAT checkpoint with quantization enabled (auto-detected)")
+        if missing:
+            print(f"  Missing keys: {len(missing)}")
+        if unexpected:
+            print(f"  Unexpected keys: {len(unexpected)}")
 
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
