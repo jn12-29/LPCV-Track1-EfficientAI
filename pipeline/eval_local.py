@@ -7,12 +7,46 @@ from typing import Dict, List, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import open_clip
+import onnxruntime as ort
 import torch
 import torch.nn.functional as F
 
 from pipeline.dataset import RetrievalEvalDataset
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched, recall_at_k
+
+
+# ---------------------------------------------------------------------------
+# ONNX encoding
+# ---------------------------------------------------------------------------
+
+def _encode_images_onnx(
+    sess: "ort.InferenceSession",
+    image_dataset: RetrievalEvalDataset,
+    batch_size: int,
+) -> torch.Tensor:
+    features: List[torch.Tensor] = []
+    for _, batch_indices in _batched(list(range(len(image_dataset))), batch_size):
+        batch_images = [image_dataset[idx]["image"] for idx in batch_indices]
+        pixel_values = torch.stack(batch_images, dim=0).numpy()
+        out = sess.run(None, {"image": pixel_values})[0]
+        features.append(F.normalize(torch.from_numpy(out), dim=-1))
+    return torch.cat(features, dim=0)
+
+
+def _encode_texts_onnx(
+    sess: "ort.InferenceSession",
+    tokenizer,
+    texts: Sequence[str],
+    batch_size: int,
+) -> torch.Tensor:
+    features: List[torch.Tensor] = []
+    for _, batch_texts in _batched(list(texts), batch_size):
+        tokens = tokenizer(list(batch_texts)).numpy()
+        out = sess.run(None, {"text": tokens})[0]
+        features.append(F.normalize(torch.from_numpy(out), dim=-1))
+    return torch.cat(features, dim=0)
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +91,11 @@ def run_clip_retrieval_eval(
     k: int = 10,
     device: str | None = None,
     checkpoint_path: str | None = None,
+    onnx_dir: str | Path | None = None,
 ) -> Dict[str, float]:
     root_dir = Path(root_dir)
-    device_obj = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device_obj = torch.device(device_str)
 
     image_dataset = RetrievalEvalDataset(
         root_dir=root_dir,
@@ -69,9 +105,23 @@ def run_clip_retrieval_eval(
     )
     eval_data = image_dataset.get_image_to_text_eval_data()
 
-    model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
-    image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size)
-    text_embeds = _encode_texts_torch(model, tokenizer, eval_data.texts, device_obj, batch_size)
+    if onnx_dir is not None:
+        onnx_dir = Path(onnx_dir)
+        providers = (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if device_str.startswith("cuda")
+            else ["CPUExecutionProvider"]
+        )
+        img_sess = ort.InferenceSession(str(onnx_dir / "image_encoder.onnx"), providers=providers)
+        txt_sess = ort.InferenceSession(str(onnx_dir / "text_encoder.onnx"), providers=providers)
+        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        # QAI Hub input spec requires batch=1
+        image_embeds = _encode_images_onnx(img_sess, image_dataset, batch_size=1)
+        text_embeds = _encode_texts_onnx(txt_sess, tokenizer, eval_data.texts, batch_size=1)
+    else:
+        model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
+        image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size)
+        text_embeds = _encode_texts_torch(model, tokenizer, eval_data.texts, device_obj, batch_size)
 
     image_to_text_recall = recall_at_k(
         image_embeds.numpy(),
@@ -97,6 +147,11 @@ def parse_args() -> argparse.Namespace:
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
     parser.add_argument("--checkpoint-path", type=str, default=None)
+    parser.add_argument(
+        "--onnx-dir", type=str, default=None,
+        help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-S0_onnx). "
+             "If set, uses ONNX inference instead of PyTorch.",
+    )
     return parser.parse_args()
 
 
@@ -111,6 +166,7 @@ def main() -> None:
         k=args.k,
         device=args.device,
         checkpoint_path=args.checkpoint_path,
+        onnx_dir=args.onnx_dir,
     )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")

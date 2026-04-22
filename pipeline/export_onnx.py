@@ -102,6 +102,104 @@ def _simplify_onnx(onnx_path: str) -> None:
         print(f"  Simplification failed (kept original): {onnx_path}")
 
 
+def _split_clip_onnx(
+    full_onnx_path: str,
+    inputs: list,
+    outputs: list,
+    image_onnx_path: str,
+    text_onnx_path: str,
+) -> None:
+    """Split a combined CLIP ONNX (from AIMET sim.export) into separate encoder files.
+
+    Determines which graph output belongs to the image vs text path by BFS from each input.
+    """
+    import onnx
+
+    model_proto = onnx.load(full_onnx_path)
+    graph = model_proto.graph
+
+    consumer_map: dict = {}
+    for node in graph.node:
+        for inp in node.input:
+            if inp:
+                consumer_map.setdefault(inp, []).extend(o for o in node.output if o)
+
+    output_set = {o.name for o in graph.output}
+
+    def reachable_graph_outputs(start: str) -> set:
+        visited, queue, reached = set(), [start], set()
+        while queue:
+            t = queue.pop()
+            if t in visited:
+                continue
+            visited.add(t)
+            if t in output_set:
+                reached.add(t)
+            queue.extend(consumer_map.get(t, []))
+        return reached
+
+    img_outs = reachable_graph_outputs(inputs[0])
+    txt_outs = reachable_graph_outputs(inputs[1])
+    img_out = next(iter(img_outs)) if img_outs else outputs[0]
+    txt_out = next(iter(txt_outs)) if txt_outs else outputs[1]
+
+    print(f"  Image path: {inputs[0]} → {img_out}")
+    print(f"  Text  path: {inputs[1]} → {txt_out}")
+
+    onnx.utils.extract_model(full_onnx_path, image_onnx_path, [inputs[0]], [img_out])
+    onnx.utils.extract_model(full_onnx_path, text_onnx_path, [inputs[1]], [txt_out])
+    print(f"  Saved {image_onnx_path}")
+    print(f"  Saved {text_onnx_path}")
+
+
+def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
+    """Export image and text encoders with Q/DQ nodes via AIMET sim.export().
+
+    AIMET converts fake-quant (QuantizeDequantize) nodes into real ONNX
+    QuantizeLinear + DequantizeLinear ops.  The combined ONNX is then split
+    into image_encoder.onnx and text_encoder.onnx using graph connectivity.
+    """
+    import shutil
+    import tempfile
+
+    import onnx
+
+    os.makedirs(output_dir, exist_ok=True)
+    dummy_image = torch.zeros(1, 3, 224, 224, dtype=torch.float32)
+    dummy_text = torch.zeros(1, 77, dtype=torch.long)
+
+    # AIMET export requires model and dummy inputs on the same device.
+    model_device = next(sim.model.parameters()).device
+    sim.model.cpu()
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            print("\nExporting quantized ONNX via AIMET (Q/DQ nodes preserved)...")
+            sim.export(tmp_dir, "model", (dummy_image, dummy_text))
+
+            full_onnx = os.path.join(tmp_dir, "model.onnx")
+            model_proto = onnx.load(full_onnx)
+            inputs = [i.name for i in model_proto.graph.input]
+            outputs = [o.name for o in model_proto.graph.output]
+            print(f"  Inputs : {inputs}")
+            print(f"  Outputs: {outputs}")
+
+            if len(inputs) >= 2 and len(outputs) >= 2:
+                image_onnx = os.path.join(output_dir, "image_encoder.onnx")
+                text_onnx = os.path.join(output_dir, "text_encoder.onnx")
+                _split_clip_onnx(full_onnx, inputs, outputs, image_onnx, text_onnx)
+            else:
+                combined = os.path.join(output_dir, "combined_quantized.onnx")
+                shutil.copy(full_onnx, combined)
+                print(
+                    f"  Cannot split (inputs={inputs}, outputs={outputs}), "
+                    f"saved combined → {combined}"
+                )
+    finally:
+        sim.model.to(model_device)
+
+    print(f"\nExport complete → {output_dir}")
+
+
 def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
     """Export image and text encoders to ONNX.
 
@@ -179,18 +277,24 @@ def main() -> None:
         is_qat_ckpt = isinstance(ckpt, dict) and ckpt.get("qat_enabled", False)
 
     if is_qat_ckpt:
-        # QAT checkpoint: load into reparameterized base model by filtering keys.
-        from utils.qat_utils import extract_base_model_state_dict
+        # QAT checkpoint: rebuild QuantSim with saved encodings and export with Q/DQ nodes.
+        from utils.qat_utils import QATConfig, wrap_model_for_qat
+
+        saved_args = ckpt.get("args", {})
+        qat_config = QATConfig(
+            enabled=True,
+            weight_bw=ckpt.get("qat_weight_bw", saved_args.get("qat_weight_bw", 8)),
+            act_bw=ckpt.get("qat_act_bw", saved_args.get("qat_act_bw", 8)),
+            quant_scheme=saved_args.get("qat_quant_scheme", "tf_enhanced"),
+            calib_samples=saved_args.get("qat_calib_samples", 1024),
+        )
+        qat_encodings = ckpt.get("qat_encodings")
         clip_model, _, _ = _load_clip(model_name=args.model_name, device=device)
-        clip_model = reparameterize_model(clip_model)
-        qat_state_dict = ckpt.get("model_state_dict", ckpt)
-        filtered = extract_base_model_state_dict(qat_state_dict, clip_model)
-        missing, unexpected = clip_model.load_state_dict(filtered, strict=False)
+        # wrap_model_for_qat reparameterizes and creates QuantSim; encodings skip calibration.
+        clip_model = wrap_model_for_qat(clip_model, qat_config, device, qat_encodings=qat_encodings)
+        sim = clip_model._qat_sim
         print(f"Loaded QAT checkpoint: {checkpoint_path}")
-        if missing:
-            print(f"  Missing keys: {len(missing)}")
-        if unexpected:
-            print(f"  Unexpected keys: {len(unexpected)}")
+        export_quantized_encoders_to_onnx(sim, output_dir_name)
     else:
         clip_model, _, _ = _load_clip(
             model_name=args.model_name,
@@ -198,9 +302,8 @@ def main() -> None:
             checkpoint_path=checkpoint_path,
         )
         clip_model = reparameterize_model(clip_model)
-
-    clip_model.eval()
-    export_encoders_to_onnx(clip_model, output_dir_name)
+        clip_model.eval()
+        export_encoders_to_onnx(clip_model, output_dir_name)
 
     if checkpoint_path:
         print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
