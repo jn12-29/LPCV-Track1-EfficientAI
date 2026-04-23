@@ -42,8 +42,17 @@ export CUDA_VISIBLE_DEVICES=<gpu_id_or_gpu_list>
 # 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
 python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 
-# 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
+# 2a. Compile FP32→FP16 (original flow, no PTQ)
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
+
+# 2b. QAI Hub native PTQ (INT8) + compile (recommended for on-device speed)
+python ptq/quantize.py \
+    --onnx-dir exported_MobileCLIP2-S0_onnx \
+    --jsonl-path <path_to_jsonl> --image-base-dir <path> \
+    --compile --ids-file ptq_ids.json
+# Or two-step: quantize first, then compile with model IDs
+python ptq/quantize.py --onnx-dir ... --jsonl-path ... --image-base-dir ... --ids-file ptq_ids.json
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 --quantize-ids-file ptq_ids.json
 
 # 3. Evaluate
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
@@ -72,7 +81,7 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
 - **`pipeline/dataset.py`** — `RetrievalEvalDataset` (per-image or per-text iteration; `get_image_to_text_eval_data()` returns all texts + per-image positive indices) and `ImageTextRetrievalDataset` (positive pairs).
 - **`pipeline/export_onnx.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder`, exports to ONNX opset 18, verifies outputs. Exposes `export_encoders_to_onnx(clip_model, output_dir)` for reuse. Handles QAT checkpoints via `--checkpoint-path` (auto-detects, extracts base weights).
-- **`pipeline/compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results with `lowpowervision@gmail.com`.
+- **`pipeline/compile_and_profile.py`** — submits models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Supports two modes: (A) local FP32 ONNX → FP16 compile, (B) QAI Hub quantized model IDs → INT8 compile (via `--quantize-ids-file` or `--quantized-image-model-id`). Auto-shares results with `lowpowervision@gmail.com`.
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference submission, and Recall@K. Three modes: (A) upload + infer, (B) infer with existing dataset IDs, (C) reuse inference job outputs.
 
@@ -88,6 +97,14 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 - **`train/distributed.py`** — DDP init/cleanup, seed management, `broadcast_run_timestamp`.
 - **`train/metrics.py`** — `append_metrics_row`, `append_metrics_jsonl`, `plot_training_curves`.
 - **`train/analyze_hard_negatives.py`** — analyzes positive vs hard-negative similarity distributions.
+
+### PTQ pipeline (`ptq/`)
+
+Uses QAI Hub native quantization (NOT ORT `quantize_static`, which has fatal incompatibilities with qairt-converter: MatMul→Gemm rewrite, QDQ fusion failure, bias format mismatch, per-channel zero_point corruption).
+
+- **`ptq/quantize.py`** — uploads FP32 ONNX to QAI Hub, runs `submit_quantize_job` with real calibration data, optionally compiles in one shot. Qualcomm's own quantizer handles mixed-precision partitioning correctly (INT8 for MatMul/Conv/Gemm, FP32 islands for GELU/Softmax/LN).
+- **`ptq/dataset.py`** — `ImageCalibReader` / `TextCalibReader` (ONNX Runtime `CalibrationDataReader` subclasses), `load_jsonl_records`, `split_calib_val`. Reused by both PTQ and evaluation.
+- **`ptq/eval_ptq.py`** — Recall@K evaluation for quantized ONNX encoders using ONNX Runtime.
 
 ### QAT pipeline
 
@@ -135,5 +152,7 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 - `reparameterize_model()` from `timm.utils` must be called before ONNX export. For QAT, it is called automatically inside `wrap_model_for_qat()` — do not call it again afterward (would break fake quant nodes).
 - QAT checkpoint loading: the model must be reparameterized before QuantSim is created so the state dict key names match. `_load_clip()` handles this — regular checkpoints are loaded before reparameterize; QAT checkpoints are loaded after.
 - The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position (argmax) to ensure consistent input regardless of tokenizer padding style.
-- QAI Hub auto-converts to fp16 during compilation.
+- QAI Hub auto-converts to fp16 during FP32 compilation (compile_and_profile.py Mode A). For INT8 models (Mode B), `--float_bitwidth 16` is omitted — the model is already quantized.
+- **Do NOT use ORT `quantize_static` for qairt-converter targets** — it rewrites 48 MatMul→Gemm, breaks QDQ fusion, corrupts per-channel zero_point, and misformats biases. Use QAI Hub's native `submit_quantize_job` instead.
+- **Do NOT run onnxsim on QDQ ONNX** — it may fold scale/zero_point constants into surrounding nodes, breaking QDQ structure. Only use onnxsim on FP32 ONNX (before quantization).
 - The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` regardless of which MobileCLIP2 variant is used — all variants share the same tokenizer.
