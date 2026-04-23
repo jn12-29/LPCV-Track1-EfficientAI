@@ -1,8 +1,8 @@
 {
   "model_name": "MobileCLIP2-B",
-  "postfix": "_ptq_qdq_u8s8_pct_1000_Conv,MatMul,LayerNormalization,Gelu,Add,Gemm",
-  "image_compile_id": "jp1d90n8p",
-  "text_compile_id": "jgdrkwdrp",
-  "image_profile_id": "j5mw7r0dp",
-  "text_profile_id": "jpx7qvl3g"
+  "postfix": "_ptq_qdq_u8s8_pct_1000_Conv,Gemm,MatMul",
+  "image_compile_id": "jgj0jvmep",
+  "text_compile_id": "jperjd1vg",
+  "image_profile_id": "jp1dr4l7p",
+  "text_profile_id": "j57jqyw95"
 }

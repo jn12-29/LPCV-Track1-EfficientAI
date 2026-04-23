@@ -27,7 +27,7 @@ def compile_model(model, name, device, input_specs) -> str:
         name=name,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io --float_bitwidth 16",
+        options="--target_runtime qnn_dlc --truncate_64bit_io",
     )
     compile_job.modify_sharing(add_emails=["lowpowervision@gmail.com"])
     print(f"Job {compile_job.job_id} shared with lowpowervision@gmail.com")
