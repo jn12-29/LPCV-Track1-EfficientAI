@@ -4,10 +4,23 @@ Condensed from the LPCVTrack1 mobileclipv2_quant.py reference, tailored for
 MobileCLIP2-B (ViT-based vision encoder).
 
 Default configuration:
-  - Format:      QDQ
-  - Activation:  QUInt8
-  - Weight:      QInt8 (U8S8)
-  - Calibration: Percentile
+  - Format:      QDQ (QuantizeLinear + DequantizeLinear node pairs)
+  - Activation:  QUInt8 (asymmetric, HTP preferred)
+  - Weight:      QInt8 (symmetric, per-channel)
+  - Calibration: Percentile (99.9%, robust against attention logit outliers)
+
+Quantized ops (INT8):
+  - MatMul (72 nodes): MHSA projections + MLP FCs, main acceleration target
+  - Conv   (3 nodes):  Patch embedding backbone, memory bandwidth bottleneck
+  - Gemm   (1 node):   Final projection head
+
+FP32 islands (kept unquantized):
+  - GELU (14 Erf nodes): No native INT8 on QNN HTP, would fall back to CPU
+  - Softmax (12 nodes):  Attention distribution sensitive to quantization noise
+  - LayerNorm (25 nodes): QNN HTP has native FP16/FP32 LN support
+
+QNN EP will auto-partition: INT8 MatMul/Conv/Gemm → HTP HMX units,
+FP32 GELU/Softmax/LN → CPU/HVX fallback.
 """
 
 from __future__ import annotations
@@ -62,7 +75,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="PTQ for MobileCLIP2 ONNX encoders")
     p.add_argument("--onnx-dir", type=str, required=True,
                     help="Directory containing image_encoder.onnx and text_encoder.onnx")
-    p.add_argument("--output-suffix", type=str, default="_ptq_qdq_u8s8_pct")
+    p.add_argument("--output-suffix", type=str, default="_ptq_qdq_u8s8_mixed")
     p.add_argument("--jsonl-path", type=str, required=True)
     p.add_argument("--image-base-dir", type=str, required=True)
     p.add_argument("--calib-size", type=int, default=1000)
@@ -91,8 +104,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--per-channel", action="store_true", default=True)
     p.add_argument("--no-per-channel", dest="per_channel", action="store_false")
 
-    p.add_argument("--op-types", type=str, default="MatMul",
-                    help="Comma-separated op types to quantize (ViT is MatMul-heavy)")
+    p.add_argument("--op-types", type=str, default="MatMul,Gemm,Conv",
+                    help="Comma-separated op types to quantize. Default includes "
+                         "MatMul (72 MHSA+MLP), Conv (3 patch embed), Gemm (1 proj). "
+                         "GELU/Softmax/LayerNorm are intentionally excluded as FP32 islands.")
     p.add_argument("--model-name", type=str, default="MobileCLIP2-B",
                     help="Used for tokenizer selection only")
     return p.parse_args()
@@ -128,8 +143,12 @@ def _quantize_encoder(
             per_channel=per_channel,
             calibrate_method=calib_method,
             extra_options={
-                "ActivationSymmetric": False,
-                "WeightSymmetric": True,
+                "ActivationSymmetric": False,   # U8 asymmetric for activations
+                "WeightSymmetric": True,        # S8 symmetric for weights
+                "EnableSubgraph": False,        # Avoid subgraph quantization errors
+                "ForceQuantizeNoInputCheck": False,  # Respect input type constraints
+                # For older Hexagon DSP (HTP v68 and below), uncomment:
+                # "ReduceRange": True,          # Use 7-bit effective range
             },
         )
         print(f"  Quantized → {output_path}")
@@ -159,7 +178,9 @@ def main() -> None:
     text_dst = os.path.join(onnx_dir, f"text_encoder{suffix}.onnx")
 
     print(f"PTQ config: format={args.quant_format} act={args.activation_type} "
-          f"wt={args.weight_type} calib={args.calib_method} ops={op_types}")
+          f"wt={args.weight_type} calib={args.calib_method} per_channel={args.per_channel}")
+    print(f"  INT8 op types: {op_types}")
+    print(f"  FP32 islands:  GELU(Erf), Softmax, LayerNormalization (auto-skipped)")
 
     records = load_jsonl_records(args.jsonl_path, args.image_base_dir)
     calib_records, _ = split_calib_val(

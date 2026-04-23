@@ -24,8 +24,8 @@ from utils.preprocess import preprocess_image
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate PTQ ONNX encoders")
     p.add_argument("--onnx-dir", type=str, required=True)
-    p.add_argument("--image-postfix", type=str, default="_ptq_u8s8")
-    p.add_argument("--text-postfix", type=str, default="_ptq_u8s8")
+    p.add_argument("--image-postfix", type=str, default="_ptq_qdq_u8s8_mixed")
+    p.add_argument("--text-postfix", type=str, default="_ptq_qdq_u8s8_mixed")
     p.add_argument("--jsonl-path", type=str, required=True)
     p.add_argument("--image-base-dir", type=str, required=True)
     p.add_argument("--calib-size", type=int, default=1000)
