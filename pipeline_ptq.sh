@@ -42,7 +42,7 @@ if [ "${mode}" == "ptq" ]; then
     --seed 42 \
     --calib-method percentile \
     --quant-format qdq \
-    --activation-type qint8 \
+    --activation-type quint8 \
     --weight-type qint8 \
     --op-types "${op_types}" \
     --model-name MobileCLIP2-B 
