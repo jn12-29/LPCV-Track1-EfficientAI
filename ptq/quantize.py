@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -40,12 +41,16 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--onnx-dir", type=str, required=True,
                     help="Directory containing image_encoder.onnx and text_encoder.onnx")
+    p.add_argument("--output-suffix", type=str, default="_ptq_qdq_u8s8_pct",
+                    help="Suffix for locally saved quantized ONNX files")
     p.add_argument("--jsonl-path", type=str, required=True,
                     help="Contrastive JSONL dataset for calibration")
     p.add_argument("--image-base-dir", type=str, required=True,
                     help="Root directory for resolving image_path in JSONL")
     p.add_argument("--calib-size", type=int, default=500,
                     help="Number of calibration samples (default: 500)")
+    p.add_argument("--val-size", type=int, default=1,
+                    help="Validation split size used only for split compatibility")
     p.add_argument("--seed", type=int, default=42)
 
     p.add_argument("--quantize-image", action="store_true", default=True)
@@ -59,6 +64,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--activations-dtype", type=str, default="int8",
                     choices=["int8", "int16"],
                     help="Activation quantization dtype (default: int8)")
+    p.add_argument("--calib-method", type=str, default="percentile",
+                    help="Compatibility arg; QAI Hub uses backend-native PTQ method.")
+    p.add_argument("--quant-format", type=str, default="qdq",
+                    help="Compatibility arg; ignored in QAI Hub native quantization.")
+    p.add_argument("--activation-type", type=str, default="quint8",
+                    help="Compatibility arg; mapped by --activations-dtype instead.")
+    p.add_argument("--weight-type", type=str, default="qint8",
+                    help="Compatibility arg; mapped by --weights-dtype instead.")
+    p.add_argument("--op-types", type=str, default="",
+                    help="Compatibility arg; QAI Hub quantization is op-agnostic.")
 
     p.add_argument("--compile", action="store_true", default=False,
                     help="Also compile + profile after quantization")
@@ -70,9 +85,9 @@ def parse_args() -> argparse.Namespace:
 
 
 DTYPE_MAP = {
-    "int8": qai_hub.DataType.INT8,
-    "int4": qai_hub.DataType.INT4,
-    "int16": qai_hub.DataType.INT16,
+    "int8": qai_hub.QuantizeDtype.INT8,
+    "int4": qai_hub.QuantizeDtype.INT4,
+    "int16": qai_hub.QuantizeDtype.INT16,
 }
 
 
@@ -119,8 +134,8 @@ def build_text_calib_data(
 def quantize_on_hub(
     onnx_path: str,
     calib_data: dict[str, np.ndarray],
-    weights_dtype: qai_hub.DataType,
-    activations_dtype: qai_hub.DataType,
+    weights_dtype: qai_hub.QuantizeDtype,
+    activations_dtype: qai_hub.QuantizeDtype,
     name: str,
 ) -> tuple[str, object]:
     """Upload FP32 ONNX, run QAI Hub quantization, return (job_id, quantized_model)."""
@@ -149,6 +164,11 @@ def quantize_on_hub(
     return quantize_job.job_id, quantized_model
 
 
+def _copy_if_needed(src_path: str, dst_path: str) -> None:
+    if os.path.abspath(src_path) != os.path.abspath(dst_path):
+        shutil.copy2(src_path, dst_path)
+
+
 def compile_quantized(
     quantized_model,
     name: str,
@@ -174,6 +194,8 @@ def main() -> None:
 
     image_src = os.path.join(onnx_dir, "image_encoder.onnx")
     text_src = os.path.join(onnx_dir, "text_encoder.onnx")
+    image_dst = os.path.join(onnx_dir, f"image_encoder{args.output_suffix}.onnx")
+    text_dst = os.path.join(onnx_dir, f"text_encoder{args.output_suffix}.onnx")
 
     w_dtype = DTYPE_MAP[args.weights_dtype]
     a_dtype = DTYPE_MAP[args.activations_dtype]
@@ -184,7 +206,7 @@ def main() -> None:
     # Load calibration data
     records = load_jsonl_records(args.jsonl_path, args.image_base_dir)
     calib_records, _ = split_calib_val(
-        records, calib_size=args.calib_size, val_size=1, seed=args.seed,
+        records, calib_size=args.calib_size, val_size=args.val_size, seed=args.seed,
     )
     print(f"Loaded {len(calib_records)} calibration records")
 
@@ -203,6 +225,8 @@ def main() -> None:
         )
         results["image_quantize_job_id"] = img_q_job_id
         results["image_quantized_model_id"] = img_q_model.model_id
+        img_q_model.download(image_dst)
+        results["image_quantized_onnx_path"] = image_dst
 
         if args.compile:
             print("  Compiling quantized image encoder...")
@@ -213,6 +237,9 @@ def main() -> None:
                 {"image": (1, 3, 224, 224)},
             )
             results["image_compile_job_id"] = img_c_id
+    else:
+        _copy_if_needed(image_src, image_dst)
+        results["image_quantized_onnx_path"] = image_dst
 
     # --- Text encoder ---
     if args.quantize_text:
@@ -228,6 +255,8 @@ def main() -> None:
         )
         results["text_quantize_job_id"] = txt_q_job_id
         results["text_quantized_model_id"] = txt_q_model.model_id
+        txt_q_model.download(text_dst)
+        results["text_quantized_onnx_path"] = text_dst
 
         if args.compile:
             print("  Compiling quantized text encoder...")
@@ -238,6 +267,9 @@ def main() -> None:
                 {"text": ((1, 77), "int64")},
             )
             results["text_compile_job_id"] = txt_c_id
+    else:
+        _copy_if_needed(text_src, text_dst)
+        results["text_quantized_onnx_path"] = text_dst
 
     # Save results
     if args.ids_file:
