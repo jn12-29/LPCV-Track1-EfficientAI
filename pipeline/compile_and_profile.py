@@ -7,6 +7,9 @@ import qai_hub
 import onnx
 import os
 import argparse
+import json
+
+from onnx_utils import sanitize_value_info_clashing_with_io
 
 
 def run_profile(model, name, device) -> str:
@@ -35,6 +38,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--postfix", type=str, default="")
+    parser.add_argument("--ids-file", type=str, default=None)
     return parser.parse_args()
 
 
@@ -59,7 +63,7 @@ def main():
 
     # Load the ONNX models from the new location
     print(f"Loading ONNX Image Encoder from {IMAGE_ONNX_PATH}...")
-    onnx_img_model = onnx.load(IMAGE_ONNX_PATH)
+    onnx_img_model = sanitize_value_info_clashing_with_io(onnx.load(IMAGE_ONNX_PATH))
 
     # Check the model for errors
     try:
@@ -70,7 +74,7 @@ def main():
         print(e)
 
     print(f"\nLoading ONNX Text Encoder from {TEXT_ONNX_PATH}...")
-    onnx_txt_model = onnx.load(TEXT_ONNX_PATH)
+    onnx_txt_model = sanitize_value_info_clashing_with_io(onnx.load(TEXT_ONNX_PATH))
 
     # Check the model for errors
     try:
@@ -110,6 +114,11 @@ def main():
 
     def _wait_and_profile(job_id: str, name: str) -> str:
         target_model = qai_hub.get_job(job_id).get_target_model()
+        if target_model is None:
+            raise RuntimeError(
+                f"Compile failed (job {job_id}); cannot submit profile job. "
+                "Please inspect compile logs on QAI Hub."
+            )
         profile_job_id = run_profile(model=target_model, name=name, device=target_device)
         print(f"Profile job submitted for {name}: {profile_job_id}")
         return profile_job_id
@@ -121,10 +130,23 @@ def main():
         txt_profile_future = executor.submit(
             _wait_and_profile, txt_id, model_name + f"_text_encoder{postfix}"
         )
-        img_profile_future.result()
-        txt_profile_future.result()
+        img_profile_id = img_profile_future.result()
+        txt_profile_id = txt_profile_future.result()
 
     print("Profiling jobs submitted for both models.")
+
+    if args.ids_file:
+        payload = {
+            "model_name": model_name,
+            "postfix": postfix,
+            "image_compile_id": img_id,
+            "text_compile_id": txt_id,
+            "image_profile_id": img_profile_id,
+            "text_profile_id": txt_profile_id,
+        }
+        with open(args.ids_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"Saved job ids to: {args.ids_file}")
 
 
 if __name__ == "__main__":
