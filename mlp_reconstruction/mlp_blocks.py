@@ -15,7 +15,7 @@ class MLPBlockInfo:
     encoder: str                             # 'text' or 'visual'
 
 
-def iter_mlp_blocks(model: nn.Module, model_name: str) -> list[MLPBlockInfo]:
+def iter_mlp_blocks(model: nn.Module) -> list[MLPBlockInfo]:
     blocks: list[MLPBlockInfo] = []
     # Text encoder (same for all model variants)
     for i, rb in enumerate(model.text.transformer.resblocks):
@@ -60,9 +60,9 @@ def replace_gelu_with_relu(info: MLPBlockInfo) -> None:
     setattr(info.mlp, info.act_attr, nn.ReLU())
 
 
-def apply_relu_blocks(model: nn.Module, model_name: str, relu_labels: list[str]) -> None:
+def apply_relu_blocks(model: nn.Module, relu_labels: list[str]) -> None:
     """Restore ReLU structure before loading a reconstructed checkpoint's state_dict."""
     label_set = set(relu_labels)
-    for info in iter_mlp_blocks(model, model_name):
+    for info in iter_mlp_blocks(model):
         if info.label in label_set:
             replace_gelu_with_relu(info)
