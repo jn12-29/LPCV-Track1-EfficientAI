@@ -27,6 +27,8 @@ def _save_checkpoint(
         'model_state_dict': model.state_dict(),
         'model_name': model_name,
         'relu_blocks': relu_labels,
+        'relu_image': any(lbl.startswith('visual[') for lbl in relu_labels),
+        'relu_text': any(lbl.startswith('text[') for lbl in relu_labels),
     }, path)
 
 
