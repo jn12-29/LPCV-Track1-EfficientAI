@@ -29,6 +29,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Suffix appended to exported ONNX filenames and output directory.",
     )
+    parser.add_argument(
+        "--max-text-len",
+        type=int,
+        default=77,
+        help="Maximum number of tokens for text input. Can speed up inference for short text scene",
+    )
     return parser.parse_args()
 
 
@@ -42,9 +48,15 @@ class OpenClipVisionEncoder(nn.Module):
 
 
 class OpenClipTextEncoder(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, max_text_len: int = 77):
         super().__init__()
         self.model = model
+        self.max_text_len = max_text_len
+        if (getattr(model.text, "attn_mask", None) is not None) and (max_text_len < 77):
+            self.model.text.attn_mask = self.model.text.attn_mask[
+                :max_text_len, :max_text_len
+            ]
+            print(f"Truncated text attn_mask to [{max_text_len}, {max_text_len}]")
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         token_ids = token_ids.to(dtype=torch.int64)
@@ -53,7 +65,10 @@ class OpenClipTextEncoder(nn.Module):
             token_ids.shape[-1], device=token_ids.device
         ).unsqueeze(0)
         mask = (positions <= eot_pos).to(token_ids.dtype)
-        return self.model.encode_text(token_ids * mask)
+        token_ids = token_ids * mask
+        if self.max_text_len < token_ids.shape[-1]:
+            token_ids = token_ids[:, : self.max_text_len]
+        return self.model.encode_text(token_ids)
 
 
 def verify_onnx(
@@ -200,7 +215,9 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
     print(f"\nExport complete → {output_dir}")
 
 
-def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
+def export_encoders_to_onnx(
+    clip_model: nn.Module, output_dir: str, max_text_len: int
+) -> None:
     """Export image and text encoders to ONNX.
 
     clip_model must already be reparameterized and in eval mode.
@@ -209,7 +226,7 @@ def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
     device = next(clip_model.parameters()).device
 
     image_encoder = OpenClipVisionEncoder(clip_model).eval()
-    text_encoder = OpenClipTextEncoder(clip_model).eval()
+    text_encoder = OpenClipTextEncoder(clip_model, max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
     dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
@@ -291,7 +308,9 @@ def main() -> None:
         qat_encodings = ckpt.get("qat_encodings")
         clip_model, _, _ = _load_clip(model_name=args.model_name, device=device)
         # wrap_model_for_qat reparameterizes and creates QuantSim; encodings skip calibration.
-        clip_model = wrap_model_for_qat(clip_model, qat_config, device, qat_encodings=qat_encodings)
+        clip_model = wrap_model_for_qat(
+            clip_model, qat_config, device, qat_encodings=qat_encodings
+        )
         sim = clip_model._qat_sim
         print(f"Loaded QAT checkpoint: {checkpoint_path}")
         export_quantized_encoders_to_onnx(sim, output_dir_name)
@@ -303,7 +322,7 @@ def main() -> None:
         )
         clip_model = reparameterize_model(clip_model)
         clip_model.eval()
-        export_encoders_to_onnx(clip_model, output_dir_name)
+        export_encoders_to_onnx(clip_model, output_dir_name, args.max_text_len)
 
     if checkpoint_path:
         print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
