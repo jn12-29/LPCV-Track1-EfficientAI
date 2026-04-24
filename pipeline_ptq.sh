@@ -53,14 +53,3 @@ python pipeline/eval_remote.py \
   --seed 42 \
   --k 7 \
   ${image_layout_flag}
-
-# python pipeline/eval_remote.py \
-#   --model-name MobileCLIP2-B \
-#   --ids-file  ptq_compile_ids.json \
-#   --upload-dataset \
-#   --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-#   --image-base-dir ./ \
-#   --calib-size 1000 \
-#   --val-size 100 \
-#   --seed 42 \
-#   --k 7
