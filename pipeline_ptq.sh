@@ -6,7 +6,7 @@ export op_types=${3:-""}
 if [ "${mode}" == "fp" ]; then
     compile_ids_file=fp_compile_ids.json
     output_postfix=""
-    image_layout_flag=""
+    image_layout_flag="--image-channel-last"
 else
     compile_ids_file=ptq_compile_ids.json
     output_postfix="_ptq_qdq_u8s8_pct_1000"
