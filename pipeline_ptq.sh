@@ -6,12 +6,10 @@ export op_types=${3:-""}
 if [ "${mode}" == "fp" ]; then
     compile_ids_file=fp_compile_ids.json
     output_postfix=""
-    image_layout_flag="--image-channel-last"
 else
     compile_ids_file=ptq_compile_ids.json
     output_postfix="_ptq_qdq_u8s8_pct_1000"
     output_postfix="${output_postfix}_${op_types}"
-    image_layout_flag="--image-channel-last"
 fi
 
 # export onnx
@@ -51,5 +49,4 @@ python pipeline/eval_remote.py \
   --calib-size 1000 \
   --val-size 100 \
   --seed 42 \
-  --k 7 \
-  ${image_layout_flag}
+  --k 7

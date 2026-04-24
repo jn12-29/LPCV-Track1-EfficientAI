@@ -23,13 +23,9 @@ def compile_model(
     name,
     device,
     input_specs,
-    *,
-    force_channel_last_input_name: str | None = None,
 ) -> str:
     """Submits a compile job for the model and returns the job instance."""
     options = "--target_runtime qnn_dlc --truncate_64bit_io"
-    if force_channel_last_input_name:
-        options += f" --force_channel_last_input {force_channel_last_input_name}"
 
     compile_job = qai_hub.submit_compile_job(
         model=model,
@@ -97,8 +93,6 @@ def main():
 
     # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")
-    # Only enable force_channel_last for quantized image variants.
-    image_force_channel_last = "image" 
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         img_compile_future = executor.submit(
@@ -107,7 +101,6 @@ def main():
             model_name + f"_image_encoder{postfix}",
             target_device,
             {"image": (1, 3, 224, 224)},
-            force_channel_last_input_name=image_force_channel_last,
         )
         txt_compile_future = executor.submit(
             compile_model,
