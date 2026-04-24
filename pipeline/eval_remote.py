@@ -25,6 +25,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+
+import qai_hub.util.session as _qai_session
+_qai_session.EXTERNAL_RESPONSE_TIMEOUT_SECONDS = 300
+_qai_session.REQUEST_TIMEOUT_SECONDS = 300
+
 import numpy as np
 import open_clip
 import qai_hub
@@ -33,10 +38,7 @@ from PIL import Image
 from utils.data_utils import load_ground_truth, recall_at_k
 from utils.preprocess import preprocess_image
 
-DATA_DIR = Path("./sample_data")
-IMAGE_DIR = DATA_DIR / "images"
-IMG_LIST_CSV = DATA_DIR / "img_list.csv"
-TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
+DATA_DIR = Path("./sample_data")  # overridden by --data-dir at runtime
 
 DEFAULT_IMAGE_DATASET_ID = "d2qe36jl2"
 DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
@@ -77,7 +79,7 @@ def _upload_text_dataset() -> str:
     print(f"  {len(prompts)} prompts.")
 
     tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    tokenized_texts = [tokenizer([p]).numpy() for p in prompts]
+    tokenized_texts = [tokenizer([p]).numpy().astype("int32") for p in prompts]
 
     print("Uploading text dataset to QAI Hub...")
     text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
@@ -122,6 +124,8 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--data-dir", type=str, default=None,
+                        help="Path to sample_data directory (default: ./sample_data).")
     parser.add_argument("--upload-dataset", action="store_true",
                         help="Upload local sample_data to QAI Hub (Mode A).")
     parser.add_argument("--image-dataset-id", type=str, default=None,
@@ -138,6 +142,12 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+
+    if args.data_dir:
+        DATA_DIR = Path(args.data_dir)
+    IMAGE_DIR = DATA_DIR / "images"
+    IMG_LIST_CSV = DATA_DIR / "img_list.csv"
+    TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
 
     use_existing = args.image_inference_id is not None or args.text_inference_id is not None
     outputs = {}
@@ -209,12 +219,17 @@ if __name__ == "__main__":
                 task_name, result = future.result()
                 outputs[task_name] = result
 
+    if outputs.get("image") is None or outputs.get("text") is None:
+        failed = [k for k, v in outputs.items() if v is None]
+        raise RuntimeError(f"Inference failed for: {failed}. Check QAI Hub for details.")
     img_embeds = np.vstack(outputs["image"])
     txt_embeds = np.vstack(outputs["text"])
     print(f"\nComputing Recall@{args.k}...")
     print(f"  Image embeddings: {img_embeds.shape}")
     print(f"  Text  embeddings: {txt_embeds.shape}")
 
-    _, positive_indices = load_ground_truth()
+    _, positive_indices = load_ground_truth(
+        img_csv=IMG_LIST_CSV, txt_csv=TXT_LIST_CSV
+    )
     recall = recall_at_k(img_embeds, txt_embeds, positive_indices, k=args.k)
     print(f"\nRecall@{args.k} (on-device, XR2 Gen 2): {recall:.4f}")

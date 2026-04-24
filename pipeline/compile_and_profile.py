@@ -3,6 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+
+import qai_hub.util.session as _qai_session
+_qai_session.EXTERNAL_RESPONSE_TIMEOUT_SECONDS = 300
+_qai_session.REQUEST_TIMEOUT_SECONDS = 300
+
 import qai_hub
 import onnx
 import os
@@ -44,12 +49,12 @@ def main():
     postfix = args.postfix
 
     # --- Configuration ---
-    ONNX_DIR = f"exported_{model_name}_onnx"
+    ONNX_DIR = f"exported_{model_name}{postfix}_onnx"
     # ---------------------
 
     # Construct the full paths
-    IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{postfix}.onnx")
-    TEXT_ONNX_PATH = os.path.join(ONNX_DIR, f"text_encoder{postfix}.onnx")
+    IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, "image_encoder.onnx")
+    TEXT_ONNX_PATH = os.path.join(ONNX_DIR, "text_encoder.onnx")
 
     if not os.path.exists(ONNX_DIR):
         print(

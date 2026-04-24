@@ -29,6 +29,13 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Suffix appended to exported ONNX filenames and output directory.",
     )
+    parser.add_argument(
+        "--max-text-len",
+        type=int,
+        default=77,
+        help="Truncate text tokens to this length inside the ONNX graph (external input stays 77). "
+             "Reduces attention cost by ~(77/N)^2. E.g. --max-text-len 32 gives ~5.8x attention speedup.",
+    )
     return parser.parse_args()
 
 
@@ -42,9 +49,20 @@ class OpenClipVisionEncoder(nn.Module):
 
 
 class OpenClipTextEncoder(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, max_text_len: int = 77):
         super().__init__()
         self.model = model
+        self.max_text_len = max_text_len
+        # Some text transformers (e.g. MobileCLIP2-B) pre-build a fixed
+        # [context_len, context_len] causal attn_mask at init time. Truncate it
+        # to match max_text_len so encode_text doesn't raise a shape mismatch.
+        if max_text_len < 77:
+            text_module = getattr(model, "text", None)
+            if text_module is not None:
+                attn_mask = getattr(text_module, "attn_mask", None)
+                if attn_mask is not None:
+                    text_module.attn_mask = attn_mask[:max_text_len, :max_text_len]
+                    print(f"  Truncated text attn_mask to [{max_text_len}, {max_text_len}]")
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         token_ids = token_ids.to(dtype=torch.int64)
@@ -53,7 +71,10 @@ class OpenClipTextEncoder(nn.Module):
             token_ids.shape[-1], device=token_ids.device
         ).unsqueeze(0)
         mask = (positions <= eot_pos).to(token_ids.dtype)
-        return self.model.encode_text(token_ids * mask)
+        token_ids = token_ids * mask
+        if self.max_text_len < token_ids.shape[-1]:
+            token_ids = token_ids[:, : self.max_text_len]
+        return self.model.encode_text(token_ids)
 
 
 def verify_onnx(
@@ -200,16 +221,18 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
     print(f"\nExport complete → {output_dir}")
 
 
-def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
+def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str, max_text_len: int = 77) -> None:
     """Export image and text encoders to ONNX.
 
     clip_model must already be reparameterized and in eval mode.
+    max_text_len: tokens are truncated to this length inside the ONNX graph;
+                  the external input shape remains (1, 77).
     """
     os.makedirs(output_dir, exist_ok=True)
     device = next(clip_model.parameters()).device
 
     image_encoder = OpenClipVisionEncoder(clip_model).eval()
-    text_encoder = OpenClipTextEncoder(clip_model).eval()
+    text_encoder = OpenClipTextEncoder(clip_model, max_text_len=max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
     dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
@@ -303,7 +326,7 @@ def main() -> None:
         )
         clip_model = reparameterize_model(clip_model)
         clip_model.eval()
-        export_encoders_to_onnx(clip_model, output_dir_name)
+        export_encoders_to_onnx(clip_model, output_dir_name, max_text_len=args.max_text_len)
 
     if checkpoint_path:
         print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
