@@ -7,6 +7,7 @@ import qai_hub
 import onnx
 import os
 import argparse
+import json
 
 
 def run_profile(model, name, device) -> str:
@@ -17,14 +18,25 @@ def run_profile(model, name, device) -> str:
     return profile_job.job_id
 
 
-def compile_model(model, name, device, input_specs) -> str:
+def compile_model(
+    model,
+    name,
+    device,
+    input_specs,
+    *,
+    force_channel_last_input_name: str | None = None,
+) -> str:
     """Submits a compile job for the model and returns the job instance."""
+    options = "--target_runtime qnn_dlc --truncate_64bit_io"
+    if force_channel_last_input_name:
+        options += f" --force_channel_last_input {force_channel_last_input_name}"
+
     compile_job = qai_hub.submit_compile_job(
         model=model,
         name=name,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io",
+        options=options,
     )
     compile_job.modify_sharing(add_emails=["lowpowervision@gmail.com"])
     print(f"Job {compile_job.job_id} shared with lowpowervision@gmail.com")
@@ -35,6 +47,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--postfix", type=str, default="")
+    parser.add_argument("--ids-file", type=str, default=None)
     return parser.parse_args()
 
 
@@ -84,6 +97,9 @@ def main():
 
     # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")
+    # Only enable force_channel_last for quantized image variants.
+    image_force_channel_last = "image" 
+
     with ThreadPoolExecutor(max_workers=2) as executor:
         img_compile_future = executor.submit(
             compile_model,
@@ -91,6 +107,7 @@ def main():
             model_name + f"_image_encoder{postfix}",
             target_device,
             {"image": (1, 3, 224, 224)},
+            force_channel_last_input_name=image_force_channel_last,
         )
         txt_compile_future = executor.submit(
             compile_model,
@@ -121,10 +138,23 @@ def main():
         txt_profile_future = executor.submit(
             _wait_and_profile, txt_id, model_name + f"_text_encoder{postfix}"
         )
-        img_profile_future.result()
-        txt_profile_future.result()
+        img_profile_id = img_profile_future.result()
+        txt_profile_id = txt_profile_future.result()
 
     print("Profiling jobs submitted for both models.")
+
+    if args.ids_file:
+        payload = {
+            "model_name": model_name,
+            "postfix": postfix,
+            "image_compile_id": img_id,
+            "text_compile_id": txt_id,
+            "image_profile_id": img_profile_id,
+            "text_profile_id": txt_profile_id,
+        }
+        with open(args.ids_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"Saved job ids to: {args.ids_file}")
 
 
 if __name__ == "__main__":

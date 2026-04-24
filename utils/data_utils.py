@@ -88,3 +88,21 @@ def load_ground_truth(
                 [txt_num_to_idx[n] for n in gt if n in txt_num_to_idx]
             )
     return image_names, positive_indices
+
+
+def load_sample_image_names(img_csv: Path = Path("./sample_data/img_list.csv")) -> List[str]:
+    """Load ordered image filenames from sample_data img_list.csv."""
+    image_names: List[str] = []
+    with open(img_csv, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            image_names.append(row["Image_names"].strip())
+    return image_names
+
+
+def load_sample_text_prompts(txt_csv: Path = Path("./sample_data/txt_list.csv")) -> List[str]:
+    """Load ordered text prompts from sample_data txt_list.csv."""
+    prompts: List[str] = []
+    with open(txt_csv, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            prompts.append(row["Unique_Texts"].strip())
+    return prompts
