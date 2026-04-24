@@ -18,7 +18,6 @@ Three modes:
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,8 +30,14 @@ import open_clip
 import qai_hub
 from PIL import Image
 
-from utils.data_utils import load_ground_truth, recall_at_k
+from utils.data_utils import (
+    load_ground_truth,
+    load_sample_image_names,
+    load_sample_text_prompts,
+    recall_at_k,
+)
 from utils.preprocess import preprocess_image
+from ptq.dataset import load_jsonl_records, split_calib_val
 
 DATA_DIR = Path("./sample_data")
 IMAGE_DIR = DATA_DIR / "images"
@@ -51,10 +56,7 @@ DEFAULT_TEXT_COMPILED_ID = "jpx7wd93g"
 def _upload_image_dataset(image_channel_last: bool = False) -> str:
     """Preprocess and upload the image dataset; return dataset ID."""
     print("Processing images...")
-    image_names = []
-    with open(IMG_LIST_CSV, encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
-            image_names.append(row["Image_names"].strip())
+    image_names = load_sample_image_names(IMG_LIST_CSV)
 
     images = []
     for name in image_names:
@@ -72,17 +74,16 @@ def _upload_image_dataset(image_channel_last: bool = False) -> str:
     return image_dataset.dataset_id
 
 
-def _upload_text_dataset() -> str:
+def _upload_text_dataset(model_name: str, text_dtype: str) -> str:
     """Tokenize and upload the text dataset; return dataset ID."""
     print("Loading text prompts...")
-    prompts = []
-    with open(TXT_LIST_CSV, encoding="utf-8-sig", newline="") as f:
-        for row in csv.DictReader(f):
-            prompts.append(row["Unique_Texts"].strip())
+    prompts = load_sample_text_prompts(TXT_LIST_CSV)
     print(f"  {len(prompts)} prompts.")
 
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    tokenized_texts = [tokenizer([p]).numpy() for p in prompts]
+    tokenizer = open_clip.get_tokenizer(model_name)
+    target_dtype = np.int32 if text_dtype == "int32" else np.int64
+    tokens = tokenizer(prompts).numpy().astype(target_dtype)
+    tokenized_texts = [tokens[i : i + 1] for i in range(tokens.shape[0])]
 
     print("Uploading text dataset to QAI Hub...")
     text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
@@ -90,14 +91,91 @@ def _upload_text_dataset() -> str:
     return text_dataset.dataset_id
 
 
-def upload_datasets(image_channel_last: bool = False) -> tuple[str, str]:
+def upload_datasets(
+    model_name: str, text_dtype: str, image_channel_last: bool = False
+) -> tuple[str, str]:
     """Upload image and text datasets to QAI Hub in parallel; return their IDs."""
     with ThreadPoolExecutor(max_workers=2) as executor:
         img_future = executor.submit(_upload_image_dataset, image_channel_last)
-        txt_future = executor.submit(_upload_text_dataset)
+        txt_future = executor.submit(_upload_text_dataset, model_name, text_dtype)
         img_ds_id = img_future.result()
         txt_ds_id = txt_future.result()
     return img_ds_id, txt_ds_id
+
+
+def build_ptq_valid_eval_data(
+    *,
+    jsonl_path: str,
+    image_base_dir: str,
+    calib_size: int,
+    val_size: int,
+    seed: int,
+    model_name: str,
+    text_dtype: str,
+    image_channel_last: bool = False,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[list[int]]]:
+    records = load_jsonl_records(jsonl_path=jsonl_path, image_base_dir=image_base_dir)
+    _, val_records = split_calib_val(
+        records,
+        calib_size=calib_size,
+        val_size=val_size,
+        seed=seed,
+    )
+
+    images: list[np.ndarray] = []
+    for rec in val_records:
+        img = Image.open(rec["_resolved_path"]).convert("RGB")
+        tensor = preprocess_image(img).unsqueeze(0)
+        arr = tensor.numpy()
+        if image_channel_last:
+            arr = np.transpose(arr, (0, 2, 3, 1))  # (1, 224, 224, 3)
+        images.append(arr)
+
+    all_texts: list[str] = []
+    text_to_idx: dict[str, int] = {}
+    positive_indices: list[list[int]] = []
+    for rec in val_records:
+        indices = []
+        for txt in rec.get("positives", []):
+            if txt not in text_to_idx:
+                text_to_idx[txt] = len(all_texts)
+                all_texts.append(txt)
+            indices.append(text_to_idx[txt])
+        positive_indices.append(indices)
+
+    tokenizer = open_clip.get_tokenizer(model_name)
+    target_dtype = np.int32 if text_dtype == "int32" else np.int64
+    tokens = tokenizer(all_texts).numpy().astype(target_dtype)
+    tokenized_texts = [tokens[i : i + 1] for i in range(tokens.shape[0])]
+    return images, tokenized_texts, positive_indices
+
+
+def upload_ptq_valid_datasets(
+    *,
+    jsonl_path: str,
+    image_base_dir: str,
+    calib_size: int,
+    val_size: int,
+    seed: int,
+    model_name: str,
+    text_dtype: str,
+    image_channel_last: bool = False,
+) -> tuple[str, str, list[list[int]]]:
+    images, tokenized_texts, positive_indices = build_ptq_valid_eval_data(
+        jsonl_path=jsonl_path,
+        image_base_dir=image_base_dir,
+        calib_size=calib_size,
+        val_size=val_size,
+        seed=seed,
+        model_name=model_name,
+        text_dtype=text_dtype,
+        image_channel_last=image_channel_last,
+    )
+    image_dataset = qai_hub.upload_dataset({"image": images})
+    text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
+    print(f"  Image dataset ID: {image_dataset.dataset_id}")
+    print(f"  Text dataset ID: {text_dataset.dataset_id}")
+    return image_dataset.dataset_id, text_dataset.dataset_id, positive_indices
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +221,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calib-size", type=int, default=1000)
     parser.add_argument("--val-size", type=int, default=100)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save-dataset-ids-file", type=str, default=None)
+    parser.add_argument(
+        "--text-dtype",
+        type=str,
+        default="int32",
+        choices=["int32", "int64"],
+        help="Token dtype for uploaded text dataset. Use int32 with --truncate_64bit_io compile.",
+    )
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument(
         "--image-channel-last",
@@ -157,6 +243,7 @@ if __name__ == "__main__":
 
     use_existing = args.image_inference_id is not None or args.text_inference_id is not None
     outputs = {}
+    positive_indices = None
 
     if (args.image_compiled_id is None or args.text_compiled_id is None) and args.ids_file:
         try:
@@ -200,11 +287,47 @@ if __name__ == "__main__":
 
         if args.upload_dataset:
             print("=== Uploading datasets ===")
-            img_ds_id, txt_ds_id = upload_datasets(image_channel_last=args.image_channel_last)
+            if args.jsonl_path:
+                img_ds_id, txt_ds_id, positive_indices = upload_ptq_valid_datasets(
+                    jsonl_path=args.jsonl_path,
+                    image_base_dir=args.image_base_dir,
+                    calib_size=args.calib_size,
+                    val_size=args.val_size,
+                    seed=args.seed,
+                    model_name=args.model_name,
+                    text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
+                )
+            else:
+                img_ds_id, txt_ds_id = upload_datasets(
+                    model_name=args.model_name,
+                    text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
+                )
             print()
         else:
             img_ds_id = args.image_dataset_id or DEFAULT_IMAGE_DATASET_ID
             txt_ds_id = args.text_dataset_id or DEFAULT_TEXT_DATASET_ID
+            if args.jsonl_path:
+                _, _, positive_indices = build_ptq_valid_eval_data(
+                    jsonl_path=args.jsonl_path,
+                    image_base_dir=args.image_base_dir,
+                    calib_size=args.calib_size,
+                    val_size=args.val_size,
+                    seed=args.seed,
+                    model_name=args.model_name,
+                    text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
+                )
+
+        if args.save_dataset_ids_file:
+            with open(args.save_dataset_ids_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"image_dataset_id": img_ds_id, "text_dataset_id": txt_ds_id},
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
         device = qai_hub.Device("XR2 Gen 2 (Proxy)")
         tasks = {
@@ -243,6 +366,7 @@ if __name__ == "__main__":
     print(f"  Image embeddings: {img_embeds.shape}")
     print(f"  Text  embeddings: {txt_embeds.shape}")
 
-    _, positive_indices = load_ground_truth()
+    if positive_indices is None:
+        _, positive_indices = load_ground_truth()
     recall = recall_at_k(img_embeds, txt_embeds, positive_indices, k=args.k)
     print(f"\nRecall@{args.k} (on-device, XR2 Gen 2): {recall:.4f}")
