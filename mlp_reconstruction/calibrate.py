@@ -85,13 +85,14 @@ def collect_mlp_io(
 
     model.eval()
     batches = text_batches if info.encoder == 'text' else image_batches
-    for batch in batches:
-        batch = batch.to(device)
-        if info.encoder == 'text':
-            model.encode_text(batch)
-        else:
-            model.encode_image(batch)
-
-    h_x.remove()
-    h_o.remove()
+    try:
+        for batch in batches:
+            batch = batch.to(device)
+            if info.encoder == 'text':
+                model.encode_text(batch)
+            else:
+                model.encode_image(batch)
+    finally:
+        h_x.remove()
+        h_o.remove()
     return torch.cat(X_list, dim=0), torch.cat(O_list, dim=0)
