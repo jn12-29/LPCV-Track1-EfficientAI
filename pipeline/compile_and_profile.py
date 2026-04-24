@@ -1,6 +1,7 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import qai_hub
@@ -17,14 +18,14 @@ def run_profile(model, name, device) -> str:
     return profile_job.job_id
 
 
-def compile_model(model, name, device, input_specs) -> str:
+def compile_model(model, name, device, input_specs, options) -> str:
     """Submits a compile job for the model and returns the job instance."""
     compile_job = qai_hub.submit_compile_job(
         model=model,
         name=name,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io",
+        options=options,
     )
     compile_job.modify_sharing(add_emails=["lowpowervision@gmail.com"])
     print(f"Job {compile_job.job_id} shared with lowpowervision@gmail.com")
@@ -91,6 +92,7 @@ def main():
             model_name + f"_image_encoder{postfix}",
             target_device,
             {"image": (1, 3, 224, 224)},
+            "--target_runtime qnn_dlc --truncate_64bit_io",
         )
         txt_compile_future = executor.submit(
             compile_model,
@@ -98,6 +100,7 @@ def main():
             model_name + f"_text_encoder{postfix}",
             target_device,
             {"text": ((1, 77), "int64")},
+            "--target_runtime qnn_dlc --truncate_64bit_io",
         )
         img_id = img_compile_future.result()
         txt_id = txt_compile_future.result()
@@ -110,7 +113,9 @@ def main():
 
     def _wait_and_profile(job_id: str, name: str) -> str:
         target_model = qai_hub.get_job(job_id).get_target_model()
-        profile_job_id = run_profile(model=target_model, name=name, device=target_device)
+        profile_job_id = run_profile(
+            model=target_model, name=name, device=target_device
+        )
         print(f"Profile job submitted for {name}: {profile_job_id}")
         return profile_job_id
 

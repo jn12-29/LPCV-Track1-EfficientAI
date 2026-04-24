@@ -10,7 +10,7 @@ netron checkpoints/MobileCLIP2-B__bs128_ep100_lr1e-06_wd0.2_acc64_hn4_hnw1_seed0
 # export onnx
 python pipeline/export_onnx.py --model-name MobileCLIP2-S0
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2
-python pipeline/export_onnx.py --model-name MobileCLIP2-S3
+python pipeline/export_onnx.py --model-name MobileCLIP2-B
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt --output-postfix _260423  
 
@@ -18,18 +18,16 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep200_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260420_000848/checkpoint_epoch_060.pt --output-postfix _260421
 
-python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep200_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260420_000848/checkpoint_epoch_085.pt --output-postfix _260422
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt --output-postfix _260423
+
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt --output-postfix _260424_0 --max-text-len 40
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S3
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260418
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260420
-
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260421
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260422
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260423
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260424_0
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
@@ -37,9 +35,7 @@ python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt
 
-CUDA_VISIBLE_DEVICES=5 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep100_lr1e-06_wd0.2_acc64_hn4_hnw1_seed0__20260422_185248/checkpoint_epoch_025.pt
-CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep200_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260420_000848/checkpoint_epoch_150.pt
-CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_epoch_100.pt
+CUDA_VISIBLE_DEVICES=6 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt
 
 # eval local (onnx)
 python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
@@ -84,7 +80,7 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=295
 
 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 128 --accum-freq 32 --epochs 100 --lr 1e-6 --weight-decay 0.2 \
+    --model-name MobileCLIP2-B --gpu-ids 1,2,3,5 --batch-size 256 --accum-freq 30 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4
 
 python train/finetune.py \
