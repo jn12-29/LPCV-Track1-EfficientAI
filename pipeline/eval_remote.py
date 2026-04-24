@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -40,13 +41,14 @@ TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
 
 DEFAULT_IMAGE_DATASET_ID = "d2qe36jl2"
 DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
+DEFAULT_TEXT_COMPILED_ID = "jpx7wd93g"
 
 
 # ---------------------------------------------------------------------------
 # Dataset upload
 # ---------------------------------------------------------------------------
 
-def _upload_image_dataset() -> str:
+def _upload_image_dataset(image_channel_last: bool = False) -> str:
     """Preprocess and upload the image dataset; return dataset ID."""
     print("Processing images...")
     image_names = []
@@ -58,7 +60,10 @@ def _upload_image_dataset() -> str:
     for name in image_names:
         img = Image.open(IMAGE_DIR / name)
         tensor = preprocess_image(img).unsqueeze(0)  # (1, 3, 224, 224)
-        images.append(tensor.numpy())
+        arr = tensor.numpy()
+        if image_channel_last:
+            arr = np.transpose(arr, (0, 2, 3, 1))  # (1, 224, 224, 3)
+        images.append(arr)
 
     print(f"  {len(images)} images, shape {images[0].shape}, dtype {images[0].dtype}")
     print("Uploading image dataset to QAI Hub...")
@@ -85,10 +90,10 @@ def _upload_text_dataset() -> str:
     return text_dataset.dataset_id
 
 
-def upload_datasets() -> tuple[str, str]:
+def upload_datasets(image_channel_last: bool = False) -> tuple[str, str]:
     """Upload image and text datasets to QAI Hub in parallel; return their IDs."""
     with ThreadPoolExecutor(max_workers=2) as executor:
-        img_future = executor.submit(_upload_image_dataset)
+        img_future = executor.submit(_upload_image_dataset, image_channel_last)
         txt_future = executor.submit(_upload_text_dataset)
         img_ds_id = img_future.result()
         txt_ds_id = txt_future.result()
@@ -130,9 +135,20 @@ def parse_args() -> argparse.Namespace:
                         help=f"QAI Hub text dataset ID (default: {DEFAULT_TEXT_DATASET_ID}).")
     parser.add_argument("--image-compiled-id", type=str, default=None)
     parser.add_argument("--text-compiled-id", type=str, default=None)
+    parser.add_argument("--ids-file", type=str, default=None)
     parser.add_argument("--image-inference-id", type=str, default=None)
     parser.add_argument("--text-inference-id", type=str, default=None)
+    parser.add_argument("--jsonl-path", type=str, default=None)
+    parser.add_argument("--image-base-dir", type=str, default="./")
+    parser.add_argument("--calib-size", type=int, default=1000)
+    parser.add_argument("--val-size", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--k", type=int, default=10)
+    parser.add_argument(
+        "--image-channel-last",
+        action="store_true",
+        help="If set, transpose image input from NCHW to NHWC before dataset upload.",
+    )
     return parser.parse_args()
 
 
@@ -141,6 +157,18 @@ if __name__ == "__main__":
 
     use_existing = args.image_inference_id is not None or args.text_inference_id is not None
     outputs = {}
+
+    if (args.image_compiled_id is None or args.text_compiled_id is None) and args.ids_file:
+        try:
+            with open(args.ids_file, "r", encoding="utf-8") as f:
+                ids_payload = json.load(f)
+            args.image_compiled_id = ids_payload.get("image_compile_id")
+            args.text_compiled_id = ids_payload.get("text_compile_id")
+        except Exception as e:
+            print(f"Warning: failed to read ids file '{args.ids_file}': {e}")
+
+    if args.text_compiled_id is None:
+        args.text_compiled_id = DEFAULT_TEXT_COMPILED_ID
 
     if use_existing:
         tasks = {"text": args.text_inference_id, "image": args.image_inference_id}
@@ -172,7 +200,7 @@ if __name__ == "__main__":
 
         if args.upload_dataset:
             print("=== Uploading datasets ===")
-            img_ds_id, txt_ds_id = upload_datasets()
+            img_ds_id, txt_ds_id = upload_datasets(image_channel_last=args.image_channel_last)
             print()
         else:
             img_ds_id = args.image_dataset_id or DEFAULT_IMAGE_DATASET_ID
