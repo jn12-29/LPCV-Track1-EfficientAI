@@ -48,6 +48,11 @@ def parse_args():
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--postfix", type=str, default="")
     parser.add_argument("--ids-file", type=str, default=None)
+    parser.add_argument(
+        "--image-channel-last",
+        action="store_true",
+        help="Compile image model with NHWC input layout.",
+    )
     return parser.parse_args()
 
 
@@ -97,8 +102,8 @@ def main():
 
     # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")
-    # Only enable force_channel_last for quantized image variants.
-    image_force_channel_last = "image" 
+    image_force_channel_last = "image" if args.image_channel_last else None
+    image_input_shape = (1, 224, 224, 3) if args.image_channel_last else (1, 3, 224, 224)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         img_compile_future = executor.submit(
@@ -106,7 +111,7 @@ def main():
             onnx_img_model,
             model_name + f"_image_encoder{postfix}",
             target_device,
-            {"image": (1, 3, 224, 224)},
+            {"image": image_input_shape},
             force_channel_last_input_name=image_force_channel_last,
         )
         txt_compile_future = executor.submit(

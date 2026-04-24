@@ -18,7 +18,8 @@ fi
 python pipeline/export_onnx.py \
   --model-name MobileCLIP2-B \
   --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt \
-  --output-postfix ""
+  --output-postfix "" \
+  ${image_layout_flag}
 
 if [ "${mode}" == "ptq" ]; then
     python ptq/quantize.py \
@@ -40,7 +41,8 @@ fi
 python pipeline/compile_and_profile.py \
   --model-name MobileCLIP2-B \
   --postfix "${output_postfix}" \
-  --ids-file "${compile_ids_file}"
+  --ids-file "${compile_ids_file}" \
+  ${image_layout_flag}
 
 python pipeline/eval_remote.py \
   --model-name MobileCLIP2-B \
@@ -51,5 +53,4 @@ python pipeline/eval_remote.py \
   --calib-size 1000 \
   --val-size 100 \
   --seed 42 \
-  --k 7 \
-  ${image_layout_flag}
+  --k 7

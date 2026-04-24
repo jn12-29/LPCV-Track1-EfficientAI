@@ -80,9 +80,10 @@ def split_calib_val(
 class ImageCalibReader(CalibrationDataReader):
     """Feeds preprocessed images to the image encoder during calibration."""
 
-    def __init__(self, records: List[Dict]):
+    def __init__(self, records: List[Dict], image_channel_last: bool = False):
         self.records = records
         self.idx = 0
+        self.image_channel_last = image_channel_last
 
     def get_next(self) -> Optional[Dict[str, np.ndarray]]:
         if self.idx >= len(self.records):
@@ -91,6 +92,8 @@ class ImageCalibReader(CalibrationDataReader):
         self.idx += 1
         img = Image.open(rec["_resolved_path"]).convert("RGB")
         tensor = preprocess_image(img).unsqueeze(0).numpy().astype(np.float32)
+        if self.image_channel_last:
+            tensor = np.transpose(tensor, (0, 2, 3, 1))
         return {"image": tensor}
 
 

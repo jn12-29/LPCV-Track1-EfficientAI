@@ -117,6 +117,23 @@ def _parse_op_types(csv: str) -> List[str]:
     return list(dict.fromkeys(t.strip() for t in csv.split(",") if t.strip()))
 
 
+def _get_image_input_layout(image_onnx_path: str) -> str:
+    """Infer image input layout from ONNX input shape."""
+    model = onnx.load(image_onnx_path)
+    image_input = next((i for i in model.graph.input if i.name == "image"), None)
+    if image_input is None:
+        raise ValueError(f"No 'image' input found in {image_onnx_path}")
+    dims = image_input.type.tensor_type.shape.dim
+    shape = [d.dim_value for d in dims]
+    if len(shape) != 4:
+        raise ValueError(f"Expected 4D image input, got shape={shape}")
+    if shape[1] == 3:
+        return "nchw"
+    if shape[3] == 3:
+        return "nhwc"
+    raise ValueError(f"Cannot infer layout from image input shape={shape}")
+
+
 def _quantize_encoder(
     input_path: str,
     output_path: str,
@@ -197,7 +214,11 @@ def main() -> None:
         if not os.path.exists(image_src):
             raise FileNotFoundError(f"Missing {image_src}")
         print("Quantizing image encoder …")
-        reader = ImageCalibReader(calib_records)
+        image_layout = _get_image_input_layout(image_src)
+        print(f"  Detected image input layout: {image_layout.upper()}")
+        reader = ImageCalibReader(
+            calib_records, image_channel_last=(image_layout == "nhwc")
+        )
         _quantize_encoder(
             image_src, image_dst, reader,
             calib_method, quant_format, act_type, wt_type,

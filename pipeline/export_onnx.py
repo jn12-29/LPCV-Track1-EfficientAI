@@ -24,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument(
+        "--image-channel-last",
+        action="store_true",
+        help="Export image encoder ONNX with NHWC input layout.",
+    )
+    parser.add_argument(
         "--output-postfix",
         type=str,
         default="",
@@ -33,11 +38,14 @@ def parse_args() -> argparse.Namespace:
 
 
 class OpenClipVisionEncoder(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, image_channel_last: bool = False):
         super().__init__()
         self.model = model
+        self.image_channel_last = image_channel_last
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        if self.image_channel_last:
+            image = image.permute(0, 3, 1, 2)
         return self.model.encode_image(image)
 
 
@@ -102,7 +110,9 @@ def _simplify_onnx(onnx_path: str) -> None:
         print(f"  Simplification failed (kept original): {onnx_path}")
 
 
-def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
+def export_encoders_to_onnx(
+    clip_model: nn.Module, output_dir: str, image_channel_last: bool = False
+) -> None:
     """Export image and text encoders to ONNX.
 
     clip_model must already be reparameterized and in eval mode.
@@ -110,10 +120,15 @@ def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
     os.makedirs(output_dir, exist_ok=True)
     device = next(clip_model.parameters()).device
 
-    image_encoder = OpenClipVisionEncoder(clip_model).eval()
+    image_encoder = OpenClipVisionEncoder(
+        clip_model, image_channel_last=image_channel_last
+    ).eval()
     text_encoder = OpenClipTextEncoder(clip_model).eval()
 
-    dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
+    if image_channel_last:
+        dummy_image = torch.rand(1, 224, 224, 3, dtype=torch.float32, device=device)
+    else:
+        dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
     dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
 
     print("\nCalculating PyTorch baseline outputs for validation...")
@@ -200,7 +215,11 @@ def main() -> None:
         clip_model = reparameterize_model(clip_model)
 
     clip_model.eval()
-    export_encoders_to_onnx(clip_model, output_dir_name)
+    export_encoders_to_onnx(
+        clip_model,
+        output_dir_name,
+        image_channel_last=args.image_channel_last,
+    )
 
     if checkpoint_path:
         print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
