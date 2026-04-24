@@ -1,0 +1,47 @@
+name: GPT-OSS-20B
+id: gpt_oss_20b
+status: unpublished
+status_reason: GPT OSS doesn't work on commercial android devices (mostly limited to 12 GB memory). The model works on dev devices on QDC given higher RAM (16GB).
+headline: State-of-the-art Mixture of Experts large language model with extended context length for text generation tasks.
+domain: Generative AI
+use_case: Text Generation
+description: GPT-OSS-20B is a 20.9B parameter Mixture of Experts (MoE) language model with 32 experts (4 active per token). It features an extended 131K context length with YARN rope scaling and uses a GPT-4o compatible tokenizer. The model is quantized to MXFP4 for efficient on-device deployment.
+tags:
+- llm
+- generative-ai
+- moe
+research_paper: https://arxiv.org/abs/2508.10925
+research_paper_title: 'gpt-oss-120b & gpt-oss-20b Model Card'
+license: https://huggingface.co/datasets/choosealicense/licenses/blob/main/markdown/apache-2.0.md
+source_repo: https://huggingface.co/ggml-org/gpt-oss-20b-GGUF
+technical_details:
+  Number of parameters: 20.91B
+  Model architecture: Mixture of Experts (MoE)
+  Number of experts: '32'
+  Active experts per token: '4'
+  Tokenizer: BPE (GPT-2 style with GPT-4o preprocessing)
+  Quantization Type: MXFP4
+  Model size: 11.27 GB (GGUF)
+  Supported languages: English
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt.
+  Response Rate: Rate of response generation after the first response token.
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Long Context Tasks
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+license_type: apache-2.0
+dataset: []
+restrict_model_sharing: false
+model_type_llm: true
+llm_details:
+  call_to_action: Download and View Readme
+  llama_cpp_compatible: true
+  llama_cpp_model_url: https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/main/gpt-oss-20b-mxfp4.gguf
+  genie_compatible: false
+  devices: {}

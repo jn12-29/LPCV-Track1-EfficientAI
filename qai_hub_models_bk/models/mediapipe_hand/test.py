@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+import numpy as np
+
+from qai_hub_models.models.mediapipe_hand.app import MediaPipeHandApp
+from qai_hub_models.models.mediapipe_hand.demo import INPUT_IMAGE_ADDRESS
+from qai_hub_models.models.mediapipe_hand.demo import main as demo_main
+from qai_hub_models.models.mediapipe_hand.model import (
+    MODEL_ASSET_VERSION,
+    MODEL_ID,
+    MediaPipeHand,
+)
+from qai_hub_models.utils.asset_loaders import CachedWebModelAsset, load_image
+from qai_hub_models.utils.testing import skip_clone_repo_check
+
+OUTPUT_IMAGE_ADDRESS = CachedWebModelAsset.from_asset_store(
+    MODEL_ID, MODEL_ASSET_VERSION, "hand_output.png"
+)
+
+# Because we have not made a modification to the pytorch source network,
+# no numerical tests are included for the model; only for the app.
+
+
+@skip_clone_repo_check
+def test_hand_app() -> None:
+    image = load_image(
+        INPUT_IMAGE_ADDRESS,
+    )
+    expected_output = load_image(
+        OUTPUT_IMAGE_ADDRESS,
+    ).convert("RGB")
+    app = MediaPipeHandApp.from_pretrained(
+        MediaPipeHand.from_pretrained(include_detector_postprocessing=False)
+    )
+    actual_output = app.predict_landmarks_from_image(image)[0]
+    assert isinstance(actual_output, np.ndarray)
+    np.testing.assert_allclose(actual_output, np.asarray(expected_output))
+
+
+@skip_clone_repo_check
+def test_hand_app_with_det_postprocessing() -> None:
+    image = load_image(
+        INPUT_IMAGE_ADDRESS,
+    )
+    expected_output = load_image(
+        OUTPUT_IMAGE_ADDRESS,
+    ).convert("RGB")
+    app = MediaPipeHandApp.from_pretrained(
+        MediaPipeHand.from_pretrained(include_detector_postprocessing=True)
+    )
+    actual_output = app.predict_landmarks_from_image(image)[0]
+    assert isinstance(actual_output, np.ndarray)
+    np.testing.assert_allclose(actual_output, np.asarray(expected_output))
+
+
+@skip_clone_repo_check
+def test_demo() -> None:
+    demo_main(is_test=True)

@@ -1,0 +1,37 @@
+name: Falcon3-7B-Instruct
+id: falcon_v3_7b_instruct
+status: published
+headline: State-of-the-art large language model useful on a variety of language understanding and generation tasks.
+domain: Generative AI
+description: Falcon3 family of Open Foundation Models is a set of pretrained and instruct LLMs ranging from 1B to 10B.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models:
+- llama_v3_8b_instruct
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input sequence length for Prompt Processor: '128'
+  Context length: '4096'
+  Quantization Type: w4a16 + w8a16 (few layers)
+  Supported languages: English, French, Spanish, Portuguese.
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt. The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of the prompt processor) and the upper bound is for a prompt using the full context length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token.
+license_type: falcon3
+source_repo: https://huggingface.co/tiiuae/Falcon3-7B-Instruct
+license: https://falconllm.tii.ae/falcon-terms-and-conditions.html
+model_type_llm: true
+llm_details:
+  call_to_action: View Readme
+  genie_compatible: true
+  devices: {}

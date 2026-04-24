@@ -1,0 +1,10 @@
+supported_precisions:
+- w4a16
+skip_hub_tests_and_scorecard: true
+is_precompiled: true
+skip_export: true
+additional_readme_section: |
+  ## Deploying JAIS-6p7b-Chat on-device
+
+  Please follow the [LLM on-device deployment]({genie_url}) tutorial.
+skip_example_usage: true

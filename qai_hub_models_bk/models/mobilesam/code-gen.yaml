@@ -1,0 +1,4 @@
+has_on_target_demo: true
+is_collection_model: true
+global_requirements_incompatible: true
+pip_install_flags: git+https://github.com/ChaoningZhang/MobileSAM@34bbbfd --use-pep517

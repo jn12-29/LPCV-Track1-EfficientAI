@@ -1,0 +1,26 @@
+name: Pi0.5
+id: pi05
+status: unpublished
+status_reason: https://github.com/qcom-ai-hub/tetracode/issues/15634
+headline: State-of-the-art generalist robotic foundation model trained on vision, language, and action to enable dexterous, zero-shot physical task execution across diverse robot platforms.
+domain: Multimodal
+description: Pi0.5 is a vision-language-action model that co-trains on diverse data sources (robot demos, web data, semantic subtasks) to enable open-world generalization for long-horizon robotic manipulation.
+use_case: Text Generation  # placeholder
+tags:
+- generative-ai
+applicable_scenarios:
+- Robotics
+related_models:
+- llama_v3_2_3b_instruct
+form_factors:
+- Auto
+has_static_banner: false
+has_animated_banner: false
+dataset: []
+technical_details:
+  Input: Text prompt to generate image
+license_type: apache-2.0
+research_paper: https://www.physicalintelligence.company/download/pi05.pdf
+research_paper_title: "Pi0.5: a Vision-Language-Action Model with Open-World Generalization"
+source_repo: https://github.com/Physical-Intelligence/openpi
+license: https://github.com/Physical-Intelligence/openpi/blob/main/LICENSE

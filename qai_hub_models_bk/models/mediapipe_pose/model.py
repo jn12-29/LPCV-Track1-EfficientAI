@@ -1,0 +1,399 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import torch
+from typing_extensions import Self
+
+from qai_hub_models.models._shared.mediapipe.utils import (
+    MediaPipePyTorchAsRoot,
+    mediapipe_detector_postprocess,
+)
+from qai_hub_models.models.common import Precision, SampleInputsType
+from qai_hub_models.utils.asset_loaders import (
+    CachedWebModelAsset,
+    find_replace_in_repo,
+    load_numpy,
+)
+from qai_hub_models.utils.base_model import (
+    BaseModel,
+    CollectionModel,
+    PretrainedCollectionModel,
+)
+from qai_hub_models.utils.input_spec import (
+    ColorFormat,
+    ImageMetadata,
+    InputSpec,
+    IoType,
+    TensorSpec,
+)
+
+MODEL_ID = __name__.split(".")[-2]
+MODEL_ASSET_VERSION = 3
+
+POSE_LANDMARK_CONNECTIONS = [
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 7),
+    (0, 4),
+    (4, 5),
+    (5, 6),
+    (6, 8),
+    (9, 10),
+    (11, 13),
+    (13, 15),
+    (15, 17),
+    (17, 19),
+    (19, 15),
+    (15, 21),
+    (12, 14),
+    (14, 16),
+    (16, 18),
+    (18, 20),
+    (20, 16),
+    (16, 22),
+    (11, 12),
+    (12, 24),
+    (24, 23),
+    (23, 11),
+]
+
+
+# pose detector model parameters.
+BATCH_SIZE = 1
+DETECT_SCORE_CLIPPING_THRESHOLD = 100  # Clip output scores to this maximum value.
+DETECT_DEFAULT_INCLUDE_POSTPROCESSING = False
+FILTER_OOB_BOX = False  # Filter out of bound bbox
+DETECT_DXY, DETECT_DSCALE = (
+    0,
+    1.5,
+)  # Modifiers applied to pose detector output bounding box to encapsulate the entire pose.
+POSE_KEYPOINT_INDEX_START = 2  # The pose detector outputs several keypoints. This is the keypoint index for the bottom.
+POSE_KEYPOINT_INDEX_END = 3  # The pose detector outputs several keypoints. This is the keypoint index for the top.
+DRAW_POSE_KEYPOINT_INDICES = [
+    1,
+    3,
+]  # The pose keypoints that should be drawn on the output image.
+ROTATION_VECTOR_OFFSET_RADS = (
+    torch.pi / 2
+)  # Offset required when computing rotation of the detected pose.
+
+
+def _apply_blazepose_fixes(repo_path: str) -> None:
+    """
+    Apply necessary fixes to the blazepose repository code.
+    These fixes include:
+    1. Changing return statement to return separate tensors as concat reduces the w8a8 accuracy
+    2. Apply padding for better quantization accuracy
+    """
+    find_replace_in_repo(
+        repo_path,
+        "blazepose.py",
+        "return [r, c]",
+        "return [r1, r2, c1, c2]",
+    )
+    find_replace_in_repo(
+        repo_path,
+        "blazepose.py",
+        '# x = F.pad(x, (1, 2, 1, 2), "constant", 0)',
+        'x = F.pad(x, (1, 2, 2, 2), "constant", 0)',
+    )
+
+
+class PoseDetector(BaseModel):
+    """
+    Pose detection model. Input is an image, output is
+    [bounding boxes & keypoints, box & kp scores]
+    """
+
+    def __init__(
+        self,
+        detector: Callable[
+            [torch.Tensor],
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ],
+        anchors: torch.Tensor,
+        score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> None:
+        super().__init__()
+        self.detector = detector
+        self.anchors = anchors.view([*list(anchors.shape)[:-1], -1, 2])
+        self.include_postprocessing = include_postprocessing
+        self.score_clipping_threshold = score_clipping_threshold
+
+    def forward(
+        self, image: torch.Tensor
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        | tuple[torch.Tensor, torch.Tensor]
+    ):
+        """
+        Pose detector forward pass.
+
+        Parameters
+        ----------
+        image
+          RGB input image of shape (B, 3, H, W).  Range is [0-1].
+
+        Returns
+        -------
+        boxes_and_coordinates_and_scores: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor]
+            If self.include_postprocessing is False:
+                boxes_coords_1: torch.Tensor
+                    Boxes + Coords of shape [1, N1, 12] in pixel space
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (width, height))
+                    - indices [4-11] are the 4 keypoint coordinates ((x1,y1), (x2,y2), (x3,y3), (x4,y4)).
+
+                boxes_coords_2: torch.Tensor
+                    Boxes + Coords of shape [1, N2, 12] in pixel space
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (width, height))
+                    - indices [4-11] are the 4 keypoint coordinates ((x1,y1), (x2,y2), (x3,y3), (x4,y4)).
+
+                box_scores_1: torch.Tensor
+                    Raw model logits of shape [1, N1, 1] in pixel space
+
+                box_scores_2: torch.Tensor
+                    Raw model logits of shape [1, N2, 1] in pixel space
+
+            If self.include_postprocessing is True:
+                boxes_and_coordinates: torch.Tensor
+                    Detected boxes and coordinates in pixel space
+                    Shape (B, N, 12). Where N is number of detections
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (x_max, y_max))
+                    - indices [4-11] are the 4 keypoint coordinates (x1,y1, x2,y2, x3,y3, x4,y4).
+
+                scores: torch.Tensor
+                    Clipped and sigmoid activated scores of shape (B, N).
+        """
+        box_coords1, box_coords2, box_scores1, box_scores2 = self.detector(image)
+
+        if self.include_postprocessing:
+            coords = torch.cat([box_coords1, box_coords2], dim=1)
+            scores = torch.cat([box_scores1, box_scores2], dim=1)
+            coords, scores = mediapipe_detector_postprocess(
+                coords,
+                scores,
+                self.score_clipping_threshold,
+                (image.shape[2], image.shape[3]),
+                self.anchors,
+            )
+            return coords, scores
+
+        return box_coords1, box_coords2, box_scores1, box_scores2
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        detector_weights: str = "blazepose.pth",
+        detector_anchors: str = "anchors_pose.npy",
+        score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> Self:
+        with MediaPipePyTorchAsRoot() as repo_path:
+            _apply_blazepose_fixes(repo_path)
+
+            from blazepose import BlazePose
+
+            pose_detector = BlazePose()
+            pose_detector.load_weights(detector_weights)
+            pose_detector.load_anchors(detector_anchors)
+            return cls(
+                pose_detector,
+                pose_detector.anchors,
+                score_clipping_threshold,
+                include_postprocessing,
+            )
+
+    @staticmethod
+    def get_input_spec(batch_size: int = BATCH_SIZE) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type) of the pose detector.
+        This can be used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return {
+            "image": TensorSpec(
+                shape=(batch_size, 3, 128, 128),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.RGB,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["box_coords_1", "box_coords_2", "box_scores_1", "box_scores_2"]
+
+    def get_hub_quantize_options(
+        self, precision: Precision, other_options: str | None = None
+    ) -> str:
+        options = other_options or ""
+        if "--range_scheme" in options:
+            return options
+        return options + " --range_scheme min_max"
+
+    @staticmethod
+    def calibration_dataset_name() -> str:
+        return "human_poses"
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["image"]
+
+    def _sample_inputs_impl(
+        self, input_spec: InputSpec | None = None
+    ) -> SampleInputsType:
+        numpy_inputs = CachedWebModelAsset.from_asset_store(
+            MODEL_ID, MODEL_ASSET_VERSION, "sample_detector_inputs.npy"
+        )
+        return {"image": [load_numpy(numpy_inputs)]}
+
+
+class PoseLandmarkDetector(BaseModel):
+    """
+    Pose landmark detector model. Input is an image cropped to the posing
+    object. The pose must be upright and un-tilted in the frame. Returns
+    [landmark_scores, landmarks, mask]
+
+    Note that although the landmark detector returns 3 values,
+    the third output (mask) is unused by this application.
+    """
+
+    def __init__(
+        self,
+        detector: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+        num_valid_landmarks: int | None = 25,
+    ) -> None:
+        super().__init__()
+        self.detector = detector
+        self.num_valid_landmarks = num_valid_landmarks
+
+    def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute image landmarks.
+
+        Parameters
+        ----------
+        image
+            RGB, range [0 - 1] image. This should be the cropped output of the PoseDetector model.
+
+        Returns
+        -------
+        ld_scores : torch.Tensor
+            Landmark score. Shape [B]
+        landmarks : torch.Tensor
+            Landmark points. Shape is [b, # of landmark points, 2]
+            where 2 == (x, y) and coordinates are normalized [0 - 1] (fraction of the input image height / width)
+        """
+        output = self.detector(image)
+        ld_scores = output[0]
+        landmarks = output[1]
+        if self.num_valid_landmarks:
+            # Crop to landmarks that are valid. Landmarks past this index are unused (incorrect / untrained) and thus are cropped out of the network output.
+            landmarks = landmarks[:, : self.num_valid_landmarks]
+        return ld_scores, landmarks
+
+    @classmethod
+    def from_pretrained(
+        cls, landmark_detector_weights: str = "blazepose_landmark.pth"
+    ) -> Self:
+        with MediaPipePyTorchAsRoot():
+            from blazepose_landmark import BlazePoseLandmark
+
+            pose_regressor = BlazePoseLandmark()
+            pose_regressor.load_weights(landmark_detector_weights)
+            return cls(pose_regressor)
+
+    @staticmethod
+    def get_input_spec(batch_size: int = BATCH_SIZE) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type) of the pose landmark detector.
+        This can be used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return {
+            "image": TensorSpec(
+                shape=(batch_size, 3, 256, 256),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.RGB,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["scores", "landmarks"]
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["image"]
+
+    def _sample_inputs_impl(
+        self, input_spec: InputSpec | None = None
+    ) -> SampleInputsType:
+        numpy_inputs = CachedWebModelAsset.from_asset_store(
+            MODEL_ID, MODEL_ASSET_VERSION, "sample_landmark_inputs.npy"
+        )
+        return {"image": [load_numpy(numpy_inputs)]}
+
+    @staticmethod
+    def calibration_dataset_name() -> str:
+        return "human_poses"
+
+    def get_hub_quantize_options(
+        self, precision: Precision, other_options: str | None = None
+    ) -> str:
+        options = other_options or ""
+        if "--range_scheme" in options:
+            return options
+        return options + " --range_scheme min_max"
+
+
+@CollectionModel.add_component(PoseDetector, "pose_detector")
+@CollectionModel.add_component(PoseLandmarkDetector, "pose_landmark_detector")
+class MediaPipePose(PretrainedCollectionModel):
+    def __init__(
+        self,
+        pose_detector: PoseDetector,
+        pose_landmark_detector: PoseLandmarkDetector,
+    ) -> None:
+        super().__init__(pose_detector, pose_landmark_detector)
+        self.pose_detector = pose_detector
+        self.pose_landmark_detector = pose_landmark_detector
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        detector_weights: str = "blazepose.pth",
+        detector_anchors: str = "anchors_pose.npy",
+        landmark_detector_weights: str = "blazepose_landmark.pth",
+        detector_score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_detector_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> Self:
+        """
+        Load mediapipe models from the source repository.
+        Returns tuple[<source repository>.blazepose.BlazePose, BlazePose Anchors, <source repository>.blazepose_landmark.BlazePoseLandmark]
+        """
+        return cls(
+            PoseDetector.from_pretrained(
+                detector_weights,
+                detector_anchors,
+                detector_score_clipping_threshold,
+                include_detector_postprocessing,
+            ),
+            PoseLandmarkDetector.from_pretrained(landmark_detector_weights),
+        )

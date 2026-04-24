@@ -1,0 +1,11 @@
+is_collection_model: true
+is_aimet: true
+supported_precisions:
+- w8a16
+tflite_scorecard_failure: Runtime does not support any precisions supported by this model
+onnx_scorecard_failure: Runtime does not support any precisions supported by this model
+requires_aot_prepare: true
+additional_readme_section: |
+  ## Quantize and Deploy Your Own Fine-Tuned Stable Diffusion on Snapdragon X Elite NPU
+
+  Please follow the [Quantize Stable Diffusion]({REPOSITORY_URL}/tutorials/stable_diffusion/quantize_stable_diffusion.md) tutorial.

@@ -1,0 +1,9 @@
+has_on_target_demo: true
+disabled_paths:
+  float:
+    qnn_dlc:
+      scorecard_failure: 'Compilation Failure(s): jpr47rkkg'
+    onnx:
+      scorecard_failure: 'Profiling Failure(s): jp018vvng'
+global_requirements_incompatible: true
+pip_install_flags: git+https://github.com/motional/nuplan-devkit.git@d60b4cd2071de9bb041509c43f5226dd22f248c0#egg=nuplan_devkit

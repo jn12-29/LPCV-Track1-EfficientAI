@@ -1,0 +1,91 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+- Snapdragon X2 Elite CRD
+- Snapdragon X Elite CRD
+- SA8775P ADP
+- Dragonwing IQ-9075 EVK
+- SA8295P ADP
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x2-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-sa8775p
+- qualcomm-qcs9075
+- qualcomm-sa8295p
+precisions:
+  w4a16:
+    components:
+      Llama-v3.2-3B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 32.39283065795898
+                time_to_first_token_range_milliseconds:
+                  min: 62.597199999999994
+                  max: 2003.1103999999998
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 16.657778549194337
+                time_to_first_token_range_milliseconds:
+                  min: 119.9063
+                  max: 3837.0016
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 41.82037925720215
+                time_to_first_token_range_milliseconds:
+                  min: 78.3631
+                  max: 2507.6192
+          SA8775P ADP:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 17.47
+                time_to_first_token_range_milliseconds:
+                  min: 109.614
+                  max: 3507.648
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 17.58785104751587
+                time_to_first_token_range_milliseconds:
+                  min: 108.3801
+                  max: 3468.1632
+          Samsung Galaxy S25:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 28.099240112304688
+                time_to_first_token_range_milliseconds:
+                  min: 82.1426
+                  max: 2628.5632
+  w4:
+    components:
+      Llama-v3.2-3B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 18.00883
+                time_to_first_token_range_milliseconds:
+                  min: 131.546
+                  max: 4209.475
+          SA8295P ADP:
+            genie:
+              llm_metrics:
+              - context_length: 1024
+                tokens_per_second: 3.523
+                time_to_first_token_range_milliseconds:
+                  min: 373.117
+                  max: 2984.936

@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from qai_hub_models.models._shared.ffnet.test_utils import run_test_off_target_numerical
+from qai_hub_models.models.ffnet_78s.demo import main as demo_main
+from qai_hub_models.models.ffnet_78s.model import FFNet78S
+from qai_hub_models.utils.testing import skip_clone_repo_check
+
+
+@skip_clone_repo_check
+def test_off_target_numerical() -> None:
+    run_test_off_target_numerical(FFNet78S, "segmentation_ffnet78S_dBBB_mobile")
+
+
+@skip_clone_repo_check
+def test_demo() -> None:
+    demo_main(is_test=True)

@@ -1,0 +1,40 @@
+name: HRNetPose
+id: hrnet_pose
+status: published
+headline: Perform accurate human pose estimation.
+domain: Computer Vision
+description: HRNet performs pose estimation in high-resolution representations.
+use_case: Pose Estimation
+tags:
+- bu-auto
+applicable_scenarios:
+- Injury prevention training
+- Sports performance analysis
+- Posture recognition
+related_models:
+- litehrnet
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: hrnet_posenet_FP32_state_dict
+  Input resolution: 256x192
+  Number of parameters: 28.5M
+  Model size (float): 109 MB
+  Model size (w8a8): 28.1 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/1902.09212
+research_paper_title: Deep High-Resolution Representation Learning for Human Pose Estimation
+source_repo: https://github.com/leoxiaobin/deep-high-resolution-net.pytorch
+license: https://github.com/leoxiaobin/deep-high-resolution-net.pytorch/blob/master/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: cocobody
+  metric_name: Mean Average Precision
+  value: 74.4
+  unit: mAP
+  source: https://github.com/leoxiaobin/deep-high-resolution-net.pytorch

@@ -1,0 +1,8 @@
+has_on_target_demo: true
+disabled_paths:
+  float:
+    tflite:
+      scorecard_failure: 'Compilation Failure(s): roi_head:jpv1n8zmp'
+    onnx:
+      scorecard_failure: 'Profiling Failure(s): roi_head:jpx7z2l1g'
+is_collection_model: true

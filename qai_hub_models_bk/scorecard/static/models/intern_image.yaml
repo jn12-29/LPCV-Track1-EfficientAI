@@ -1,0 +1,21 @@
+id: intern_image
+hub_model_id: mn16gjvpq
+hub_input_dataset_id: dq9k88qd9
+type: ONNX
+bu_owner: auto
+sponsors:
+- ahmesyed@qti.qualcomm.com
+- svikas@qti.qualcomm.com
+context: InternImage is a SOTA model of interest to the Auto BU. This model represents the out-of-box version of this model before any optimizations applied.
+source: Originally available at https://github.com/OpenGVLab/InternImage/tree/master/classification.
+domain: Computer Vision
+use_case: Image Classification
+tags: []
+enabled_device_form_factors:
+- Auto
+enabled_profile_runtimes:
+- qnn_dlc
+hub_model_ids_automated:
+  prod: mn16gjvpq
+hub_input_dataset_ids_automated:
+  prod: dq9k88qd9

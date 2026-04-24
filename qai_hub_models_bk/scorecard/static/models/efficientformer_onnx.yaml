@@ -1,0 +1,19 @@
+id: efficientformer_onnx
+hub_model_id: mmrvdeexq
+hub_input_dataset_id: d91yjp8g9
+type: ONNX
+sponsors:
+- abhisgu@qti.qualcomm.com
+context: Efficientformer is a SOTA model of interest to the Auto BU. This model represents the out-of-box version of this model before any optimizationss or customizations are applied.
+source: Originally available at https://github.com/snap-research/EfficientFormer.
+domain: Computer Vision
+use_case: Image Classification
+tags: []
+enabled_device_form_factors:
+- Auto
+hub_model_ids_automated:
+  prod: mmrvdeexq
+  dev: mn0l0l4zn
+hub_input_dataset_ids_automated:
+  prod: d91yjp8g9
+  dev: do7m6jml9

@@ -1,0 +1,35 @@
+name: Distil-Whisper
+id: distil_whisper
+status: published
+headline: Distilled Whisper model for fast English automatic speech recognition (ASR).
+domain: Audio
+description: Distil-Whisper Small English is a distilled version of Whisper Small, optimized for fast and efficient automatic speech recognition.
+use_case: Speech Recognition
+tags: []
+applicable_scenarios:
+- Smart Home
+- Accessibility
+- Real-time Transcription
+related_models:
+- whisper_small
+- whisper_tiny
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: distil-whisper/distil-small.en
+  Input resolution: 80x3000 (30 seconds audio)
+  Max decoded sequence length: 200 tokens
+  Number of parameters (encoder): 166M
+  Model size (encoder) (float): 332 MB
+  Number of parameters (decoder): 211M
+  Model size (decoder) (float): 450MB
+license_type: mit
+research_paper: https://arxiv.org/abs/2311.00430
+research_paper_title: Distil-Whisper - Robust Knowledge Distillation via Large-Scale Pseudo Labelling
+source_repo: https://github.com/huggingface/distil-whisper
+license: https://github.com/huggingface/distil-whisper/blob/main/LICENSE

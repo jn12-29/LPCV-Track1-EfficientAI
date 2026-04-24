@@ -1,0 +1,6 @@
+object-detection-metrics==0.4.post1
+shapely==2.1.2
+ultralytics~=8.4.0
+aiohttp==3.13.3
+aiofiles==25.1.0
+types-aiofiles==25.1.0.20251011

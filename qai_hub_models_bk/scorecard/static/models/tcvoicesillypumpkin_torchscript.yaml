@@ -1,0 +1,202 @@
+id: tcvoicesillypumpkin_torchscript
+hub_model_id: mqed11x4m
+hub_input_dataset_id: d82npkn57
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://hub.tetra.ai/jobs/lpew6vpr/
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: input_1
+  shape:
+  - 1
+  - 240
+  dtype: float32
+- name: input_2
+  shape:
+  - 1
+  - 240
+  dtype: float32
+- name: input_3
+  shape:
+  - 239
+  dtype: float32
+- name: input_4
+  shape:
+  - 239
+  dtype: float32
+- name: input_5
+  shape:
+  - 3
+  - 2
+  - 241
+  dtype: float32
+- name: input_6
+  shape:
+  - 64
+  - 3
+  - 120
+  dtype: float32
+- name: input_7
+  shape:
+  - 64
+  - 2
+  - 120
+  dtype: float32
+- name: input_8
+  shape:
+  - 96
+  - 3
+  - 60
+  dtype: float32
+- name: input_9
+  shape:
+  - 3
+  - 2
+  - 241
+  dtype: float32
+- name: input_10
+  shape:
+  - 16
+  - 3
+  - 120
+  dtype: float32
+- name: input_11
+  shape:
+  - 16
+  - 2
+  - 120
+  dtype: float32
+- name: input_12
+  shape:
+  - 96
+  - 3
+  - 60
+  dtype: float32
+- name: input_13
+  shape:
+  - 99
+  - 8
+  - 60
+  dtype: float32
+- name: input_14
+  shape:
+  - 8
+  - 4
+  - 100
+  dtype: float32
+- name: input_15
+  shape:
+  - 98
+  - 1
+  - 5760
+  dtype: float32
+- name: input_16
+  shape:
+  - 192
+  - 2
+  - 60
+  dtype: float32
+- name: input_17
+  shape:
+  - 96
+  - 2
+  - 60
+  dtype: float32
+- name: input_18
+  shape:
+  - 96
+  - 3
+  - 30
+  dtype: float32
+- name: input_19
+  shape:
+  - 96
+  - 2
+  - 30
+  dtype: float32
+- name: input_20
+  shape:
+  - 64
+  - 3
+  - 15
+  dtype: float32
+- name: input_21
+  shape:
+  - 480
+  dtype: float32
+- name: input_22
+  shape:
+  - 32
+  - 3
+  - 15
+  dtype: float32
+- name: input_23
+  shape:
+  - 96
+  - 3
+  - 30
+  dtype: float32
+- name: input_24
+  shape:
+  - 96
+  - 3
+  - 60
+  dtype: float32
+- name: input_25
+  shape:
+  - 64
+  - 3
+  - 120
+  dtype: float32
+- name: input_26
+  shape:
+  - 2
+  - 2
+  - 241
+  dtype: float32
+- name: input_27
+  shape:
+  - 240
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_7
+- output_8
+- output_9
+- output_10
+- output_11
+- output_12
+- output_13
+- output_14
+- output_15
+- output_16
+- output_17
+- output_18
+- output_19
+- output_20
+- output_21
+- output_22
+- output_23
+- output_24
+- output_25
+hub_model_ids_automated:
+  prod: mqed11x4m
+  dev: mn1w2gr4m
+hub_input_dataset_ids_automated:
+  prod: d82npkn57
+  dev: dn7xq3gv9

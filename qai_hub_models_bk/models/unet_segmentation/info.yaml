@@ -1,0 +1,43 @@
+name: Unet-Segmentation
+id: unet_segmentation
+status: published
+headline: Real-time segmentation optimized for mobile and edge.
+domain: Computer Vision
+description: UNet is a machine learning model that produces a segmentation mask for an image. The most basic use case will label each pixel in the image as being in the foreground or the background. More advanced usage will assign a class label to each pixel. This version of the model was trained on the data from Kaggle's Carvana Image Masking Challenge (see https://www.kaggle.com/c/carvana-image-masking-challenge) and is used for vehicle segmentation.
+use_case: Semantic Segmentation
+tags:
+- backbone
+- bu-auto
+- real-time
+applicable_scenarios:
+- Autonomous Vehicles
+- Medical Imaging
+- Factory Quality Control
+related_models:
+- fcn_resnet50
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: unet_carvana_scale1.0_epoch2
+  Input resolution: 640x1280
+  Number of output classes: 2 (foreground / background)
+  Number of parameters: 31.0M
+  Model size (float): 118 MB
+  Model size (w8a8): 29.8 MB
+license_type: gpl-3.0
+research_paper: https://arxiv.org/abs/1505.04597
+research_paper_title: 'U-Net: Convolutional Networks for Biomedical Image Segmentation'
+source_repo: https://github.com/milesial/Pytorch-UNet
+license: https://github.com/milesial/Pytorch-UNet/blob/master/LICENSE
+numerics_benchmark:
+  dataset_name: carvana
+  metric_name: Mean Intersection Over Union
+  value: 97.7
+  unit: mIOU
+  source: AI Hub Models Reference Eval

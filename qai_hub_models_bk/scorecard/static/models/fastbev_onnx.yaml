@@ -1,0 +1,21 @@
+id: fastbev_onnx
+hub_model_id: mmrwpk70n
+hub_input_dataset_id: d6788rjw7
+type: ONNX
+bu_owner: auto
+sponsors:
+- svikas@qti.qualocmm.com
+- ahmesyed@qti.qualcomm.com
+context: FastBev model added to repo for tracking the performance on auto targets
+source: https://arxiv.org/abs/2301.12511
+domain: Computer Vision
+use_case: Object Detection
+tags: []
+enabled_device_form_factors:
+- Auto
+enabled_profile_runtimes:
+- qnn_dlc
+hub_model_ids_automated:
+  prod: mmrwpk70n
+hub_input_dataset_ids_automated:
+  prod: d6788rjw7

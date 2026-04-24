@@ -1,0 +1,39 @@
+name: Gemma-3n-E2B-it
+id: gemma_3n_e2b_it
+status: unpublished
+status_reason: Needs adaptation, quantization, perf, legal (make sure to update deploy license).
+headline: State-of-the-art large language model useful on a variety of language understanding and generation tasks.
+domain: Generative AI
+description: Gemma is a family of lightweight, state-of-the-art open models from Google, built from the same research and technology used to create the Gemini models.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+research_paper: https://arxiv.org/abs/2503.19786
+research_paper_title: 'Gemma 3 Technical Report'
+license: https://ai.google.dev/gemma/terms
+source_repo: https://huggingface.co/google/gemma-3n-E2B-it
+technical_details:
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt. The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of the prompt processor) and the upper bound is for a prompt using the full context length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token.
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models:
+- llama_v3_8b_instruct
+- llama_v3_1_8b_instruct
+- llama_v3_2_3b_instruct
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+license_type: gemma
+dataset: []
+restrict_model_sharing: true
+model_type_llm: true
+llm_details:
+  call_to_action: View Readme
+  genie_compatible: true
+  devices: {}

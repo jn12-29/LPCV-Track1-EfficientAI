@@ -1,0 +1,59 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+- Snapdragon X2 Elite CRD
+- Snapdragon X Elite CRD
+- Dragonwing IQ-9075 EVK
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x2-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-qcs9075
+precisions:
+  w4a16:
+    components:
+      Llama3-TAIDE-LX-8B-Chat-Alpha1:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 16.677952766418457
+                time_to_first_token_range_milliseconds:
+                  min: 99.0285
+                  max: 3168.912
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 7.201948595046997
+                time_to_first_token_range_milliseconds:
+                  min: 222.99370000000002
+                  max: 7135.798400000001
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 22.244472312927247
+                time_to_first_token_range_milliseconds:
+                  min: 136.2849
+                  max: 4361.1168
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 11.305743980407716
+                time_to_first_token_range_milliseconds:
+                  min: 183.1854
+                  max: 5861.9328
+          Samsung Galaxy S25:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 15.232870101928711
+                time_to_first_token_range_milliseconds:
+                  min: 125.42460000000001
+                  max: 4013.5872000000004

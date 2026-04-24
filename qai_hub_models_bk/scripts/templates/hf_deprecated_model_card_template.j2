@@ -1,0 +1,16 @@
+{#
+    Deprecated HuggingFace Model Card Template
+
+    Generates a deprecation notice README.md for models that have been removed.
+#}
+{% macro render() %}
+---
+library_name: pytorch
+license: other
+tags:
+- deprecated
+pipeline_tag: other
+
+---
+This model is deprecated. Please refer to https://aihub.qualcomm.com for the latest models and updates.
+{% endmacro %}

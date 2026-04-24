@@ -1,0 +1,67 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Snapdragon X2 Elite CRD
+- Snapdragon X Elite CRD
+- SA8775P ADP
+- Dragonwing IQ-9075 EVK
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x2-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-sa8775p
+- qualcomm-qcs9075
+precisions:
+  w4a16:
+    components:
+      Llama-v3.2-3B-Instruct-SSD:
+        performance_metrics:
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 78.08206481933594
+                time_to_first_token_range_milliseconds:
+                  min: 51.714400000000005
+                  max: 1654.8608000000002
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 25.715454292297363
+                time_to_first_token_range_milliseconds:
+                  min: 121.3954
+                  max: 3884.6528
+          Samsung Galaxy S25:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 49.483089447021484
+                time_to_first_token_range_milliseconds:
+                  min: 68.0748
+                  max: 2178.3936
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 57.81013984680176
+                time_to_first_token_range_milliseconds:
+                  min: 50.9541
+                  max: 1630.5312
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 33.729867935180664
+                time_to_first_token_range_milliseconds:
+                  min: 102.30380000000001
+                  max: 3273.7216000000003
+          SA8775P ADP:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 26.860780715942383
+                time_to_first_token_range_milliseconds:
+                  min: 108.953
+                  max: 3486.496

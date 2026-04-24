@@ -1,0 +1,44 @@
+name: Beit
+id: beit
+status: published
+headline: Imagenet classifier and general purpose backbone.
+domain: Computer Vision
+description: Beit is a machine learning model that can classify images from the Imagenet dataset. It can also be used as a backbone in building more complex models for specific use cases.
+use_case: Image Classification
+tags:
+- backbone
+applicable_scenarios:
+- Medical Imaging
+- Anomaly Detection
+- Inventory Management
+related_models:
+- mobilenet_v2
+- densenet121
+- googlenet
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- imagenet-1k
+- imagenet-22k
+technical_details:
+  Model checkpoint: Imagenet
+  Input resolution: 224x224
+  Number of parameters: 92.0M
+  Model size (float): 351 MB
+license_type: bsd-3-clause
+research_paper: https://arxiv.org/abs/2106.08254
+research_paper_title: 'BEIT: BERT Pre-Training of Image Transformers'
+source_repo: https://github.com/microsoft/unilm/tree/master/beit
+license: https://github.com/pytorch/vision/blob/main/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: imagenet
+  metric_name: Top-1 Accuracy
+  value: 83.2
+  unit: '%'
+  source: https://arxiv.org/abs/2106.08254

@@ -1,0 +1,32 @@
+name: DnCNN
+id: dncnn
+status: published
+headline: Remove Gaussian noise from grayscale images in real-time.
+domain: Computer Vision
+description: DnCNN is a 17-layer denoising convolutional neural network that uses residual learning to remove Gaussian noise (sigma=25) from grayscale images. The network predicts the noise residual and subtracts it from the input to produce a clean image.
+use_case: Image Editing
+tags:
+- real-time
+applicable_scenarios:
+- Photography
+- Document Scanning
+- Medical Imaging
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: false
+dataset:
+- BSDS300
+technical_details:
+  Model checkpoint: dncnn_25
+  Input resolution: 256x256
+  Number of parameters: 555K
+  Model size (float): 2.12 MB
+  Model size (w8a8): 581 KB
+license_type: mit
+research_paper: https://arxiv.org/abs/1608.03981
+research_paper_title: 'Beyond a Gaussian Denoiser: Residual Learning of Deep CNN for Image Denoising'
+source_repo: https://github.com/cszn/KAIR
+license: https://github.com/cszn/KAIR/blob/master/LICENSE

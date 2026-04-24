@@ -1,0 +1,45 @@
+name: Yolo-X
+id: yolox
+status: published
+headline: Real-time object detection optimized for mobile and edge.
+domain: Computer Vision
+description: YoloX is a machine learning model that predicts bounding boxes and classes of objects in an image.
+use_case: Object Detection
+tags:
+- real-time
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models:
+- yolov6
+- yolov7
+- yolov8_det
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- COCO
+technical_details:
+  Model checkpoint: YoloX Small
+  Input resolution: 640x640
+  Number of parameters: 8.98M
+  Model size (float): 34.3 MB
+  Model size (w8a16): 9.53 MB
+  Model size (w8a8): 8.96 MB
+license_type: apache-2.0
+research_paper: https://github.com/Megvii-BaseDetection/YOLOX/blob/main/README.md
+research_paper_title: 'YOLOX: Exceeding YOLO Series in 2021'
+source_repo: https://github.com/Megvii-BaseDetection/YOLOX/
+license: https://github.com/Megvii-BaseDetection/YOLOX/blob/main/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: coco
+  metric_name: Mean Average Precision
+  value: 40.5
+  unit: mAP
+  source: https://arxiv.org/abs/2107.08430

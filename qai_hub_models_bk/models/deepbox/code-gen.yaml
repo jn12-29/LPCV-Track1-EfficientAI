@@ -1,0 +1,5 @@
+supported_precisions:
+- float
+- w8a16
+check_trace: false
+is_collection_model: true

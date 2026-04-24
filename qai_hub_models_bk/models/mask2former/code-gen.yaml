@@ -1,0 +1,8 @@
+has_on_target_demo: true
+disabled_paths:
+  float:
+    precompiled_qnn_onnx:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-0.377 PQ) above threshold (0.1 PQ)
+requires_aot_prepare: true
+global_requirements_incompatible: true
+pip_install_flags: git+https://github.com/cocodataset/panopticapi.git

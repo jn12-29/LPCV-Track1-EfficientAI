@@ -1,0 +1,15 @@
+is_aimet: true
+supported_precisions:
+- w4
+- w4a16
+add_genie_url_to_export: true
+skip_scorecard: true
+skip_export: true
+global_requirements_incompatible: true
+additional_readme_section: |
+  ## Deploying Qwen3-0.6B on-device
+
+  Please follow the [LLM on-device deployment]({genie_url}) tutorial.
+pip_install_flags_gpu: onnxruntime-gpu==1.23.2 https://github.com/quic/aimet/releases/download/2.26.0/aimet_onnx-2.26.0+cu121-cp310-cp310-manylinux_2_34_x86_64.whl -f https://download.pytorch.org/whl/torch_stable.html
+orchestrator_runtimes: [genie]
+only_allow_orchestrator_runtimes: true

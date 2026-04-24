@@ -1,0 +1,39 @@
+id: tcfacemodel_torchscript
+hub_model_id: mqed1k05m
+hub_input_dataset_id: dr9w1op32
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Sent from Lightricks
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 3
+  - 256
+  - 256
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mqed1k05m
+  dev: mq8dwgxvm
+hub_input_dataset_ids_automated:
+  prod: dr9w1op32
+  dev: dz7zywrr9
+hub_input_channel_last_dataset_ids_automated:
+  prod: dn7xv03e2
+  dev: dv913jno2

@@ -1,0 +1,80 @@
+id: tctc2decoderstep_torchscript
+hub_model_id: mm659yvvn
+hub_input_dataset_id: d09ye8g17
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: '# Override this to use ct.RangeDim'
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: encoder_output
+  shape:
+  - 1
+  - 151
+  - 576
+  dtype: float32
+- name: frame_input
+  shape:
+  - 1
+  - 80
+  dtype: float32
+- name: lstm_input_state_00
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: lstm_input_state_01
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: lstm_input_state_10
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: lstm_input_state_11
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: attention_input
+  shape:
+  - 1
+  - 576
+  dtype: float32
+- name: attention_state
+  shape:
+  - 1
+  - 151
+  dtype: float32
+- name: LocationSensitiveAttention2
+  shape:
+  - 1
+  - 151
+  - 128
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_7
+- output_8
+hub_model_ids_automated:
+  prod: mm659yvvn
+  dev: mm5jl0gkn
+hub_input_dataset_ids_automated:
+  prod: d09ye8g17
+  dev: d6786wxp2

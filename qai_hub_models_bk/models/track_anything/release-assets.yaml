@@ -1,0 +1,13 @@
+precisions:
+  float:
+    universal_assets:
+      tflite:
+        s3_key: pre_release_assets/gh_actions/24598778341/track_anything-tflite-float.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327
+          litert: 1.4.2
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/track_anything-onnx-float.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3

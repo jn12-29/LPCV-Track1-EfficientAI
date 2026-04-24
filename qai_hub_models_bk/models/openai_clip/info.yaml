@@ -1,0 +1,31 @@
+name: OpenAI-Clip
+id: openai_clip
+status: published
+headline: Multi-modal foundational model for vision and language tasks like image/text similarity and for zero-shot image classification.
+domain: Multimodal
+description: Contrastive Language-Image Pre-Training (CLIP) uses a ViT like transformer to get visual features and a causal language model to get the text features. Both the text and visual features can then be used for a variety of zero-shot learning tasks.
+use_case: Image Classification
+tags:
+- foundation
+applicable_scenarios:
+- Image Search
+- Content Moderation
+- Caption Creation
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: ViT-B/16
+  Image input resolution: 224x224
+  Text context length: '77'
+  Number of parameters: 150M
+  Model size (float): 571 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/2103.00020
+research_paper_title: Learning Transferable Visual Models From Natural Language Supervision
+source_repo: https://github.com/openai/CLIP/
+license: https://github.com/openai/CLIP/blob/main/LICENSE

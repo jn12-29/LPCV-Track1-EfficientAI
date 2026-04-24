@@ -1,0 +1,7 @@
+transformers==4.53.0
+sentencepiece==0.2.0
+psutil
+onnx==1.17.0
+torch==2.4.1
+torchvision==0.19.1
+onnxruntime==1.22

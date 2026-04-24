@@ -1,0 +1,909 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+
+from __future__ import annotations
+
+import argparse
+import atexit
+import os
+import shutil
+import tempfile
+import textwrap
+import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+import numpy as np
+import onnx
+import qai_hub as hub
+import torch
+from qai_hub.public_rest_api import DatasetEntries
+
+from qai_hub_models.configs.info_yaml import QAIHMModelInfo
+from qai_hub_models.configs.tool_versions import ToolVersions
+from qai_hub_models.models._shared.llm.model import (
+    DEFAULT_EXPORT_SEQUENCE_LENGTHS,
+    PositionProcessorBase,
+)
+from qai_hub_models.models._shared.llm.split_onnx_utils import utils
+from qai_hub_models.models.common import (
+    Precision,
+    TargetRuntime,
+)
+from qai_hub_models.utils.args import (
+    get_export_model_name,
+    get_input_spec_kwargs,
+    get_model_kwargs,
+)
+from qai_hub_models.utils.asset_loaders import ASSET_CONFIG
+from qai_hub_models.utils.compare import torch_inference
+from qai_hub_models.utils.export_result import (
+    CollectionExportResult,
+    ExportResult,
+)
+from qai_hub_models.utils.input_spec import to_hub_input_specs
+from qai_hub_models.utils.model_cache import CacheMode, get_or_create_cached_model
+from qai_hub_models.utils.onnx.helpers import ONNXBundle
+from qai_hub_models.utils.printing import (
+    print_inference_metrics,
+    print_profile_metrics_from_job,
+    print_tool_versions,
+)
+
+if TYPE_CHECKING:
+    from transformers import PretrainedConfig
+
+    from qai_hub_models.models._shared.llm.model import LLM_AIMETOnnx
+
+from qai_hub_models.models._shared.llm.model import (
+    LLMBase,
+    determine_precision_from_checkpoint,
+)
+from qai_hub_models.utils.args import (
+    export_parser,
+)
+
+VALID_TARGET_RUNTIMES = Literal[TargetRuntime.GENIE]
+
+
+def _parse_comma_separated_ints(value: str) -> list[int]:
+    """Argparse type function: converts "128,1" -> [128, 1]."""
+    return [int(x) for x in value.split(",")]
+
+
+def _ensure_int_list(raw: int | list[int]) -> list[int]:
+    """Normalize an int or list[int] to list[int] (for direct callers of export_model)."""
+    return [raw] if isinstance(raw, int) else raw
+
+
+def _make_sub_component_name(
+    instantiation_name: str, part_index: int, num_splits: int
+) -> str:
+    return f"{instantiation_name}_{part_index + 1}_of_{num_splits}"
+
+
+def _onnx_has_dynamic_shapes(onnx_path: str) -> bool:
+    """Check if an ONNX model has dynamic (symbolic) input dimensions."""
+    model = onnx.load(onnx_path, load_external_data=False)
+    for inp in model.graph.input:
+        for dim in inp.type.tensor_type.shape.dim:
+            if dim.dim_param:
+                return True
+    return False
+
+
+# TODO(#12640): Unnecessary if we can pull this information directly.
+def _infer_output_specs(
+    instantiations: list[tuple[str, int, int]],
+    num_splits: int,
+    input_specs: dict[str, Any],
+    llm_config: PretrainedConfig,
+    precision: Precision,
+) -> dict[str, tuple[tuple[int, ...], str]]:
+    """This infers the output specs from the input specs."""
+
+    def out_from_in_shape(
+        name: str, in_shape: tuple[int, ...], sequence_length: int
+    ) -> tuple[int, ...]:
+        """Convert output KV cache shape from input KV cache shape"""
+        if "_key" in name:
+            return (*in_shape[:3], sequence_length)
+        return (*in_shape[:2], sequence_length, in_shape[3])
+
+    output_specs: dict[str, Any] = {}
+    intermediate_type = "float16" if precision == Precision.w4 else "uint16"
+    for instantiation_name, seq_len, _ in instantiations:
+        for i in range(num_splits):
+            specs: dict[str, tuple[tuple[int, ...], str]] = {}
+            if i == num_splits - 1:
+                specs["logits"] = (
+                    (1, seq_len, llm_config.vocab_size),
+                    intermediate_type,
+                )
+            else:
+                # Find name by process of elimination of next part's inputs
+                next_sub_component_name = _make_sub_component_name(
+                    instantiation_name, i + 1, num_splits
+                )
+                intermediate_name_candidates = [
+                    name
+                    for name, spec in input_specs[next_sub_component_name].items()
+                    if "past_" not in name
+                    and "position_ids_" not in name
+                    and name != "attention_mask"
+                ]
+                if intermediate_name_candidates:
+                    specs[intermediate_name_candidates[0]] = (
+                        (1, seq_len, llm_config.hidden_size),
+                        intermediate_type,
+                    )
+
+            # Convert the KV cache inputs to outputs
+            sub_component_name = _make_sub_component_name(
+                instantiation_name, i, num_splits
+            )
+            for name, (shape, dtype_str) in input_specs[sub_component_name].items():
+                if "past_" in name:
+                    out_name = name.replace("_in", "_out")
+                    specs[out_name] = (
+                        out_from_in_shape(name, shape, seq_len),
+                        dtype_str,
+                    )
+
+            output_specs[sub_component_name] = specs
+    return output_specs
+
+
+def export_model(
+    model_cls: type[LLM_AIMETOnnx],
+    model_id: str,
+    model_asset_version: int,
+    num_splits: int,
+    num_layers_per_split: int,
+    precision: Precision,
+    device: hub.Device,
+    position_processor_cls: type[PositionProcessorBase] | None = None,
+    skip_profiling: bool = False,
+    skip_inferencing: bool = True,
+    skip_downloading: bool = False,
+    skip_summary: bool = False,
+    output_dir: str | None = None,
+    target_runtime: VALID_TARGET_RUNTIMES = TargetRuntime.GENIE,
+    compile_options: str = "",
+    link_options: str = "",
+    profile_options: str = "",
+    synchronous: bool = False,
+    model_cache_mode: CacheMode = CacheMode.DISABLE,
+    onnx_export_dir: str = "",
+    zip_assets: bool = False,
+    **additional_model_kwargs: Any,
+) -> CollectionExportResult:
+    """
+    Export the given LLM class for use with Genie or ONNX Runtime GenAI.
+
+    Parameters
+    ----------
+    model_cls
+        LLM class to export.
+    model_id
+        Model identifier (folder name), e.g. "llama_v3_2_3b_instruct".
+    model_asset_version
+        Identifier used as a cache key to store the model asset.
+    num_splits
+        Number of times to split the model for compatibility with HTP high bandwidth memory.
+    num_layers_per_split
+        How many layers to include in each model part.
+    precision
+        Precision to use for model export.
+    device
+        Device for which to export the model (e.g. hub.Device("Samsung Galaxy S25")).
+        Full list of available devices can be found by running `hub.get_devices()`.
+    position_processor_cls
+        Position processor class to use for the model.
+    skip_profiling
+        If set, skips profiling of compiled model on real devices.
+    skip_inferencing
+        If set, skips computing on-device outputs from sample data.
+    skip_downloading
+        If set, skips creation of the model runtime bundle on-disk.
+    skip_summary
+        If set, skips waiting for and summarizing results from profiling and inference jobs.
+    output_dir
+        Directory to store generated assets (e.g. compiled model).
+        Defaults to `<cwd>/build/<model_id>`.
+    target_runtime
+        Which on-device GenAI runtime to target.
+    compile_options
+        Additional options to pass when submitting the compile job.
+    link_options
+        Additional options to pass when submitting the link job.
+    profile_options
+        Additional options to pass when submitting the profile job.
+    synchronous
+        If set, waits for each job to finish before submitting the next.
+    model_cache_mode
+        Whether to cache uploaded AI Hub Workbench model during export.
+        If enable, caches uploaded model (i.e. re-uses uploaded AI Hub Workbench model from cache).
+        If disable, disables caching i.e. no reading from and write to cache.
+        If overwrite, ignores and overwrites previous cache with newly uploaded AI Hub Workbench model instead.
+    onnx_export_dir
+        If set, save intermediate ONNX file under this directory.
+    zip_assets
+        If set, zip assets on download.
+    **additional_model_kwargs
+        Additional optional kwargs used to customize `model_cls.from_pretrained`.
+
+    Returns
+    -------
+    CollectionExportResult
+        A Mapping from component_name to:
+            * A LinkJob object containing metadata about the link job submitted to hub
+            * A ProfileJob containing metadata about the profile job (None if profiling skipped).
+        * The path to the downloaded model folder (or zip), or None if one or more of: skip_downloading is True, fetch_static_assets is set, or AI Hub Workbench is not accessible
+    """
+    model_name = get_export_model_name(
+        model_cls, model_id, precision, additional_model_kwargs
+    )
+    model_display_name = QAIHMModelInfo.from_model(model_id).name
+
+    output_path = Path(output_dir or Path.cwd() / "build" / model_id)
+
+    # Resolves all of the device attributes from a partially specified hub.Device
+    hub_devices = hub.get_devices(
+        name=device.name,
+        attributes=device.attributes,
+        os=device.os,
+    )
+    if len(hub_devices) == 0:
+        raise ValueError(
+            f"No device found compatible with the supplied name ({device.name}), os ({device.os}), and attributes ({device.attributes})."
+        )
+
+    device = hub_devices[-1]
+    chipset_attr = next((attr for attr in device.attributes if "chipset" in attr), None)
+    chipset = chipset_attr.split(":")[-1] if chipset_attr else None
+
+    # Throw a warning if weight sharing is not supported.
+    if "htp-supports-weight-sharing:true" not in device.attributes:
+        warnings.warn(
+            "The selected device may not support weight sharing.", stacklevel=2
+        )
+
+    if "chipset:qualcomm-sa8295p" in device.attributes and precision == Precision.w4a16:
+        raise ValueError(
+            "The selected precision (w4a16) is not supported on this target device"
+        )
+    if ("htp-supports-fp16:true" not in device.attributes) and (
+        precision == Precision.w4
+    ):
+        raise ValueError(
+            "The selected precision (w4) is not supported on this target device. Please try a different precision or target device."
+        )
+
+    # Instantiation names and input sequence length
+    # 1. Initialize PyTorch model
+    model_params = dict(get_model_kwargs(model_cls, additional_model_kwargs))
+
+    # Normalize context_length to a list of ints
+    context_lengths = _ensure_int_list(model_params.pop("context_length"))
+    # Check for context length constraint for SA8295P ADP
+    if (
+        "constrained_device_max_context_length" in additional_model_kwargs
+        and "chipset:qualcomm-sa8295p" in device.attributes
+    ):
+        max_cl = additional_model_kwargs["constrained_device_max_context_length"]
+        if any(cl > max_cl for cl in context_lengths):
+            raise ValueError(
+                f"The {model_id}'s context length is too large to deploy on SA8295P. "
+                "Please set the context length to 1024 or lower."
+            )
+
+    sequence_lengths = _ensure_int_list(
+        model_params.pop("sequence_length", DEFAULT_EXPORT_SEQUENCE_LENGTHS)
+    )
+
+    # Names follow the ar{seq_len}_cl{ctx_len} convention required by Genie.
+    instantiations: list[tuple[str, int, int]] = [
+        (f"ar{sl}_cl{cl}", sl, cl) for cl in context_lengths for sl in sequence_lengths
+    ]
+
+    compile_jobs_to_link: dict[str, list[hub.client.CompileJob]] = {}
+    compile_jobs: dict[str, hub.client.CompileJob] = {}
+    input_specs: dict[str, Any] = {}
+    output_specs: dict[str, Any] = {}
+    link_jobs: dict[str, hub.client.LinkJob] = {}
+    profile_options_per_subcomponent: dict[str, str] = {}
+    llm_config: PretrainedConfig
+
+    sub_component_names: dict[str, list[str]] = {}
+    component_from_sub_component_names = {}
+    input_encodings_path: str | None = None
+
+    if not onnx_export_dir:
+        # TODO(#12640): This scope is not ideal and only a temporary fix until
+        # this issue has landed and we can pull this IO information from the
+        # AI Hub Workbench model directly.
+        tmpdir_handler = tempfile.TemporaryDirectory()
+        atexit.register(tmpdir_handler.cleanup)
+        onnx_export_dir = tmpdir_handler.name
+    Path(onnx_export_dir).mkdir(parents=True, exist_ok=True)
+
+    # Load the model once to determine checkpoint type and get llm_config.
+    _first_instantiation_name, first_seq_len, first_ctx_len = instantiations[0]
+    model = model_cls.from_pretrained(
+        sequence_length=first_seq_len,
+        context_length=first_ctx_len,
+        precision=precision,
+        **model_params,
+    )
+    llm_config = model.llm_config
+
+    # Check if the checkpoint has a dynamic ONNX model.
+    # Dynamic models are exported/split/uploaded once and compiled with
+    # explicit input_specs for each (seq_len, ctx_len) combo.
+    # Static models are exported/split/uploaded per combo.
+    has_dynamic_onnx = (
+        hasattr(model, "checkpoint")
+        and model.checkpoint is not None
+        and os.path.exists(os.path.join(model.checkpoint, "model_dynamic.onnx"))
+        and _onnx_has_dynamic_shapes(
+            os.path.join(model.checkpoint, "model_dynamic.onnx")
+        )
+    )
+
+    def _export_split_upload(
+        label: str,
+        inst_model: LLM_AIMETOnnx,
+        inst_seq_len: int,
+        inst_ctx_len: int,
+    ) -> tuple[list[Any], list[list[str]]]:
+        """Export ONNX, split, upload parts. Returns (uploaded_models, split_input_names)."""
+        inst_input_spec = inst_model.get_input_spec(
+            **{
+                **get_input_spec_kwargs(inst_model, additional_model_kwargs),
+                "sequence_length": inst_seq_len,
+                "context_length": inst_ctx_len,
+                "llm_config": llm_config.to_dict(),
+                "llm_io_type": inst_model.llm_io_type,
+            },
+        )
+        sub_output_path = Path(onnx_export_dir) / label
+        source_model_dir = inst_model.convert_to_hub_source_model(
+            target_runtime,
+            sub_output_path,
+            inst_input_spec,
+            external_onnx_weights=True,
+            output_names=inst_model.get_output_names(),
+        )
+        assert source_model_dir is not None
+        source_model_bundle = ONNXBundle.from_bundle_path(source_model_dir)
+        nonlocal input_encodings_path
+        input_encodings_path = str(source_model_bundle.aimet_encodings_path)
+
+        model_artifact = Path(onnx_export_dir) / label
+        os.makedirs(model_artifact, exist_ok=True)
+        onnx.checker.check_model(source_model_bundle.onnx_graph_path, full_check=True)
+
+        if num_splits == 1:
+            bundles = [source_model_bundle]
+        else:
+            bundles = utils.split_onnx(
+                onnxfile=source_model_bundle,
+                modelname=f"{model_name}_{label}",
+                num_splits=num_splits,
+                num_layers_per_split=num_layers_per_split,
+                output_dir=model_artifact,
+                split_embedding=True,
+                using_qairt_workflow=True,
+            )
+
+        uploaded: list[Any] = []
+        input_names: list[list[str]] = []
+        for i, bundle in enumerate(bundles):
+            onnx_path = bundle.onnx_graph_path.as_posix()
+            split_model = onnx.load(onnx_path, load_external_data=False)
+            onnx.checker.check_model(onnx_path, full_check=True)
+            input_names.append([inp.name for inp in split_model.graph.input])
+
+            cache_keys: dict[str, str] = {"precision": str(precision)}
+            if not has_dynamic_onnx:
+                cache_keys["context_length"] = str(inst_ctx_len)
+                cache_keys["sequence_length"] = str(inst_seq_len)
+
+            uploaded.append(
+                get_or_create_cached_model(
+                    model_name=model_name,
+                    model_asset_version=model_asset_version,
+                    cache_name=f"{label}_part_{i + 1}_of_{num_splits}",
+                    cache_mode=model_cache_mode,
+                    model_path=bundle.bundle_path.as_posix(),
+                    additional_keys=cache_keys,
+                )
+            )
+        return uploaded, input_names
+
+    if has_dynamic_onnx:
+        # Dynamic path: Export+Upload once per part (regardless of instantiations)
+        uploaded_models, split_onnx_input_names = _export_split_upload(
+            "dynamic", model, first_seq_len, first_ctx_len
+        )
+    else:
+        # Static path: Export+Upload once per instantiation and part
+        uploaded_models = []
+        split_onnx_input_names = []
+
+    # Submit compile jobs for each (seq_len, ctx_len) combo
+    for inst_idx, (instantiation_name, seq_len, ctx_len) in enumerate(instantiations):
+        sub_component_names[instantiation_name] = []
+
+        if not has_dynamic_onnx:
+            # Static path: export/split/upload per instantiation
+            # Reuse the model from the initial load for the first instantiation.
+            if inst_idx > 0:
+                model = model_cls.from_pretrained(
+                    sequence_length=seq_len,
+                    context_length=ctx_len,
+                    precision=precision,
+                    **model_params,
+                )
+                llm_config = model.llm_config
+            uploaded_models, split_onnx_input_names = _export_split_upload(
+                instantiation_name, model, seq_len, ctx_len
+            )
+        else:
+            model.sequence_length = seq_len
+            model.context_length = ctx_len
+
+        input_spec = model.get_input_spec(
+            **{
+                **get_input_spec_kwargs(model, additional_model_kwargs),
+                "sequence_length": seq_len,
+                "context_length": ctx_len,
+                "llm_config": llm_config.to_dict(),
+                "llm_io_type": model.llm_io_type,
+            },
+        )
+
+        for i in range(len(uploaded_models)):
+            sub_component_name = _make_sub_component_name(
+                instantiation_name, i, num_splits
+            )
+            component_name = f"part_{i + 1}_of_{num_splits}"
+            sub_component_names[instantiation_name].append(sub_component_name)
+            full_name = f"{model_name}_{sub_component_name}"
+
+            model_compile_options = model.get_hub_compile_options(
+                target_runtime,
+                precision,
+                compile_options,
+                context_graph_name=model.get_qnn_context_graph_name(i, num_splits),
+            )
+
+            # Build per-split input spec from the split's ONNX input names.
+            # Intermediate tensors (e.g. "embedding") from previous splits are float32.
+            split_input_spec = {}
+            for inp_name in split_onnx_input_names[i]:
+                if inp_name in input_spec:
+                    split_input_spec[inp_name] = input_spec[inp_name]
+                else:
+                    split_input_spec[inp_name] = (
+                        (1, seq_len, llm_config.hidden_size),
+                        "float32",
+                    )
+
+            submitted_compile_job = hub.submit_compile_job(
+                model=uploaded_models[i],
+                input_specs=to_hub_input_specs(split_input_spec),
+                device=device,
+                name=full_name,
+                options=model_compile_options,
+            )
+            if synchronous:
+                submitted_compile_job.wait()
+            if component_name not in compile_jobs_to_link:
+                compile_jobs_to_link[component_name] = []
+
+            compile_jobs_to_link[component_name].append(
+                cast(hub.client.CompileJob, submitted_compile_job)
+            )
+            compile_jobs[sub_component_name] = cast(
+                hub.client.CompileJob, submitted_compile_job
+            )
+            component_from_sub_component_names[sub_component_name] = component_name
+
+            profile_options_per_subcomponent[sub_component_name] = (
+                model.get_hub_profile_options(
+                    target_runtime,
+                    profile_options,
+                    model.get_qnn_context_graph_name(i, num_splits),
+                )
+            )
+
+    # 1 1/2. Determine IO specs from jobs
+    for sub_component_name, cjob in compile_jobs.items():
+        cjob.wait()  # make sure target_shapes materializes
+        input_specs[sub_component_name] = cjob.target_shapes
+    assert llm_config is not None
+    output_specs = _infer_output_specs(
+        instantiations, num_splits, input_specs, llm_config, precision
+    )
+
+    # 2. Link jobs
+    for component_name, cjobs in compile_jobs_to_link.items():
+        models: list[hub.Model | str | Path | None] = [
+            cast(hub.Model, cjob.get_target_model()) for cjob in cjobs
+        ]
+        full_name = f"{model_name}_{component_name}"
+        model_link_options = model.get_hub_link_options(target_runtime, link_options)
+
+        link_job = hub.submit_link_job(
+            models,
+            name=full_name,
+            options=model_link_options,
+            device=device,
+        )
+        if synchronous:
+            link_job.wait()
+        link_jobs[component_name] = link_job
+
+    # 3. Profile the model assets on real devices
+    profile_jobs: dict[str, hub.client.ProfileJob] = {}
+
+    if not skip_profiling:
+        for instantiation_name, _, _ in instantiations:
+            for sub_component_name in sub_component_names[instantiation_name]:
+                component_name = component_from_sub_component_names[sub_component_name]
+                print(
+                    f"Profiling model {instantiation_name} {sub_component_name} on a hosted device."
+                )
+                link_job = link_jobs[component_name]
+                if not link_job.wait().success:
+                    raise RuntimeError(
+                        f"Link job {link_job.job_id} failed. Please go to {link_job.url} and consult the error log."
+                    )
+                full_name = f"{model_name}_{sub_component_name}"
+                submitted_profile_job = hub.submit_profile_job(
+                    model=link_job.get_target_model(),
+                    device=device,
+                    name=full_name,
+                    options=profile_options_per_subcomponent[sub_component_name],
+                )
+                if synchronous:
+                    submitted_profile_job.wait()
+                profile_jobs[sub_component_name] = cast(
+                    hub.client.ProfileJob, submitted_profile_job
+                )
+
+    # 4. Run inference on-device with sample inputs
+    inference_jobs: dict[str, hub.client.InferenceJob] = {}
+    final_device_output_data: dict[str, DatasetEntries] = {}
+    final_ref_output_data: dict[str, list[np.ndarray]] = {}
+    if not skip_inferencing:
+        for instantiation_name, seq_len, ctx_len in instantiations:
+            model = model_cls.from_pretrained(
+                sequence_length=seq_len, context_length=ctx_len, **model_params
+            )
+            full_model_sample_inputs = model.sample_inputs()
+            output_data: DatasetEntries = {}
+            for sub_component_name in sub_component_names[instantiation_name]:
+                component_name = component_from_sub_component_names[sub_component_name]
+                print(
+                    f"Running inference for {sub_component_name} on a hosted device with example inputs."
+                )
+
+                compile_job = compile_jobs[sub_component_name]
+                target_shapes = compile_job.target_shapes
+
+                # Source inputs from full inputs and previous part's outputs
+                sample_inputs = {}
+                for key in target_shapes:
+                    if key in output_data:
+                        sample_inputs[key] = output_data[key]
+                    elif key in full_model_sample_inputs:
+                        sample_inputs[key] = full_model_sample_inputs[key]
+
+                # Load individual model part
+                full_name = f"{model_name}_{sub_component_name}"
+                submitted_inference_job = hub.submit_inference_job(
+                    model=link_jobs[component_name].get_target_model(),
+                    inputs=sample_inputs,
+                    device=device,
+                    name=full_name,
+                    options=profile_options_per_subcomponent[sub_component_name],
+                )
+                if synchronous:
+                    submitted_inference_job.wait()
+                    output_data = cast(
+                        DatasetEntries, submitted_inference_job.download_output_data()
+                    )
+                inference_jobs[sub_component_name] = cast(
+                    hub.client.InferenceJob, submitted_inference_job
+                )
+
+            # Store the final output data
+            final_device_output_data[instantiation_name] = output_data
+
+            if not skip_summary:
+                # Compute reference (PyTorch) output data
+                ref_output_data_list = torch_inference(model, full_model_sample_inputs)
+                final_ref_output_data[instantiation_name] = ref_output_data_list
+
+    # 5. Download the model assets to a local file
+    target_model_list = []
+    output_path = output_path / ASSET_CONFIG.get_release_asset_name(
+        model_id, target_runtime, precision, chipset
+    )
+    if not skip_downloading:
+        output_path.mkdir(parents=True, exist_ok=True)
+        for component_name, link_job in link_jobs.items():
+            target_model = link_job.get_target_model()
+            assert target_model is not None
+            target_model_filename = f"{model_name}_{component_name}.bin"
+            target_model_list.append(target_model_filename)
+            target_model.download(str(output_path / target_model_filename))
+
+    # 6. Summarize the results from profiling and inference
+    if not skip_summary and not skip_profiling:
+        for instantiation_name, _, _ in instantiations:
+            for sub_component_name in sub_component_names[instantiation_name]:
+                profile_job = profile_jobs[sub_component_name]
+                assert profile_job is not None and profile_job.wait().success
+                profile_data: dict[str, Any] = profile_job.download_profile()
+                print_profile_metrics_from_job(profile_job, profile_data)
+
+    if not skip_summary and not skip_inferencing:
+        for instantiation_name, _, _ in instantiations:
+            # Get ordered model output names
+            torch_out = final_ref_output_data[instantiation_name]
+            inference_result = final_device_output_data[instantiation_name]
+            print_inference_metrics(
+                None,
+                inference_result,
+                torch_out,
+            )
+    # Prepare Genie bundle if applicable
+    tool_versions = None
+    if not skip_downloading:
+        link_job = next(iter(link_jobs.values()))
+        hub_model = link_job.get_target_model()
+        assert hub_model is not None
+
+        tool_versions = ToolVersions.from_job(link_job)
+        tool_versions.to_yaml(output_path / "tool-versions.yaml")
+
+        qairt_version = tool_versions.qairt
+        assert qairt_version is not None
+        version = f"{qairt_version.api_version}.{qairt_version.framework.patch}"
+
+        if (
+            target_runtime == TargetRuntime.GENIE
+            and hasattr(model, "checkpoint")
+            and model.checkpoint is not None
+        ):
+            assert input_encodings_path is not None
+            model.prepare_genie_assets(
+                hub_device=device,
+                checkpoint=model.checkpoint,
+                llm_config=llm_config,
+                context_lengths=context_lengths,
+                model_list=target_model_list,
+                output_path=output_path,
+                precision=precision,
+                encodings_path=input_encodings_path,
+                input_specs=input_specs,
+                output_specs=output_specs,
+                model_id=model_id,
+                model_name=model_display_name,
+            )
+
+            raw_message = f"""
+                These models can be deployed on-device using the Genie SDK.
+                The assets were compiled with QAIRT SDK {version} and we
+                recommend matching this version for on-device deployment.
+
+                [Note] Avoid QAIRT SDK 2.38 since it has a known Genie issue.
+
+                For a full tutorial, please follow the instructions here:
+
+                    https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie.
+            """
+            print(textwrap.dedent(raw_message))
+
+    # Print versions of frameworks used for compilation/profiling
+    if not skip_summary:
+        print_tool_versions(tool_versions)
+
+    # Zip the contents of output_path if requested
+    if zip_assets:
+        shutil.make_archive(
+            str(output_path),
+            "zip",
+            root_dir=str(output_path.parent),
+            base_dir=output_path.name,
+        )
+        shutil.rmtree(output_path)
+
+    return CollectionExportResult(
+        components={
+            sub_component_name: ExportResult(
+                compile_job=compile_jobs[sub_component_name],
+                link_job=link_jobs[component_name],
+                profile_job=profile_jobs.get(sub_component_name),
+                inference_job=inference_jobs.get(sub_component_name),
+            )
+            for component_name in link_jobs
+            for sub_component_name in [
+                x
+                for x, y in component_from_sub_component_names.items()
+                if y == component_name
+            ]
+        }
+    )
+
+
+def _add_skip_inferencing_arg(parser: argparse.ArgumentParser) -> None:
+    """
+    The llama parser was changed to skip inference by default, which changed the
+    --skip-inferencing flag to --do-inferencing.
+
+    However, some external demos rely on the previous flag, so we add it explicity here
+    to avoid breaking them.
+
+    If the upstream parser ever changes back to having --skip-inferencing, this function
+    will become a no-op.
+    """
+    for action in parser._actions:
+        if "--skip-inferencing" in action.option_strings:
+            return
+    parser.add_argument(
+        "--skip-inferencing",
+        action="store_true",
+        help="If set, skips computing on-device outputs from sample data.",
+    )
+
+
+def get_llm_parser(
+    supported_precision_runtimes: dict[Precision, list[TargetRuntime]],
+    model_cls: type[LLM_AIMETOnnx],
+    default_export_device: str,
+    default_precision: Precision,
+    default_sequence_lengths: list[int] | None = None,
+    default_context_lengths: list[int] | None = None,
+) -> argparse.ArgumentParser:
+    if default_sequence_lengths is None:
+        default_sequence_lengths = DEFAULT_EXPORT_SEQUENCE_LENGTHS
+    parser = export_parser(
+        model_cls=model_cls,
+        export_fn=export_model,
+        supported_precision_runtimes=supported_precision_runtimes,
+        default_export_device=default_export_device,
+    )
+    _add_skip_inferencing_arg(parser)
+    parser.set_defaults(
+        _skip_quantsim_creation=True,
+        precision=default_precision,
+        target_runtime=TargetRuntime.GENIE,
+    )
+    parser.add_argument("--quantize", help=argparse.SUPPRESS)
+    parser.add_argument("--precision", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--zip-assets", action="store_true", help="If set, zip assets on download."
+    )
+    # Override the auto-generated --context-length and --sequence-length (int)
+    # to accept comma-separated lists, e.g. "1024,4096" or "128,1".
+    # The type function parses strings to list[int] at the CLI boundary.
+    for action in parser._actions:  # pylint: disable=protected-access
+        if action.dest == "context_length":
+            action.type = _parse_comma_separated_ints
+            if default_context_lengths is not None:
+                action.default = default_context_lengths
+            action.help = (
+                "Context length(s) for the model. "
+                "Pass a single value (e.g. 4096) or a comma-separated list "
+                "(e.g. 1024,4096) to export models for multiple context lengths."
+            )
+        elif action.dest == "sequence_length":
+            action.type = _parse_comma_separated_ints
+            action.default = default_sequence_lengths
+            action.help = (
+                "Sequence length(s) for the model. "
+                "Pass a single value (e.g. 128) or a comma-separated list "
+                "(e.g. 128,1) to export models for multiple sequence lengths."
+            )
+    suppress_help_arguments = [
+        "host_device",
+        "fp_model",
+        "_skip_quantsim_creation",
+        "llm_config",
+    ]
+    for option in parser._actions:  # pylint: disable=protected-access
+        if option.dest and option.dest in suppress_help_arguments:
+            option.help = argparse.SUPPRESS
+        if option.dest and option.dest == "checkpoint":
+            allowed_checkpoints_for_precisions = ",".join(
+                [
+                    f"DEFAULT_{str(prec).upper()}"
+                    for prec in list(supported_precision_runtimes.keys())
+                ]
+            )
+            option.help = f"Path to your quantized checkpoint or 'DEFAULT' to use the checkpoint for the default precision of the model. You can also specify a precision-specific default checkpoint by using 'DEFAULT_<PRECISION>', e.g. 'DEFAULT_W4A16'. Available precisions for this model are: {allowed_checkpoints_for_precisions}."
+    return parser
+
+
+def export_main(
+    model_id: str,
+    model_asset_version: int,
+    supported_precision_runtimes: dict[Precision, list[TargetRuntime]],
+    num_splits: int,
+    num_layers_per_split: int,
+    model_cls: type[LLM_AIMETOnnx],
+    fp_model_cls: type[LLMBase],
+    position_processor_cls: type[PositionProcessorBase],
+    default_export_device: str,
+    default_precision: Precision,
+    constrained_device_max_context_length: int | None = None,
+    default_sequence_lengths: list[int] | None = None,
+    default_context_lengths: list[int] | None = None,
+) -> None:
+    if default_sequence_lengths is None:
+        default_sequence_lengths = DEFAULT_EXPORT_SEQUENCE_LENGTHS
+    warnings.filterwarnings("ignore")
+    parser = get_llm_parser(
+        supported_precision_runtimes,
+        model_cls,
+        default_export_device,
+        default_precision,
+        default_sequence_lengths,
+        default_context_lengths,
+    )
+    args = parser.parse_args()
+    additional_model_kwargs = vars(args)
+
+    if not args.skip_inferencing:
+        additional_model_kwargs["_skip_quantsim_creation"] = False
+    additional_model_kwargs["context_length"] = _ensure_int_list(
+        additional_model_kwargs["context_length"]
+    )
+    additional_model_kwargs["sequence_length"] = _ensure_int_list(
+        additional_model_kwargs["sequence_length"]
+    )
+    first_context_length = additional_model_kwargs["context_length"][0]
+    first_sequence_length = additional_model_kwargs["sequence_length"][0]
+    fp_model_params = dict(
+        sequence_length=first_sequence_length,
+        context_length=first_context_length,
+    )
+    if isinstance(
+        additional_model_kwargs["checkpoint"], str
+    ) and additional_model_kwargs["checkpoint"].startswith("DEFAULT"):
+        additional_model_kwargs["fp_model"] = fp_model_cls.from_pretrained(
+            **fp_model_params
+        )
+        additional_model_kwargs["precision"] = (
+            determine_precision_from_checkpoint(additional_model_kwargs["checkpoint"])
+            or default_precision
+        )
+    # Cache does not differentiate checkpoints, so must be off
+    elif additional_model_kwargs["model_cache_mode"] != CacheMode.DISABLE:
+        raise ValueError(
+            "must use `--model-cache-mode disable` when passing in a custom checkpoint."
+        )
+
+    if host_device := additional_model_kwargs.get("host_device"):
+        additional_model_kwargs["host_device"] = torch.device(host_device)
+    if constrained_device_max_context_length is not None:
+        additional_model_kwargs["constrained_device_max_context_length"] = (
+            constrained_device_max_context_length
+        )
+    export_model(
+        model_cls=model_cls,
+        position_processor_cls=position_processor_cls,
+        model_id=model_id,
+        model_asset_version=model_asset_version,
+        num_splits=num_splits,
+        num_layers_per_split=num_layers_per_split,
+        **additional_model_kwargs,
+    )

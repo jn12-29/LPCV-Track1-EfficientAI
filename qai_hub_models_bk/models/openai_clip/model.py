@@ -1,0 +1,167 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Callable, Generator
+
+import clip
+import torch
+import torch.nn.functional as F
+from clip.model import CLIP
+from PIL.Image import Image
+from torch import Tensor
+from torchvision.transforms import Compose
+from typing_extensions import Self
+
+from qai_hub_models.utils.asset_loaders import callback_with_retry
+from qai_hub_models.utils.base_model import BaseModel
+from qai_hub_models.utils.input_spec import (
+    ColorFormat,
+    ImageMetadata,
+    InputSpec,
+    IoType,
+    TensorSpec,
+)
+
+PRETRAINED_WEIGHTS = "ViT-B/16"
+MODEL_ID = __name__.split(".")[-2]
+MODEL_ASSET_VERSION = 1
+
+
+class OpenAIClip(BaseModel):
+    def __init__(
+        self,
+        clip: CLIP,
+        text_tokenizer: Callable[[str], torch.Tensor],
+        image_preprocessor: Callable[[Image], torch.Tensor],
+    ) -> None:
+        super().__init__()
+        """ Wrapper for OpenAI CLIP."""
+        self.clip = clip
+        self.eot_token = 49407
+        self.text_tokenizer = text_tokenizer
+        self.image_preprocessor = image_preprocessor
+
+    def forward(self, image: torch.Tensor, text: torch.Tensor) -> torch.Tensor:
+        """
+        Forward call on Open AI CLIP model.
+
+        Parameters
+        ----------
+        image
+            Processed image tensor with values normalized to be between 0-1.
+            Shape: [1, 3, 224, 224]
+            Channel Layout: RGB
+        text
+            Processed text tensor to be tokenized.
+            Shape: [1, 77] where context_length=77
+
+        Returns
+        -------
+        cosine_similarities_per_image : torch.Tensor
+            Given a batch of images and a batch of text tokens, returns a tensor,
+            containing the cosine similarity scores corresponding to each image per text input.
+            The values are cosine similarities between the corresponding image and
+            text features, times 100. The cosine similarities of text per image can be computed
+            by doing a transpose.
+            Shape: [num_images, num_text_prompts]
+        """
+        with patched_in_projection_packed():
+            clipped_text = torch.clip(text, min=0, max=self.eot_token)
+            text_features = self.clip.encode_text(clipped_text)
+            # text_features: torch.Tensor [512 (transformer_width), num_text_prompts]
+            # Raw text features.
+            text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+            image_features = self.clip.encode_image(image)
+            image_features = image_features / image_features.norm(dim=1, keepdim=True)
+            # image_features: torch.Tensor [num_images, 512 (transformer_width)]
+            # Raw image features (multiplied to 100)
+            image_features = self.clip.logit_scale.exp() * image_features
+
+        return image_features @ text_features.t()
+
+    @staticmethod
+    def get_input_spec(
+        image_batch_size: int = 1,
+        image_height: int = 224,
+        image_width: int = 224,
+        text_batch_size: int = 1,
+        text_length: int = 77,
+    ) -> InputSpec:
+        # Get the input specification ordered (name -> (shape, type)) pairs for this model.
+        #
+        # This can be used with the qai_hub python API to declare
+        # the model input specification upon submitting a profile job.
+        return {
+            "image": TensorSpec(
+                shape=(image_batch_size, 3, image_height, image_width),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.RGB,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+            "text": TensorSpec(
+                shape=(text_batch_size, text_length),
+                dtype="int32",
+                io_type=IoType.TENSOR,
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["logits_per_image"]
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["image"]
+
+    @classmethod
+    def from_pretrained(cls) -> Self:
+        def load_clip() -> tuple[CLIP, Callable, Compose]:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            tokenizer = clip.tokenize
+            net, preprocess = clip.load(PRETRAINED_WEIGHTS, device=device)
+            return net, tokenizer, preprocess
+
+        net, tokenizer, preprocess = callback_with_retry(
+            num_retries=5, callback=load_clip
+        )
+        assert isinstance(net, CLIP)
+        return cls(net, tokenizer, preprocess)
+
+
+@contextlib.contextmanager
+def patched_in_projection_packed() -> Generator[None]:
+    """
+    Avoid unflatten that causes ONNX export failure.
+    https://github.com/pytorch/pytorch/issues/135764
+    """
+    original_in_projection_packed = torch.nn.functional._in_projection_packed  # type: ignore[attr-defined]
+
+    def patched_in_projection_packed(
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        w: Tensor,
+        b: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        E = q.size(-1)
+        if k is v and q is k:
+            proj = F.linear(q, w, b)
+            proj = proj.view(*proj.shape[:-1], 3, E).permute((2, 0, 1, 3)).contiguous()
+            return proj[0], proj[1], proj[2]
+        return original_in_projection_packed(q, k, v, w, b)
+
+    torch.nn.functional._in_projection_packed = patched_in_projection_packed  # type: ignore[attr-defined]
+
+    try:
+        yield
+    finally:
+        torch.nn.functional._in_projection_packed = original_in_projection_packed  # type: ignore[attr-defined]

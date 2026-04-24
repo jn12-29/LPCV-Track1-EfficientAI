@@ -1,0 +1,7 @@
+supported_precisions:
+- float
+- w8a8
+has_on_target_demo: true
+is_collection_model: true
+requires_aot_prepare: true
+inference_on_8gen3: true

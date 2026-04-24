@@ -1,0 +1,39 @@
+id: tcvideoenhance_torchscript
+hub_model_id: mqvx2248m
+hub_input_dataset_id: dv95olqm7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://hub.tetra.ai/jobs/o5m6yygk/
+domain: Computer Vision
+use_case: Video Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 3
+  - 3
+  - 1280
+  - 720
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mqvx2248m
+  dev: mmd3kpr3n
+hub_input_dataset_ids_automated:
+  prod: dv95olqm7
+  dev: dd9pzlwn7
+hub_input_channel_last_dataset_ids_automated:
+  prod: d678o3zl2
+  dev: dj7dq4wq2

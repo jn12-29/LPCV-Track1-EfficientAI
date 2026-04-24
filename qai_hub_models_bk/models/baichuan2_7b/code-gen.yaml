@@ -1,0 +1,12 @@
+supported_precisions:
+- w4a16
+add_genie_url_to_export: true
+is_collection_model: true
+skip_hub_tests_and_scorecard: true
+skip_scorecard: true
+is_precompiled: true
+additional_readme_section: |
+  ## Deploying Baichuan2-7B on-device
+
+  Please follow the [LLM on-device deployment]({genie_url}) tutorial.
+skip_example_usage: true

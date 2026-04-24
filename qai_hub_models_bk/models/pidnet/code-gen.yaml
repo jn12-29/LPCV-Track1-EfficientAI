@@ -1,0 +1,8 @@
+supported_precisions:
+- float
+- w8a8
+has_on_target_demo: true
+disabled_paths:
+  w8a8:
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): jpy4ywwlp'

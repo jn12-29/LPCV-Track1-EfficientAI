@@ -1,0 +1,41 @@
+supported_devices:
+  - Snapdragon X Elite CRD
+  - Snapdragon X2 Elite CRD
+  - Snapdragon 8 Elite Gen 5 QRD
+  - Samsung Galaxy S25
+  - Samsung Galaxy S25 Ultra
+  - Samsung Galaxy S25+
+supported_chipsets:
+  - qualcomm-snapdragon-8-elite
+  - qualcomm-snapdragon-x-elite
+  - qualcomm-snapdragon-x2-elite
+  - qualcomm-snapdragon-8-elite-gen5
+precisions:
+  w4a16:
+    components:
+      Llama-SEA-LION-v3.5-8B-R:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+                - context_length: 4096
+                  time_to_first_token_range_milliseconds:
+                    min: 111.043
+                    max: 3553.376
+                  tokens_per_second: 16.17
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+                - context_length: 4096
+                  time_to_first_token_range_milliseconds:
+                    min: 226.932
+                    max: 7261.824
+                  tokens_per_second: 7.41
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+                - context_length: 4096
+                  time_to_first_token_range_milliseconds:
+                    min: 129.952
+                    max: 4158.464
+                  tokens_per_second: 21.00

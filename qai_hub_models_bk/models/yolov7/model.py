@@ -1,0 +1,343 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from importlib import reload
+from typing import Any, cast
+
+import torch
+import torch.nn.functional as F
+from typing_extensions import Self
+
+from qai_hub_models.models._shared.yolo.model import DEFAULT_YOLO_IMAGE_INPUT_HW, Yolo
+from qai_hub_models.models._shared.yolo.utils import detect_postprocess_split_input
+from qai_hub_models.models.common import Precision
+from qai_hub_models.utils.asset_loaders import SourceAsRoot, find_replace_in_repo
+from qai_hub_models.utils.input_spec import InputSpec
+from qai_hub_models.utils.set_env import set_temp_env
+
+YOLOV7_SOURCE_REPOSITORY = "https://github.com/WongKinYiu/yolov7"
+YOLOV7_SOURCE_REPO_COMMIT = "84932d70fb9e2932d0a70e4a1f02a1d6dd1dd6ca"
+MODEL_ID = __name__.split(".")[-2]
+DEFAULT_WEIGHTS = "yolov7-tiny.pt"
+MODEL_ASSET_VERSION = 1
+
+
+class YoloV7(Yolo):
+    """Exportable YoloV7 bounding box detector, end-to-end."""
+
+    def __init__(
+        self,
+        yolov7_feature_extractor: torch.nn.Module,
+        yolov7_detector: _YoloV7Detector,
+        include_postprocessing: bool = True,
+        split_output: bool = False,
+    ) -> None:
+        super().__init__()
+        self.yolov7_feature_extractor = yolov7_feature_extractor
+        self.yolov7_detector = yolov7_detector
+        self.include_postprocessing = include_postprocessing
+        self.split_output = split_output
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        weights_name: str = DEFAULT_WEIGHTS,
+        include_postprocessing: bool = True,
+        split_output: bool = False,
+        height: int = DEFAULT_YOLO_IMAGE_INPUT_HW,
+        width: int = DEFAULT_YOLO_IMAGE_INPUT_HW,
+    ) -> Self:
+        """Load YoloV7 from a weightfile created by the source YoloV7 repository."""
+        # Load PyTorch model from disk
+        yolov7_model = _load_yolov7_source_model_from_weights(weights_name)
+
+        yolov7_model.profile = False  # type: ignore[assignment]
+
+        # When traced = True, the model will skip the "Detect" step,
+        # which allows us to override it with an exportable version.
+        yolov7_model.traced = True  # type: ignore[assignment]
+
+        # Generate replacement detector that can be traced
+        detector_head_state_dict = yolov7_model.model[-1].state_dict()  # type: ignore[index, union-attr]
+        yolov7_detect = _YoloV7Detector.from_yolov7_state_dict(
+            detector_head_state_dict,
+            (height, width),
+            yolov7_model.model[-1].stride,  # type: ignore[index, arg-type]
+        )
+
+        return cls(
+            yolov7_model,
+            yolov7_detect,
+            include_postprocessing,
+            split_output,
+        )
+
+    def _get_input_spec_for_instance(self, batch_size: int = 1) -> InputSpec:
+        return super().get_input_spec(
+            batch_size, self.yolov7_detector.h, self.yolov7_detector.w
+        )
+
+    def forward(
+        self, image: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | torch.Tensor:
+        """
+        Run YoloV7 on `image`, and produce a predicted set of bounding boxes and associated class probabilities.
+
+        Parameters
+        ----------
+        image
+            Pixel values pre-processed for encoder consumption.
+            Range: float[0, 1]
+            3-channel Color Space: RGB
+
+        Returns
+        -------
+        result : tuple[torch.Tensor, torch.Tensor, torch.Tensor] | torch.Tensor
+            If self.include_postprocessing is True, returns:
+            boxes
+                Bounding box locations. Shape [batch, num preds, 4] where 4 == (left_x, top_y, right_x, bottom_y).
+            scores
+                Class scores multiplied by confidence. Shape is [batch, num_preds].
+            class_idx
+                Shape is [batch, num_preds] where the last dim is the index of the most probable class of the prediction.
+
+            If self.include_postprocessing is False and self.split_output is True, returns:
+            boxes_xy
+                Shape is [batch, num_preds, 2] where, 2 is [x_center, y_center] (box_coordinates).
+            boxes_wh
+                Shape is [batch, num_preds, 2] where, 2 is [width, height] (box_size).
+            scores
+                Shape is [batch, num_preds, # of classes + 1]. The +1 is the confidence score.
+
+            If self.include_postprocessing is False and self.split_output is False, returns:
+            detector_output
+                Shape is [batch, num_preds, k] where, k = # of classes + 5. k is structured as follows [box_coordinates (4), conf (1), # of classes] and box_coordinates are [x_center, y_center, w, h].
+        """
+        feature_extraction_output = (
+            *self.yolov7_feature_extractor(image),
+        )  # Convert output list to Tuple, for exportability
+        detector_output = self.yolov7_detector(feature_extraction_output)
+
+        if not self.include_postprocessing:
+            if self.split_output:
+                return detector_output
+            return torch.cat(detector_output, -1)
+
+        return detect_postprocess_split_input(*detector_output)
+
+    @staticmethod
+    def get_output_names(
+        include_postprocessing: bool = True, split_output: bool = False
+    ) -> list[str]:
+        if include_postprocessing:
+            return ["boxes", "scores", "class_idx"]
+        if split_output:
+            return ["boxes_xy", "boxes_wh", "scores"]
+        return ["detector_output"]
+
+    def _get_output_names_for_instance(self) -> list[str]:
+        return self.__class__.get_output_names(
+            self.include_postprocessing, self.split_output
+        )
+
+    def get_hub_quantize_options(
+        self, precision: Precision, other_options: str | None = None
+    ) -> str:
+        options = other_options or ""
+        if "--range_scheme" in options:
+            return options
+        if precision in {Precision.w8a8_mixed_int16, Precision.w8a16_mixed_int16}:
+            options += f" --range_scheme min_max --lite_mp percentage={self.get_hub_litemp_percentage(precision)};override_qtype=int16"
+        elif precision in {Precision.w8a8_mixed_fp16, Precision.w8a16_mixed_fp16}:
+            options += f" --range_scheme min_max --lite_mp percentage={self.get_hub_litemp_percentage(precision)};override_qtype=fp16"
+        else:
+            options += " --range_scheme min_max"
+        return options
+
+    @staticmethod
+    def get_hub_litemp_percentage(precision: Precision) -> float:
+        """Returns the Lite-MP percentage value for the specified mixed precision quantization."""
+        return 10
+
+
+class _YoloV7Detector(torch.nn.Module):  # YoloV7 Detection
+    """Converts features extracted by YoloV7 to predicted bounding boxes & associated class predictions."""
+
+    def __init__(
+        self,
+        stride: torch.Tensor,
+        num_anchors: int,
+        num_layers: int,
+        m_in_channels: list[int],
+        m_out_channel: int,
+        input_shape: tuple[int, int],
+    ) -> None:
+        super().__init__()
+        self.stride = stride
+        self.na = num_anchors
+        self.no = m_out_channel // self.na  # number of outputs per anchor
+        self.nc = self.no - 5  # number of classes
+        self.nl = num_layers
+        self.h, self.w = input_shape
+        for i in range(self.nl):
+            self.register_buffer(
+                f"anchor_grid_{i}", torch.zeros(1, self.na, 1, 1, 2)
+            )  # nl * [ tensor(shape(1,na,1,1,2)) ]
+        self.m = torch.nn.ModuleList(
+            torch.nn.Conv2d(m_in_channel, m_out_channel, 1)
+            for m_in_channel in m_in_channels
+        )  # output conv
+
+    @classmethod
+    def from_yolov7_state_dict(
+        cls,
+        state_dict: Mapping[str, Any],
+        input_shape: tuple[int, int],
+        stride: torch.Tensor,
+        strict: bool = True,
+    ) -> Self:
+        """
+        Load this module from a state dict taken from the "Detect" module.
+        This module is found in the original YoloV7 source repository (models/common.py::Detect).
+        """
+        new_state_dict = {}
+
+        # Convert anchor grid buffer from rank 6 to several rank 5 tensors, for export-friendliness.
+        anchor_grid = state_dict["anchor_grid"]
+        nl = len(anchor_grid)
+        na = anchor_grid.shape[2]
+        for i in range(nl):
+            new_state_dict[f"anchor_grid_{i}"] = anchor_grid[i]
+
+        # Copy over `m` layers
+        m_in_channels = []
+        m_out_channel = 0
+        for i in range(nl):
+            weight = f"m.{i}.weight"
+            for x in [weight, f"m.{i}.bias"]:
+                new_state_dict[x] = state_dict[x]
+            m_in_channels.append(new_state_dict[weight].shape[1])
+            m_out_channel = new_state_dict[weight].shape[0]
+
+        out = cls(
+            stride,
+            na,
+            nl,
+            m_in_channels,
+            m_out_channel,
+            input_shape,
+        )
+        out.load_state_dict(new_state_dict, strict)
+        return out
+
+    def make_grid_points(
+        self, x: torch.Tensor, i: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = x.sigmoid()
+        # bs, _, ny, nx = x.shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+        stride = int(self.stride[i])
+        nx, ny = self.h // stride, self.w // stride
+        x = x.reshape(-1, self.na, self.no, nx, ny).permute(0, 1, 3, 4, 2).contiguous()
+        # TODO(13933) Revert once QNN issues with ReduceMax are fixed
+        # Pad 1 class up to 2 to get NPU residence
+        x = F.pad(x, (0, max(7 - self.no, 0)))
+        grid = self._make_grid(nx, ny)
+        y = x
+
+        # Fp16 NPU only supports tensor math up to rank 4
+        # xy computation suffers from accuracy loss when moved to NPU
+        # Only convert wh to rank 4
+        xy = (y[..., 0:2] * 2.0 - 0.5 + grid) * stride
+        xy = xy.reshape(-1, self.na * nx * ny, 2)
+
+        wh = y[..., 2:4].reshape(-1, self.na, nx * ny, 2)
+        wh = (wh * 2) ** 2 * cast(
+            torch.Tensor, self.__getattr__(f"anchor_grid_{i}")
+        ).squeeze(2)
+        wh = wh.reshape(-1, self.na * nx * ny, 2)
+
+        # TODO(13933) Revert max operation once QNN issues with ReduceMax are fixed
+        scores = y[..., 4:].reshape(-1, self.na * nx * ny, max(3, self.no - 4))
+        return xy, wh, scores
+
+    def forward(
+        self, all_x: tuple[torch.Tensor, ...]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        From the outputs of the feature extraction layers of YoloV7, predict bounding boxes,
+        classes, and confidence.
+
+        Parameters
+        ----------
+        all_x
+            Outputs of the feature extraction layers of YoloV7. Typically 3 5D tensors.
+
+        Returns
+        -------
+        xy: torch.Tensor
+            Center coordinates. Shape [batch_size, # of predictions, 2]
+        wh: torch.Tensor
+            Width and height. Shape [batch_size, # of predictions, 2]
+        scores: torch.Tensor
+            Confidence and class scores. Shape [batch_size, # of predictions, # of classes + 1]
+        """
+        # inference output
+        all_xy = []
+        all_wh = []
+        all_scores = []
+        for i in range(self.nl):
+            x = all_x[i]
+            x = self.m[i](x)  # conv
+            xy, wh, scores = self.make_grid_points(x, i)
+            all_xy.append(xy)
+            all_wh.append(wh)
+            all_scores.append(scores)
+
+        return torch.cat(all_xy, 1), torch.cat(all_wh, 1), torch.cat(all_scores, 1)
+
+    @staticmethod
+    def _make_grid(nx: int, ny: int) -> torch.Tensor:
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)], indexing="ij")
+        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+
+
+def _load_yolov7_source_model_from_weights(weights_name: str) -> torch.nn.Module:
+    # Load YoloV7 model from the source repository using the given weights.
+    # Returns <source repository>.models.yolo.Model
+    with SourceAsRoot(
+        YOLOV7_SOURCE_REPOSITORY,
+        YOLOV7_SOURCE_REPO_COMMIT,
+        MODEL_ID,
+        MODEL_ASSET_VERSION,
+    ) as repo_path:
+        # We don't touch these flags, and having conditionals in `forward`
+        # dependent on inputs to the function makes torch fx Graph creation unhappy.
+        find_replace_in_repo(repo_path, "models/yolo.py", "if augment:", "if False:")
+        find_replace_in_repo(repo_path, "models/yolo.py", "if profile:", "if False:")
+
+        # Our qai_hub_models/models package may already be loaded and cached
+        # as "models" (reproduce by running python -m models.yolov7.demo from
+        # models qai_hub_models folder). To make sure it loads the external
+        # "models" package, explicitly reload first.
+        import models
+
+        reload(models)
+
+        # necessary imports. `models` come from the yolov7 repo.
+        from models.experimental import attempt_load
+        from models.yolo import Model
+
+        # Set the environment variable to force torch.load to use weights_only=False
+        # This is needed for PyTorch 2.8+ where the default changed to weights_only=True
+        with set_temp_env({"TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1"}):
+            yolov7_model = attempt_load(
+                weights_name, map_location="cpu"
+            )  # load FP32 model
+
+        assert isinstance(yolov7_model, Model)
+        return yolov7_model

@@ -1,0 +1,141 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from pydantic import Field, model_serializer, model_validator
+
+from qai_hub_models.models.common import Precision, TargetRuntime
+from qai_hub_models.utils.base_config import BaseQAIHMConfig
+
+
+class ModelDisableReasons(BaseQAIHMConfig):
+    # The reason this model failed in the last scorecard run.
+    # Only failures on the default device are included here.
+    #
+    # If set, testing and export are disabled for the given Precision + TargetRuntime combination.
+    #
+    # This field is managed automatically by the scorecard, and should
+    # not be manually edited after a model is first added. If the model
+    # begins to work again, this will be removed automatically by scorecard.
+    scorecard_failure: str | None = None
+
+    # The reason this model failed accuracy testing in the last scorecard run.
+    # Only failures on the default device are included here.
+    #
+    # If set, testing and export are disabled for the given Precision + TargetRuntime combination.
+    #
+    # This field is managed automatically by the scorecard, and should
+    # not be manually edited after a model is first added. If the model
+    # begins to work again, this will be removed automatically by scorecard.
+    scorecard_accuracy_failure: str | None = None
+
+    # If set, testing and export are disabled for the given Precision + TargetRuntime combination.
+    # This requires a filed issue link. You can also include additional info besides the link if you want.
+    #
+    # Scorecard can still run models disabled this way, depending on scorecard settings.
+    issue: str | None = None
+
+    # If set, testing, export, and scorecard are disabled for the given Precision + TargetRuntime combination.
+    # This requires that disable_issue is set above.
+    causes_timeout: bool = False
+
+    @model_validator(mode="after")
+    def check_fields(self) -> ModelDisableReasons:
+        if self.causes_timeout and not self.issue:
+            raise ValueError(
+                "If causes_timeout is set, disable_issue must also be provided for the same precision + runtime pair."
+            )
+        if self.issue:
+            issue_link = "https://github.com/qcom-ai-hub/tetracode/issues/"
+            jira_link = "https://jira-dc.qualcomm.com/"
+            if issue_link not in self.issue and jira_link not in self.issue:
+                raise ValueError(
+                    f"'disable_issue' must include a full link to an issue or JIRA (expected format: `{issue_link}1234` )"
+                )
+        return self
+
+    @property
+    def has_failure(self) -> bool:
+        return (
+            self.scorecard_failure is not None
+            or self.scorecard_accuracy_failure is not None
+            or self.issue is not None
+        )
+
+    @property
+    def failure_reason(self) -> str:
+        assert self.has_failure
+        return self.scorecard_failure or self.scorecard_accuracy_failure or self.issue  # type: ignore[return-value]
+
+
+class ModelDisableReasonsMapping(BaseQAIHMConfig):
+    data: dict[Precision, dict[TargetRuntime, ModelDisableReasons]] = Field(
+        default_factory=dict
+    )
+
+    def __getitem__(self, key: Precision) -> dict[TargetRuntime, ModelDisableReasons]:
+        return self.data[key]
+
+    def __setitem__(
+        self, key: Precision, val: dict[TargetRuntime, ModelDisableReasons]
+    ) -> None:
+        self.data[key] = val
+
+    def __init__(self, **kwargs: Any) -> None:
+        # If the input is a dictionary, treat it as the value for 'data'
+        if len(kwargs) == 0:
+            kwargs = {"data": {}}
+        elif (
+            len(kwargs) == 1
+            and isinstance(next(iter(kwargs.values())), dict)
+            and "data" not in kwargs
+        ):
+            kwargs = {"data": kwargs}
+        super().__init__(**kwargs)
+
+    def get_disable_reasons(
+        self, precision: Precision, runtime: TargetRuntime
+    ) -> ModelDisableReasons:
+        """Get disable reasons for the given precision + runtime pair. Create if it doesn't exist."""
+        if precision not in self.data:
+            self.data[precision] = {}
+        precision_mapping: dict[TargetRuntime, ModelDisableReasons] = self.data[
+            precision
+        ]
+        if runtime not in precision_mapping:
+            precision_mapping[runtime] = ModelDisableReasons()
+        return precision_mapping[runtime]
+
+    @model_serializer(mode="wrap")
+    def serialize_model(
+        self, handler: Callable[[ModelDisableReasonsMapping], dict]
+    ) -> dict:
+        # Skip serialization of dict items that don't have failure reasons set
+        out: dict[Precision, dict[TargetRuntime, ModelDisableReasons]] = {}
+        for precision, runtimes in self.data.items():
+            serialized_runtimes = {
+                runtime: reasons
+                for runtime, reasons in runtimes.items()
+                if reasons.has_failure
+            }
+            if serialized_runtimes:
+                out[precision] = serialized_runtimes
+
+        # Serialize the dict directly (without "data" field)
+        result = handler(ModelDisableReasonsMapping(data=out))
+        if "data" in result:
+            return result["data"]
+        return result  # generally this means the serialization is empty
+
+    @model_validator(mode="before")
+    def _parse_without_data(cls, v: Any) -> Any:
+        # Parse the dict by inserting the "data" outer field if required
+        if isinstance(v, dict) and "data" not in v:
+            return dict(data=v)
+        return v

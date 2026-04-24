@@ -1,0 +1,111 @@
+{#
+    Hugging Face Model Card Template
+
+    Generates the README.md for models published to Hugging Face.
+    Includes performance tables, getting started guide, and model details.
+#}
+{% from 'shared/readme_macros.j2' import model_intro, license, references, community, usage_and_limitations %}
+{% from 'shared/hf_macros.j2' import getting_started, model_details_section, performance_table %}
+{#
+    Render the Hugging Face model card.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier (e.g., "resnet50").
+    model_name : str
+        Display name of the model.
+    model_url : str
+        URL to the model page on AI Hub.
+    model_description : str
+        Full model description.
+    source_repo : str
+        URL to the original repository this model was sourced from.
+    license_url : str
+        URL to the license file.
+    research_paper_title : str
+        Title of the research paper.
+    research_paper_url : str
+        URL to the research paper.
+    include_gen_ai_terms : bool
+        Whether to include generative AI usage limitations.
+    additional_readme_section : str
+        Additional content to include in the README.
+    hugging_face_metadata : str
+        YAML metadata for Hugging Face model card.
+    static_image : str
+        URL to the model's static image.
+    qaihm_model_url : str
+        URL to the model's folder in the AI Hub Models GitHub repository.
+    use_case : str
+        Model use case category.
+    technical_details : dict[str, str]
+        Dictionary of technical details.
+    perf_rows : list[dict]
+        List of performance data rows.
+    download_links : list[dict]
+        List of download link rows.
+    is_llm : bool
+        Whether model is a large language model.
+    is_precompiled : bool, optional
+        Whether model is precompiled only (default: False).
+    restrict_model_sharing : bool, optional
+        Whether model sharing is restricted (default: False).
+    show_purchase_statement : bool, optional
+        Whether to show purchase info (default: False).
+#}
+{% macro render(
+    model_id,
+    model_name,
+    model_url,
+    model_description,
+    source_repo,
+    license_url,
+    research_paper_title,
+    research_paper_url,
+    include_gen_ai_terms,
+    additional_readme_section,
+    hugging_face_metadata,
+    static_image,
+    qaihm_model_url,
+    use_case,
+    technical_details,
+    perf_rows,
+    download_links,
+    is_llm,
+    is_precompiled=False,
+    restrict_model_sharing=False,
+    show_purchase_statement=False
+) %}
+---
+{{ hugging_face_metadata }}
+---
+
+![]({{ static_image }})
+
+# {{ model_name }}: Optimized for Qualcomm Devices
+
+{{ model_description }}
+
+{{ model_intro(model_name, source_repo, model_url, qaihm_model_url, is_hf_readme=True) }}
+{% if additional_readme_section %}
+
+{{ additional_readme_section }}
+{%- endif %}
+
+{{ getting_started(model_name, model_url, qaihm_model_url, download_links, is_precompiled, restrict_model_sharing, show_purchase_statement) }}
+
+{{ model_details_section(use_case, technical_details) }}
+
+{{ performance_table(perf_rows, is_llm) }}
+
+{{ license(model_name, license_url) }}
+
+{{ references(research_paper_title, research_paper_url, source_repo) }}
+
+{{ community() }}
+{% if include_gen_ai_terms %}
+
+{{ usage_and_limitations() }}
+{% endif %}
+{% endmacro %}

@@ -1,0 +1,33 @@
+name: StereoNet
+id: stereonet
+status: published
+headline: Real-time stereo matching network for disparity estimation.
+domain: Computer Vision
+description: StereoNet is an end-to-end deep architecture for real-time stereo matching that produces high-quality, edge-preserved disparity maps from a rectified stereo image pair.
+use_case: Depth Estimation
+tags: []
+applicable_scenarios:
+- Robotics
+- AR/VR
+- Autonomous Driving
+related_models:
+- midas
+- depth_anything
+- depth_anything_v2
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: KeystoneDepth (epoch=21-step=696366.ckpt)
+  Input resolution: 786x490
+  Number of parameters: 1.94M
+  Model size (float): 7.41 MB
+research_paper: https://arxiv.org/abs/1807.08865
+research_paper_title: 'StereoNet: Guided Hierarchical Refinement for Real-Time Edge-Aware Depth Prediction'
+source_repo: https://github.com/andrewlstewart/StereoNet_PyTorch
+license: https://github.com/andrewlstewart/StereoNet_PyTorch/blob/main/LICENSE
+license_type: mit

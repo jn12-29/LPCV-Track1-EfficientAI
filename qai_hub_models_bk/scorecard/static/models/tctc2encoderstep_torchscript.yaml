@@ -1,0 +1,60 @@
+id: tctc2encoderstep_torchscript
+hub_model_id: mmx0gypjm
+hub_input_dataset_id: dk7gqdyy2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: '# Override this to use ct.RangeDim'
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: fw_cell_input
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: fw_cell_input_state_1
+  shape:
+  - 1
+  - 256
+  dtype: float32
+- name: fw_cell_input_state_2
+  shape:
+  - 1
+  - 256
+  dtype: float32
+- name: bw_cell_input
+  shape:
+  - 1
+  - 512
+  dtype: float32
+- name: bw_cell_input_state_1
+  shape:
+  - 1
+  - 256
+  dtype: float32
+- name: bw_cell_input_state_2
+  shape:
+  - 1
+  - 256
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+hub_model_ids_automated:
+  prod: mmx0gypjm
+  dev: mq2xk8wjn
+hub_input_dataset_ids_automated:
+  prod: dk7gqdyy2
+  dev: d6786wvp2

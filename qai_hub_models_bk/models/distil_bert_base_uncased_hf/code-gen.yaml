@@ -1,0 +1,8 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  float:
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'

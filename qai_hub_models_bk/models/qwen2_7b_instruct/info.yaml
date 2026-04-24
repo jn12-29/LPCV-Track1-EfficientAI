@@ -1,0 +1,43 @@
+name: Qwen2-7B-Instruct
+id: qwen2_7b_instruct
+status: published
+headline: State-of-the-art large language model useful on a variety of language understanding and generation tasks.
+domain: Generative AI
+description: The Qwen2-7B-Instruct is a state-of-the-art multilingual language model with 7.07 billion parameters, excelling in language understanding, generation, coding, and mathematics.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input sequence length for Prompt Processor: '128'
+  Context length: '4096'
+  Number of parameters: 7.07B
+  Quantization Type: w4a16 + w8a16 (few layers)
+  Information about the model parts: Prompt Processor and Token Generator are split into 5 parts each. Each corresponding Prompt Processor and Token Generator part share weights.
+  Supported languages: English, Chinese, German, French, Spanish, Portuguese, Italian, Dutch, Russian, Czech, Polish, Arabic, Persian, Hebrew, Turkish, Japanese, Korean, Vietnamese, Thai, Indonesian, Malay, Lao, Burmese, Cebuano, Khmer, Tagalog, Hindi, Bengali, Urdu.
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt. The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of the prompt processor) and the upper bound is for a prompt using the full context length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token.
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2407.10671v1
+research_paper_title: Qwen2 Technical Report
+source_repo: https://github.com/QwenLM/Qwen2.5
+license: https://huggingface.co/Qwen/Qwen2-7B-Instruct/blob/main/LICENSE
+model_type_llm: true
+llm_details:
+  call_to_action: Download
+  genie_compatible: true
+  devices:
+    Snapdragon 8 Elite QRD:
+      qnn_context_binary:
+        model_download_url: v2/snapdragon_8_elite/models.zip

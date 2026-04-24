@@ -1,0 +1,31 @@
+supported_precisions:
+- float
+- w8a8
+has_on_target_demo: true
+disabled_paths:
+  float:
+    tflite:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true
+    qnn_dlc:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true
+    onnx:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true
+  w8a8:
+    tflite:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true
+    qnn_dlc:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true
+    onnx:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: https://jira-dc.qualcomm.com/jira/projects/AISW/issues/AISW-161021
+      causes_timeout: true

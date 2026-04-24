@@ -1,0 +1,44 @@
+name: Yolo-v6
+id: yolov6
+status: published
+headline: Real-time object detection optimized for mobile and edge.
+domain: Computer Vision
+description: YoloV6 is a machine learning model that predicts bounding boxes and classes of objects in an image.
+use_case: Object Detection
+tags:
+- real-time
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models:
+- yolov7
+- yolov8_det
+- yolov11_det
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: YoloV6-N
+  Input resolution: 640x640
+  Number of parameters: 4.68M
+  Model size (float): 17.9 MB
+  Model size (w8a8): 4.68 MB
+  Model size (w8a16): 5.03 MB
+license_type: gpl-3.0
+research_paper: https://arxiv.org/abs/2209.02976
+research_paper_title: 'YOLOv6: A Single-Stage Object Detection Framework for Industrial Applications'
+source_repo: https://github.com/meituan/YOLOv6/
+license: https://github.com/meituan/YOLOv6/blob/47625514e7480706a46ff3c0cd0252907ac12f22/LICENSE
+restrict_model_sharing: true
+numerics_benchmark:
+  dataset_name: coco
+  metric_name: Mean Average Precision
+  value: 37.5
+  unit: mAP
+  source: https://github.com/meituan/YOLOv6

@@ -1,0 +1,242 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+import torch
+from torch import nn
+from typing_extensions import Self
+
+from qai_hub_models.evaluators.base_evaluators import BaseEvaluator
+from qai_hub_models.evaluators.face_det_lite_evaluator import FaceDetLiteEvaluator
+from qai_hub_models.models.common import Precision
+from qai_hub_models.models.face_det_lite.layers import (
+    CBAModule,
+    DetectModule,
+    HeadModule,
+    Mbv3SmallFast,
+    UpModule,
+)
+from qai_hub_models.utils.asset_loaders import CachedWebModelAsset, load_torch
+from qai_hub_models.utils.base_model import BaseModel
+from qai_hub_models.utils.input_spec import (
+    ColorFormat,
+    ImageMetadata,
+    InputSpec,
+    IoType,
+    TensorSpec,
+)
+
+MODEL_ID = "face_det_lite"
+MODEL_ASSET_VERSION = "3"
+DEFAULT_WEIGHTS = "QFD_V3_superlite_060525_50_pickled.pt"
+
+
+class FaceDetLite(BaseModel):
+    """
+    qualcomm face detector model.
+    Detect bounding box for face,
+    Detect landmarks: face landmarks.
+    The output will be saved as 3 maps which will be decoded to final result in the FaceDetLite_App.
+    """
+
+    def __init__(
+        self,
+        wide: int = 32,
+        has_ext: bool = False,
+        upmode: str = "UCBA",
+        act: str = "relu",
+        RGB: bool = False,
+        has_se: bool = True,
+        phase: str = "train",
+    ) -> None:
+        """
+        FaceDetLite face detector model for face and landmark detection.
+        output face bounding box and 5 landmarks.
+
+        Parameters
+        ----------
+        wide
+            The channel size of bandwith of the intermediate layers.
+        has_ext
+            If add extension layer in the head module.
+        upmode
+            Upsampling mode.
+        act
+            Activation function.
+        RGB
+            If the input is a 3 channel RGB.
+        has_se
+            If has the se module.
+        phase
+            "train" or "test".
+        """
+        super().__init__()
+        self.use_rgb = RGB
+        self.has_landmark = True
+        # define backbone
+        self.bb = Mbv3SmallFast(act, RGB, has_se)
+
+        c1, c2 = self.bb.uplayer_shape
+        act = "relu"
+        self.conv3 = CBAModule(
+            self.bb.output_channels,
+            wide,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=False,
+            act=act,
+        )  # s32
+        self.connect1 = CBAModule(c1, wide, kernel_size=1, act=act)  # s8
+        self.connect2 = CBAModule(c2, wide, kernel_size=1, act=act)  # s16
+
+        self.up0 = UpModule(
+            wide, wide, kernel_size=2, stride=2, mode=upmode, act=act
+        )  # s16
+        self.up1 = UpModule(
+            wide, wide, kernel_size=2, stride=2, mode=upmode, act=act
+        )  # s8
+        self.detect = DetectModule(wide, act=act)
+
+        self.center = HeadModule(wide, 1, act=act)
+        self.box = HeadModule(wide, 4, act=act)
+
+        if self.has_landmark:
+            self.landmark = HeadModule(wide, 10, act=act)
+        self.phase = phase
+
+        self.bridge = nn.Conv2d(
+            wide * 2, wide, kernel_size=1, stride=1, padding=0, bias=False
+        )
+
+    def forward(
+        self, image: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+        """
+        Run FaceDetLite on `image`, and produce a the list of face bounding box
+
+        Parameters
+        ----------
+        image
+            Pixel values pre-processed for encoder consumption.
+            Range: float[0, 1]
+            1-channel gray scale image
+            Width/height must be divisible by 32.
+
+        Returns
+        -------
+        result : tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None
+            If has_landmark is True, returns:
+            heatmap
+                Shape is [N, C, H, W]. The heatmap for person/face detection.
+            bbox
+                Shape is [N, C*4, H, W]. The bounding box coordinates as a map.
+            landmark
+                Shape is [N, C*10, H, W]. The coordinates of landmarks as a map.
+
+            If has_landmark is False, returns None.
+        """
+        *_, h, w = image.shape
+        if h % 32 != 0 or w % 32 != 0:
+            raise ValueError("Image width/height must both be divisible by 32.")
+
+        image = (image - 0.442) / 0.280
+
+        s8_, s16_, s32_ = self.bb(image)
+        s32 = self.conv3(s32_)
+
+        s16 = self.up0(s32) + self.connect2(s16_)
+        s8 = self.up1(s16) + self.connect1(s8_)
+        x = self.detect(s8)  # s4: B,C,200,200
+
+        center = self.center(x)
+        box = self.box(x)
+
+        if self.has_landmark:
+            landmark = self.landmark(x)
+            if self.phase == "test":
+                return center.sigmoid(), box, landmark
+
+            return center, box, landmark
+        return None
+
+    @classmethod
+    def from_pretrained(cls, checkpoint_path: str | None = None) -> Self:
+        """Load FaceDetLite from a weightfile created by the source FaceDetLite repository."""
+        # Initialize model
+        FaceDetLite_model = cls()
+        # Determine checkpoint source: user-provided path or cached asset
+        checkpoint_to_load = checkpoint_path or CachedWebModelAsset.from_asset_store(
+            MODEL_ID, MODEL_ASSET_VERSION, DEFAULT_WEIGHTS
+        )
+        # Load weights from checkpoint
+        pretrained_dict = load_torch(checkpoint_to_load)
+
+        # Normalize checkpoint format across versions:
+        # - v3: weights directly in dict
+        # - v2: weights nested under "model_state"
+        if "model_state" in pretrained_dict:
+            pretrained_dict = pretrained_dict["model_state"]
+
+        # Load weights into model and move to CPU
+        FaceDetLite_model.load_state_dict(pretrained_dict)
+        FaceDetLite_model.to(torch.device("cpu"))
+
+        return FaceDetLite_model
+
+    @staticmethod
+    def get_input_spec(
+        batch_size: int = 1,
+        height: int = 480,
+        width: int = 640,
+    ) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type). This can be
+        used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return {
+            "input": TensorSpec(
+                shape=(batch_size, 1, height, width),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.GRAYSCALE,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["heatmap", "bbox", "landmark"]
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["input"]
+
+    @staticmethod
+    def get_channel_last_outputs() -> list[str]:
+        return ["heatmap", "bbox", "landmark"]
+
+    def get_evaluator(self) -> BaseEvaluator:
+        h, w = self.get_input_spec()["input"][0][2:4]
+        return FaceDetLiteEvaluator(h, w)
+
+    @staticmethod
+    def eval_datasets() -> list[str]:
+        return ["face_det_lite"]
+
+    @staticmethod
+    def calibration_dataset_name() -> str:
+        return "face_det_lite"
+
+    @staticmethod
+    def get_hub_litemp_percentage(precision: Precision) -> float:
+        """
+        Returns the Lite-MP percentage value for the specified mixed precision quantization.
+        The returned value is a constant 20.0.
+        """
+        return 20

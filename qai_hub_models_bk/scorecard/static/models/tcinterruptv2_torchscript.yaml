@@ -1,0 +1,30 @@
+id: tcinterruptv2_torchscript
+hub_model_id: mnzrgkw6m
+hub_input_dataset_id: d678mvll9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Customer model - Microsoft. Client checkpoint only works with torch 1.10 ~ 1.11
+domain: Audio
+use_case: Audio Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 160000
+  dtype: float32
+output_names:
+- output_0
+hub_model_ids_automated:
+  prod: mnzrgkw6m
+  dev: mn1w2gyzm
+hub_input_dataset_ids_automated:
+  prod: d678mvll9
+  dev: dn7xq3j59

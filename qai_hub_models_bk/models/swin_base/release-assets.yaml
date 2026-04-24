@@ -1,0 +1,28 @@
+precisions:
+  float:
+    universal_assets:
+      tflite:
+        s3_key: pre_release_assets/gh_actions/24598778341/swin_base-tflite-float.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327
+          litert: 1.4.2
+      qnn_dlc:
+        s3_key: pre_release_assets/gh_actions/24598778341/swin_base-qnn_dlc-float.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/swin_base-onnx-float.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3
+  w8a16:
+    universal_assets:
+      qnn_dlc:
+        s3_key: pre_release_assets/gh_actions/24598778341/swin_base-qnn_dlc-w8a16.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/swin_base-onnx-w8a16.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3

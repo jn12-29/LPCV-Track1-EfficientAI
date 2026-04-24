@@ -1,0 +1,39 @@
+id: image_enhancement_cig_i_redrawing_torchscript
+hub_model_id: mn7ev188m
+hub_input_dataset_id: dw26o6142
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Computer Vision
+use_case: Image Editing
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 48
+  - 272
+  - 272
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mn7ev188m
+  dev: mm6k1g42n
+hub_input_dataset_ids_automated:
+  prod: dw26o6142
+  dev: do7meg1y2
+hub_input_channel_last_dataset_ids_automated:
+  prod: dw9v3y6m2
+  dev: dz7zjorw9

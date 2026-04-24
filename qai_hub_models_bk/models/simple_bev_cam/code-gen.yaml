@@ -1,0 +1,8 @@
+disabled_paths:
+  float:
+    tflite:
+      scorecard_failure: 'Profiling Failure(s): j57j1k0v5'
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): jp83d60kg'
+    onnx:
+      scorecard_failure: 'Profiling Failure(s): jg937kywg'

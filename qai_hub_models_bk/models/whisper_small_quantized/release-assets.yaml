@@ -1,0 +1,152 @@
+precisions:
+  w8a16:
+    chipset_assets:
+      qualcomm-qcs8275:
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24744372966/whisper_small_quantized-voice_ai-w8a16-qualcomm_qcs8275.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8gen3:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_8gen3.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_8gen3.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_8gen3.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite-for-galaxy:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_8_elite_for_galaxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_8_elite_for_galaxy.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_8_elite_for_galaxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-7gen4:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_7gen4.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_7gen4.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_7gen4.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite-gen5:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_8_elite_gen5.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_8_elite_gen5.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_8_elite_gen5.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x-elite:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_x_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_x_elite.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_x_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x2-elite:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_snapdragon_x2_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_snapdragon_x2_elite.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_snapdragon_x2_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-sa7255p:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_sa7255p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_sa7255p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-sa8775p:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_sa8775p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_sa8775p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcm6690:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_qcm6690.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_qcm6690.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_qcm6690.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs8550-proxy:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_qcs8550_proxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_qcs8550_proxy.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_qcs8550_proxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs9075:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-qnn_context_binary-w8a16-qualcomm_qcs9075.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+        precompiled_qnn_onnx:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-precompiled_qnn_onnx-w8a16-qualcomm_qcs9075.zip
+          tool_versions:
+            qairt: 2.42.0.251225135753_193295
+            onnx_runtime: 1.24.3
+        voice_ai:
+          s3_key: pre_release_assets/gh_actions/24598778341/whisper_small_quantized-voice_ai-w8a16-qualcomm_qcs9075.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327

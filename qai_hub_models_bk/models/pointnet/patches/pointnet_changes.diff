@@ -1,0 +1,74 @@
+diff --git a/source/dataset.py b/source/dataset.py
+index 0b48884..05f32b6 100644
+--- a/source/dataset.py
++++ b/source/dataset.py
+@@ -1,5 +1,4 @@
+ import os
+-from path import Path
+ from source import utils
+ from torchvision import transforms
+ from torch.utils.data import Dataset, DataLoader
+@@ -16,19 +15,32 @@ def default_transforms():
+ class PointCloudData(Dataset):
+     def __init__(self, root_dir, valid=False, folder="train", transform=default_transforms()):
+         self.root_dir = root_dir
+-        folders = [dir for dir in sorted(os.listdir(root_dir)) if os.path.isdir(root_dir/dir)]
+-        self.classes = {folder: i for i, folder in enumerate(folders)}
++        folders = [dir for dir in sorted(os.listdir(root_dir)) if os.path.isdir(os.path.join(root_dir,dir))]
++        self.classes = {
++            'bathtub': 0,
++            'bed': 1,
++            'chair': 2,
++            'desk': 3,
++            'dresser': 4,
++            'monitor': 5,
++            'night_stand': 6,
++            'sofa': 7,
++            'table': 8,
++            'toilet': 9
++        }
++
+         self.transforms = transform if not valid else default_transforms()
+         self.valid = valid
+         self.files = []
+         for category in self.classes.keys():
+-            new_dir = root_dir/Path(category)/folder
+-            for file in os.listdir(new_dir):
+-                if file.endswith('.off'):
+-                    sample = {}
+-                    sample['pcd_path'] = new_dir/file
+-                    sample['category'] = category
+-                    self.files.append(sample)
++            new_dir = os.path.join(root_dir,category,folder)
++            if os.path.exists(new_dir):
++                for file in os.listdir(new_dir):
++                    if file.endswith('.off'):
++                        sample = {}
++                        sample['pcd_path'] = os.path.join(new_dir,file)
++                        sample['category'] = category
++                        self.files.append(sample)
+ 
+     def __len__(self):
+         return len(self.files)
+diff --git a/source/model.py b/source/model.py
+index af00d37..7b58366 100644
+--- a/source/model.py
++++ b/source/model.py
+@@ -27,7 +27,7 @@ class Tnet(nn.Module):
+       xb = F.relu(self.bn1(self.conv1(input)))
+       xb = F.relu(self.bn2(self.conv2(xb)))
+       xb = F.relu(self.bn3(self.conv3(xb)))
+-      pool = nn.MaxPool1d(xb.size(-1))(xb)
++      pool = nn.MaxPool1d(xb.size(-1) if isinstance(xb.size(-1), int) else xb.size(-1).item())(xb)
+       flat = nn.Flatten(1)(pool)
+       xb = F.relu(self.bn4(self.fc1(flat)))
+       xb = F.relu(self.bn5(self.fc2(xb)))
+@@ -67,7 +67,7 @@ class Transform(nn.Module):
+ 
+         xb = F.relu(self.bn2(self.conv2(xb)))
+         xb = self.bn3(self.conv3(xb))
+-        xb = nn.MaxPool1d(xb.size(-1))(xb)
++        xb = nn.MaxPool1d(xb.size(-1) if isinstance(xb.size(-1), int) else xb.size(-1).item())(xb)
+         output = nn.Flatten(1)(xb)
+         return output, matrix3x3, matrix64x64
+ 

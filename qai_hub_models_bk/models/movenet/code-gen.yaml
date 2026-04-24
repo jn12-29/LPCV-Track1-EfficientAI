@@ -1,0 +1,18 @@
+supported_precisions:
+- float
+- w8a16_mixed_int16
+has_on_target_demo: true
+disabled_paths:
+  w8a16_mixed_int16:
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): jpx781r9g'
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-56.400 mAP) above threshold (10.0 mAP)
+    onnx:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-56.400 mAP) above threshold (10.0 mAP)
+  float:
+    tflite:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-56.400 mAP) above threshold (10.0 mAP)
+    onnx:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-56.400 mAP) above threshold (10.0 mAP)
+    qnn_dlc:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-56.400 mAP) above threshold (10.0 mAP)

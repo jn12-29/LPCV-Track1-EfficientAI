@@ -1,0 +1,12 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  float:
+    tflite:
+      scorecard_failure: 'Compilation Failure(s): jp34rykng'
+  w8a16:
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Device accuracy (56.1 δ1) deviates from benchmark (97.2 δ1) by -41.100 δ1, threshold: 10.0 δ1'
+enable_pt2: true

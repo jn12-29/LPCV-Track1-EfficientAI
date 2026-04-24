@@ -1,0 +1,31 @@
+id: xr_indoor_sem_seg
+hub_model_id: mm6rgzxdm
+hub_input_dataset_id: d9edqk3v2
+type: ONNX
+bu_owner: xr
+sponsors:
+- qai-hub-models-contributors
+- obailo@qti.qualcomm.com
+context: XR indoor segmentation model added to repo for tracking the performance on XR targets
+source: This model is custom model composed of r30s encoder (https://arxiv.org/abs/2206.08236) and Hamburger decoder (https://arxiv.org/abs/2109.04553)
+domain: Computer Vision
+use_case: Semantic Segmentation
+tags:
+- real-time
+enabled_device_form_factors:
+- XR
+eval_device: XR2 Gen 2 (Proxy)
+enabled_profile_runtimes:
+- qnn_dlc
+- qnn_context_binary
+precision: w8a8
+channel_first_inputs:
+- img
+channel_first_outputs:
+- argmax
+hub_model_ids_automated:
+  prod: mm6rgzxdm
+hub_input_dataset_ids_automated:
+  prod: d9edqk3v2
+hub_input_channel_last_dataset_ids_automated:
+  prod: d7z0kqry2

@@ -1,0 +1,38 @@
+id: tcvocoder_torchscript
+hub_model_id: mno19x3vm
+hub_input_dataset_id: do7mmngm7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: '# Client checkpoint only works with torch 1.10 ~ 1.11 # Disable GradMultiply layer which causes jit tracing error # https://github.com/pytorch/pytorch/issues/75935 # Load saved jit # Convert (1000, 160000) into list of (1, 160000) # Numbers set during 4/27/2023 meeting w/ Francesco Email from Francesco Ledda <Francesco.Ledda@cerence.com> on # 3/17/2023 titled "Re: [EXTERNAL]Re: Models Cerence for ENU Voi". zip: # enu-model.tar 2.gz'
+domain: Audio
+use_case: Audio Enhancement
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 80
+  - 63
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- x
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mno19x3vm
+  dev: mq9wvr9lm
+hub_input_dataset_ids_automated:
+  prod: do7mmngm7
+  dev: d693jnk37
+hub_input_channel_last_dataset_ids_automated:
+  prod: dq9kz5e89
+  dev: d67orkgg7

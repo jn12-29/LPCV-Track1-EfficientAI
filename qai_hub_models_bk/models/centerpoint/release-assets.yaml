@@ -1,0 +1,11 @@
+precisions:
+  float:
+    universal_assets:
+      tflite:
+        s3_key: pre_release_assets/gh_actions/24598778341/centerpoint-tflite-float.zip
+        tool_versions:
+          litert: 1.4.2
+      qnn_dlc:
+        s3_key: pre_release_assets/gh_actions/24598778341/centerpoint-qnn_dlc-float.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327

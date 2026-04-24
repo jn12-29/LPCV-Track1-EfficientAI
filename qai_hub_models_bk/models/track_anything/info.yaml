@@ -1,0 +1,32 @@
+name: Track-Anything
+id: track_anything
+status: published
+headline: High-performance interactive tracking and segmentation in videos.
+domain: Computer Vision
+description: Track-Anything is a video based machine learning model to track an object in a video.
+use_case: Video Object Tracking
+tags: []
+applicable_scenarios: []
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: xmem
+  Input resolution: 320x568
+  Number of parameters (encode_key_with_shrinkage): 9.72M
+  Model size (encode_key_with_shrinkage) (float): 37.1 MB
+  Number of parameters (encode_value): 23.3M
+  Model size (encode_value) (float): 88.8 MB
+  Number of parameters (encode_key_without_shrinkage): 9.71M
+  Model size (encode_key_without_shrinkage) (float): 37.1 MB
+  Number of parameters (segment): 30.1M
+  Model size (segment) (float): 115 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2304.11968
+research_paper_title: 'Track Anything: Segment Anything Meets Videos'
+source_repo: https://github.com/gaomingqi/Track-Anything
+license: https://github.com/gaomingqi/Track-Anything/blob/master/LICENSE

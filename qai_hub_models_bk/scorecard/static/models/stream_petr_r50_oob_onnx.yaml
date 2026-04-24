@@ -1,0 +1,21 @@
+id: stream_petr_r50_oob_onnx
+hub_model_id: mn0v6vzxm
+hub_input_dataset_id: dw9vo56z2
+type: ONNX
+bu_owner: auto
+sponsors:
+- ahmesyed@qti.qualcomm.com
+- svikas@qti.qualocmm.com
+context: StreamPETR is a a SOTA model of interest to the Auto BU. This model represents the out-of-box version of this model before any optimizations applied.
+source: Originally available at https://github.com/exiawsh/StreamPETR.
+domain: Computer Vision
+use_case: Object Detection
+tags: []
+enabled_device_form_factors:
+- Auto
+enabled_profile_runtimes:
+- qnn_dlc
+hub_model_ids_automated:
+  prod: mn0v6vzxm
+hub_input_dataset_ids_automated:
+  prod: dw9vo56z2

@@ -1,0 +1,39 @@
+id: tcdcvcintranoar_360p_torchscript
+hub_model_id: mn7eyro8m
+hub_input_dataset_id: dq9k40p82
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://github.com/qcom-ai-hub/tetracode-customers/blob/main/microsoft/dcvc/DCVC/DCVC-DC/src/tetra/model_wrapper.py
+domain: Computer Vision
+use_case: Video Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 3
+  - 360
+  - 480
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- x
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mn7eyro8m
+  dev: mmd3kpx3n
+hub_input_dataset_ids_automated:
+  prod: dq9k40p82
+  dev: dr2q60el9
+hub_input_channel_last_dataset_ids_automated:
+  prod: dp7l8y649
+  dev: dv74rj0y9

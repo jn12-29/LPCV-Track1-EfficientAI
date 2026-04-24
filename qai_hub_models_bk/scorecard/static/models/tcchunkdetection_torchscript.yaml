@@ -1,0 +1,55 @@
+id: tcchunkdetection_torchscript
+hub_model_id: mqvx2y3lm
+hub_input_dataset_id: dv74eglw2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: customer/fulltrack/src/mobilenetv1_1.py
+domain: Computer Vision
+use_case: Object Detection
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: input_1
+  shape:
+  - 1
+  - 3
+  - 1280
+  - 720
+  dtype: float32
+- name: input_2
+  shape:
+  - 1
+  - 3
+  - 1280
+  - 720
+  dtype: float32
+- name: input_3
+  shape:
+  - 1
+  - 3
+  - 1280
+  - 720
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- input_1
+- input_2
+- input_3
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mqvx2y3lm
+  dev: mnw82rz3n
+hub_input_dataset_ids_automated:
+  prod: dv74eglw2
+  dev: dr2q6lrl9
+hub_input_channel_last_dataset_ids_automated:
+  prod: dv95l3ge7
+  dev: dk7gnp562

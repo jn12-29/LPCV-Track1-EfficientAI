@@ -1,0 +1,17 @@
+precisions:
+  float:
+    universal_assets:
+      tflite:
+        s3_key: pre_release_assets/gh_actions/24598778341/bevdet-tflite-float.zip
+        tool_versions:
+          litert: 1.4.2
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/bevdet-onnx-float.zip
+        tool_versions:
+          onnx_runtime: 1.24.3
+  w8a16_mixed_fp16:
+    universal_assets:
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/bevdet-onnx-w8a16_mixed_fp16.zip
+        tool_versions:
+          onnx_runtime: 1.24.3

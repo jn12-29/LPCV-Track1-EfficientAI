@@ -1,0 +1,9 @@
+supported_precisions:
+- float
+- w8a16_mixed_int16
+- w8a8
+has_on_target_demo: true
+disabled_paths:
+  w8a16_mixed_int16:
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 mAP) deviates from benchmark (47.8 mAP) by -47.800 mAP, threshold: 10.0 mAP'

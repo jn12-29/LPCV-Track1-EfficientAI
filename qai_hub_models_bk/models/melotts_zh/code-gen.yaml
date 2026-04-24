@@ -1,0 +1,14 @@
+supported_precisions:
+- mixed_with_float
+is_collection_model: true
+requires_aot_prepare: true
+orchestrator_runtimes:
+- voice_ai
+only_allow_orchestrator_runtimes: true
+global_requirements_incompatible: true
+pip_pre_build_reqs: --no-deps git+https://github.com/myshell-ai/MeloTTS.git
+readme_install_system_deps: |
+  #### Linux
+  ```bash
+  sudo apt install libportaudio2
+  ```

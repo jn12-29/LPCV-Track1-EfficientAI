@@ -1,0 +1,41 @@
+name: Gemma-3n-E4B-it
+id: gemma_3n_e4b_it
+status: unpublished
+status_reason: Legal approval pending
+headline: Efficient large language model from Google optimized for on-device text generation tasks.
+domain: Generative AI
+description: Gemma is a family of lightweight, state-of-the-art open models from Google, built from the same research and technology used to create the Gemini models.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+research_paper: https://arxiv.org/abs/2503.19786
+research_paper_title: 'Gemma 3 Technical Report'
+license: https://ai.google.dev/gemma/terms
+source_repo: https://huggingface.co/google/gemma-3n-E4B-it
+technical_details:
+  Model architecture: MatFormer (nested, smaller models within a single, larger model)
+  Quantization Type: Q8_0
+  Model Size: 7.35 GB (GGUF)
+  Supported languages: Multilingual Support
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt.
+  Response Rate: Rate of response generation after the first response token.
+applicable_scenarios:
+- Dialogue
+- Content Generation
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+license_type: gemma
+dataset: []
+restrict_model_sharing: false
+model_type_llm: true
+llm_details:
+  call_to_action: Download and View Readme
+  llama_cpp_compatible: true
+  llama_cpp_model_url: https://huggingface.co/ggml-org/gemma-3n-E4B-it-GGUF/resolve/main/gemma-3n-E4B-it-Q8_0.gguf
+  genie_compatible: false
+  devices: {}

@@ -1,0 +1,45 @@
+name: GPUNet
+id: gpunet
+status: published
+headline: Imagenet classifier and general purpose backbone.
+domain: Computer Vision
+description: GPUNet is a machine learning model that can classify images from the Imagenet dataset. It can also be used as a backbone in building more complex models for specific use cases.
+use_case: Image Classification
+tags:
+- backbone
+- bu-auto
+applicable_scenarios:
+- Medical Imaging
+- Anomaly Detection
+- Inventory Management
+related_models:
+- mobilenet_v2
+- densenet121
+- googlenet
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- imagenet-1k
+- imagenet-22k
+technical_details:
+  Model checkpoint: Imagenet
+  Input resolution: 224x224
+  Number of parameters: 10.49M
+  Model size (float): 45.28MB
+  Model size (w8a8): 21.3MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2205.00841
+research_paper_title: 'GPUNet: Searching the Deployable Convolution Neural Networks for GPUs'
+source_repo: https://github.com/NVIDIA/DeepLearningExamples/tree/master/PyTorch/Classification/GPUNet
+license: http://www.apache.org/licenses/LICENSE-2.0
+numerics_benchmark:
+  dataset_name: imagenet
+  metric_name: Top-1 Accuracy
+  value: 73.5
+  unit: '%'
+  source: AI Hub Models Reference Eval

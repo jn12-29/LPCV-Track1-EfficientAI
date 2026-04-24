@@ -1,0 +1,5 @@
+supported_precisions:
+- w8a8
+- float
+has_on_target_demo: true
+is_collection_model: true

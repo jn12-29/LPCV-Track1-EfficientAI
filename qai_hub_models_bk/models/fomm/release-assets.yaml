@@ -1,0 +1,8 @@
+precisions:
+  float:
+    universal_assets:
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/fomm-onnx-float.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3

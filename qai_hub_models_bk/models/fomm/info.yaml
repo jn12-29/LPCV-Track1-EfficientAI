@@ -1,0 +1,27 @@
+name: First-Order-Motion-Model
+id: fomm
+status: published
+headline: Animation of Still Image from Source Video.
+domain: Computer Vision
+description: FOMM is a machine learning model that animates a still image to mirror the movements from a target video.
+use_case: Video Generation
+tags: []
+applicable_scenarios:
+- Cartoon Animation
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: false
+dataset: []
+technical_details:
+  Model checkpoint: vox-256
+  Input resolution: 256x256
+  Model size (detector) (float): 54.2 MB
+  Model size (generator) (float): 174 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/2003.00196
+research_paper_title: First Order Motion Model for Image Animation
+source_repo: https://github.com/AliaksandrSiarohin/first-order-model/tree/master
+license: https://github.com/AliaksandrSiarohin/first-order-model/blob/master/LICENSE.md

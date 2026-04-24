@@ -1,0 +1,47 @@
+name: Segformer-Base
+id: segformer_base
+status: published
+headline: Real-time object segmentation.
+domain: Computer Vision
+description: Segformer Base is a machine learning model that predicts masks and classes of objects in an image.
+use_case: Semantic Segmentation
+tags:
+- real-time
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models:
+- unet_segmentation
+- fastsam_x
+- mediapipe_selfie
+- yolov8_seg
+- ddrnet23_slim
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: nvidia/segformer-b0-finetuned-ade-512-512
+  Input resolution: 512x512
+  Number of output classes: '150'
+  Number of parameters: 3.75M
+  Model size (float): 14.4 MB
+  Model size (w8a16): 4.57 MB
+  Model size (w8a8): 3.90 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2105.15203
+research_paper_title: 'SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers'
+source_repo: https://github.com/huggingface/transformers/tree/main/src/transformers/models/segformer
+license: https://github.com/huggingface/transformers/blob/main/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: ade20k
+  metric_name: Mean Intersection Over Union
+  value: 29.1
+  unit: mIOU
+  source: AI Hub Models Reference Eval

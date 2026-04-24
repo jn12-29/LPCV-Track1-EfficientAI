@@ -1,0 +1,17 @@
+supported_devices:
+  - Snapdragon 8 Elite QRD
+supported_chipsets:
+  - qualcomm-snapdragon-8-elite
+precisions:
+  w4a16:
+    components:
+      Qwen2-7B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite QRD:
+            qnn_context_binary:
+              llm_metrics:
+                - context_length: 4096
+                  tokens_per_second: 13.65
+                  time_to_first_token_range_milliseconds:
+                    min: 170.593
+                    max: 5458.976

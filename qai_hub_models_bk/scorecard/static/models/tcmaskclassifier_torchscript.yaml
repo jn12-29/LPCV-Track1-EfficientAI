@@ -1,0 +1,37 @@
+id: tcmaskclassifier_torchscript
+hub_model_id: mqpvrp0vq
+hub_input_dataset_id: dw260lrz2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://github.com/qcom-ai-hub/tetracode-customers/blob/main/modiface/mask_classifier.py
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 3
+  - 224
+  - 224
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- x
+hub_model_ids_automated:
+  prod: mqpvrp0vq
+  dev: mmxer9zyn
+hub_input_dataset_ids_automated:
+  prod: dw260lrz2
+  dev: d82n6lw59
+hub_input_channel_last_dataset_ids_automated:
+  prod: do7mmnvm7
+  dev: dr9w6wwo7

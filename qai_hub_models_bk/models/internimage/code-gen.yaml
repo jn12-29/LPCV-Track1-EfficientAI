@@ -1,0 +1,8 @@
+supported_precisions:
+- float
+- w8a8
+disabled_paths:
+  w8a8:
+    precompiled_qnn_onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (83.5 %) by -83.500 %, threshold: 10.0 %'
+requires_aot_prepare: true

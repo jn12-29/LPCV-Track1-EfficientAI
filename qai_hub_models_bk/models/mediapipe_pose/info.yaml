@@ -1,0 +1,35 @@
+name: MediaPipe-Pose-Estimation
+id: mediapipe_pose
+status: published
+headline: Detect and track human face, hand, and torso in real-time images and video streams.
+domain: Computer Vision
+description: The MediaPipe Pose Landmark Detector is a machine learning pipeline that predicts bounding boxes and pose skeletons of the face, hands, and torso in an image.
+use_case: Pose Estimation
+tags:
+- real-time
+applicable_scenarios:
+- Accessibility
+- Augmented Reality
+- ARVR
+related_models:
+- mediapipe_hand
+- mediapipe_face
+- mediapipe_selfie
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input resolution: 256x256
+  Number of parameters (pose_detector): 815K
+  Model size (pose_detector) (float): 3.14 MB
+  Number of parameters (pose_landmark_detector): 3.36M
+  Model size (pose_landmark_detector) (float): 12.9 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2006.10204
+research_paper_title: 'BlazePose: On-device Real-time Body Pose tracking'
+source_repo: https://github.com/zmurez/MediaPipePyTorch/
+license: https://github.com/zmurez/MediaPipePyTorch/blob/master/LICENSE

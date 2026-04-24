@@ -1,0 +1,65 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+precisions:
+  q8_0:
+    components:
+      Gemma-3n-E4B-it:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            llama_cpp_cpu:
+              llm_metrics:
+              - context_length: 128
+                tokens_per_second: 12.55
+                time_to_first_token_range_milliseconds:
+                  min: 1215.5
+                  max: 1215.5
+              - context_length: 1024
+                tokens_per_second: 11.89
+                time_to_first_token_range_milliseconds:
+                  min: 1453.2
+                  max: 11625.8
+              - context_length: 4096
+                tokens_per_second: 11.06
+                time_to_first_token_range_milliseconds:
+                  min: 1618.0
+                  max: 51776.0
+            llama_cpp_gpu:
+              llm_metrics:
+              - context_length: 128
+                tokens_per_second: 5.35
+                time_to_first_token_range_milliseconds:
+                  min: 2408.3
+                  max: 2408.3
+              - context_length: 1024
+                tokens_per_second: 5.24
+                time_to_first_token_range_milliseconds:
+                  min: 1941.2
+                  max: 15529.3
+              - context_length: 4096
+                tokens_per_second: 5.08
+                time_to_first_token_range_milliseconds:
+                  min: 1981.7
+                  max: 63415.4
+            llama_cpp_npu:
+              llm_metrics:
+              - context_length: 128
+                tokens_per_second: 9.6
+                time_to_first_token_range_milliseconds:
+                  min: 2148.7
+                  max: 2148.7
+              - context_length: 1024
+                tokens_per_second: 9.34
+                time_to_first_token_range_milliseconds:
+                  min: 2398.8
+                  max: 19190.4
+              - context_length: 4096
+                tokens_per_second: 9.07
+                time_to_first_token_range_milliseconds:
+                  min: 2668.9
+                  max: 85404.5

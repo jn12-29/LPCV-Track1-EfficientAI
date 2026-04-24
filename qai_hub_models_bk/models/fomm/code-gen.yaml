@@ -1,0 +1,17 @@
+disabled_paths:
+  float:
+    tflite:
+      scorecard_failure: 'Profiling Failure(s): generator:jper0r88g'
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): generator:jgdryrz6p'
+is_collection_model: true
+readme_install_system_deps: |
+  #### Linux
+  ```bash
+  sudo apt install ffmpeg
+  ```
+
+  #### Windows
+  ```
+  winget install ffmpeg
+  ```

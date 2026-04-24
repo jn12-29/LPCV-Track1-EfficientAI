@@ -1,8 +1,8 @@
 {
   "model_name": "MobileCLIP2-B",
-  "postfix": "_ptq_qdq_u8s8_pct_1000_Conv,Gemm,MatMul",
-  "image_compile_id": "jgj0jvmep",
-  "text_compile_id": "jperjd1vg",
-  "image_profile_id": "jp1dr4l7p",
-  "text_profile_id": "j57jqyw95"
+  "postfix": "_ptq_w8a8",
+  "image_compile_id": "jp83l71zg",
+  "text_compile_id": "jp01nr62g",
+  "image_profile_id": "jpv1jw77p",
+  "text_profile_id": "jgo1jv845"
 }

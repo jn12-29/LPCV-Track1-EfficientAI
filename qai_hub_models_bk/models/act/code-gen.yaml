@@ -1,0 +1,12 @@
+has_on_target_demo: true
+global_requirements_incompatible: true
+pip_pre_build_reqs: dm_control==1.0.36 --no-deps
+readme_install_system_deps: |
+  #### Linux
+  ```bash
+  sudo apt install libegl-dev
+  ```
+
+  #### Windows
+  You can export this model on windows without extra system dependencies.
+  To run the demo, you will need to install LibEGL libraries. Options include ANGLE or Mesa3D. This is not a well-tested path; we recommend using WSL or a Linux machine for the demo.

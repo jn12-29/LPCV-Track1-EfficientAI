@@ -1,0 +1,3 @@
+has_on_target_demo: true
+is_collection_model: true
+inference_on_8gen3: true

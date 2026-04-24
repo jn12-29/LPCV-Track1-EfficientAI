@@ -1,0 +1,10 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16:
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): jper0708g'
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.777 SSIM) deviates from benchmark (0.945 SSIM) by -0.168 SSIM, threshold: 0.1 SSIM'

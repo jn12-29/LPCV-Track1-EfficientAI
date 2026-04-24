@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+onnxruntime-gpu==1.23.2
+https://github.com/quic/aimet/releases/download/2.26.0/aimet_onnx-2.26.0+cu121-cp310-cp310-manylinux_2_34_x86_64.whl; sys_platform == 'linux' and python_version == "3.10"
+transformers==4.45.0
+sentencepiece==0.2.1
+psutil; sys_platform != 'win32'
+wmi; sys_platform == 'win32'
+onnx==1.18.0
+# GPU torch should only be used for running AIMET-ONNX, not for exporting
+# from torch to ONNX, as that would produce a different ONNX graph than
+# torch CPU exported ONNX.
+torch==2.10.0
+torchvision==0.25.0

@@ -1,0 +1,39 @@
+# General
+store_url: https://qaihub-public-assets.s3.us-west-2.amazonaws.com/
+
+# Web Assets
+web_asset_folder: "qai-hub-models/models/{model_id}/web-assets"
+static_web_banner_filename: model_demo.png
+animated_web_banner_filename: model_demo.mp4
+
+# Model Assets
+model_asset_folder: "qai-hub-models/models/{model_id}/v{version}"
+
+# Dataset Assets
+dataset_asset_folder: "qai-hub-models/datasets/{dataset_id}/v{version}"
+
+# Model Repo
+repo_url: "https://github.com/qualcomm/ai-hub-models/blob/main"
+
+# Release Asset locations
+released_asset_folder: "qai-hub-models/models/{model_id}/releases/v{version}/"
+released_asset_filename: "{model_id}-{runtime}-{precision}.zip"
+released_asset_with_chipset_filename: "{model_id}-{runtime}-{precision}-{chipset_with_underscores}.zip"
+
+# Model Repo Relative Links
+qaihm_repo: "src/qai_hub_models/models/{model_id}"
+labels_path: "src/qai_hub_models/labels/{labels_file}"
+example_use: "src/qai_hub_models/models/{model_id}#example--usage"
+
+# HuggingFace
+huggingface_path: "qualcomm/{model_name}"
+
+# Model website
+models_website_url: "https://aihub.qualcomm.com"
+models_website_relative_path: "models/{model_id}"
+
+# Email Template
+email_template: "qai_hub_models/scripts/templates/email_template.txt"
+
+# Genie Tutorial URL
+genie_url: https://github.com/qualcomm/ai-hub-apps/tree/main/tutorials/llm_on_genie

@@ -1,0 +1,33 @@
+precisions:
+  w4a16:
+    chipset_assets:
+      qualcomm-qcs8275:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_qcs8275.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs9075:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_qcs9075.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite-gen5:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_snapdragon_8_elite_gen5.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_snapdragon_8_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x-elite:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_snapdragon_x_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x2-elite:
+        genie:
+          s3_key: pre_release_assets/manual/2026-04-21/qwen3_4b-genie-w4a16-qualcomm_snapdragon_x2_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327

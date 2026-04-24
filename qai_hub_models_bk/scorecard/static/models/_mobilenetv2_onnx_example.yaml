@@ -1,0 +1,92 @@
+# Model ID (same as name of config file)
+id: "_mobilenetv2_onnx_example"
+
+# If set, access to the model and related AI Hub Workbench jobs will be restricted to only the AI Hub team.
+# You will have access to results, but not be able to look at the jobs or models on AI Hub Workbench.
+# restrict_access = True
+
+# Model to execute, uploaded to AI Hub Workbench.
+# Must be shared with qaihm_bot@qti.qualcomm.com (or qaihm_bot_private@qti.qualcomm.com if restrict_access is True)
+hub_model_id: mn1zorp8m
+
+# Example Model Input Data, uploaded as a dataset to AI Hub Workbench.
+# DO NOT INCLUDE MORE THAN 1 SAMPLE INPUT IN THIS DATASET
+# Must be shared with qaihm_bot@qti.qualcomm.com (or qaihm_bot_private@qti.qualcomm.com if restrict_access is True)
+hub_input_dataset_id: d6785plw7
+
+# Type of Source Model
+# Select from ONNX, AIMET_ONNX, TORCHSCRIPT
+type: ONNX
+
+# BU Owner of this model (auto, compute, iot, ai_hub, xr)
+bu_owner: ai_hub
+
+# Qualcomm Sponsors (users or NTK groups)
+sponsors:
+  - qai-hub-models-contributors
+  - kwatson@qti.qualcomm.com
+
+# Why was this model added to the AI Hub Models scorecard? What is its relevance to your BU / Qualcomm?
+context: "I added this model as an example for others to follow when they add their own models. It's important for the AI Hub Models project."
+
+# Where did this model come from? How was it and the sample data generated / exported?
+# This should have links for model code, data, and weights unless it was developed fully internally.
+source: "This model was traced from Torch Vision (https://pytorch.org/vision/main/models/generated/torchvision.models.mobilenet_v2.html) and compiled to ONNX using AI Hub Workbench."
+
+# The domain the model is used in such as computer vision, audio, etc.
+# See the MODEL_DOMAIN enum (https://github.com/search?q=repo%3Aqualcomm%2Fai-hub-models+MODEL_DOMAIN&type=code) for values.
+domain: Computer Vision
+
+# What task the model is used to solve, such as object detection, classification, etc.
+# See the MODEL_USE_CASE enum (https://github.com/search?q=repo%3Aqualcomm%2Fai-hub-models+MODEL_USE_CASE&type=code) for values.
+use_case: Image Classification
+
+# Applicable model tags
+# See the MODEL_TAG enum (https://github.com/search?q=repo%3Aqualcomm%2Fai-hub-models+MODEL_TAG&type=code) for values
+tags: [backbone]
+
+# Valid device form factors for this model. If set, all supported scorecard devices of these form factors are tested.
+# If unspecified, enabled_devices are used instead. Cannot be specified at the same time as enabled_devices.
+#
+# See the FormFactor enum (https://github.com/search?q=repo%3Aqualcomm%2Fai-hub-models+ScorecardDevice.FormFactor&type=code) for valid values.
+# "all" may also be used here if all Qualcomm hardware should be targeted.
+# All devices should only apply sparingly, as the resources required to run said models are very expensive.
+# enabled_device_form_factors: [Phone, Auto, XR, IoT]
+
+# Specific device names to test. Must be the names defined in qai_hub_models/scorecard/device.py
+# If unspecified, enabled_device_form_factors are used instead. Cannot be specified at the same time as enabled_device_form_factors.
+enabled_devices: ["Samsung Galaxy S24", "default"]
+
+# Device to use for accuracy validation. Must be the names defined in qai_hub_models/scorecard/device.py
+# If unspecified, defaults to ScorecardDevice.get("default")
+eval_device: "Samsung Galaxy S24"
+
+# Runtimes we want to test this model on.
+# If a profile path is not on this list, it will always be skipped for this model regardless of scorecard settings.
+# If unspecified, all paths are valid.
+# See valid values in qai_hub_Models/scorecard/path_profile.py
+enabled_profile_runtimes: [all]
+
+# If set, this model is skipped entirely. This should be set to a string reason if the model is to be disabled.
+# disabled_reason: ""
+
+# The precision that the model's graph uses.
+# If float, skips this model on chipsets that support only quantized compute.
+# See qai_hub_models.models.common.py::Precision for valid options
+precision: float
+
+# Inputs that are in channel-first (NCHW) format.
+# In other words, these inputs have a channel dimension that immediately follows the batch dimension.
+#
+# When compiling for some runtimes, to optimize performance,
+# the shapes of these inputs are changed to channel-last (NHWC).
+# In channel-last format, the channel dimension is the rightmost (last) dimension.
+channel_first_inputs: [image_tensor]
+
+# Outputs that are in channel-first (NCHW) format.
+# In other words, these inputs have a channel dimension that immediately follows the batch dimension.
+#
+# When compiling for some runtimes, to optimize performance,
+# the shapes of these outputs are changed to channel-last (NHWC).
+# In channel-last format, the channel dimension is the rightmost (last) dimension.
+channel_first_outputs: []

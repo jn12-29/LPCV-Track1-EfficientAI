@@ -1,0 +1,63 @@
+id: tcxmem_torchscript
+hub_model_id: mmd4xvdwm
+hub_input_dataset_id: dv914zjx9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Sent from Lightricks
+domain: Computer Vision
+use_case: Video Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: frames
+  shape:
+  - 5
+  - 3
+  - 352
+  - 352
+  dtype: float32
+- name: keys
+  shape:
+  - 1
+  - 64
+  - 484
+  dtype: float32
+- name: value
+  shape:
+  - 1
+  - 256
+  - 484
+  dtype: float32
+- name: shrinkage
+  shape:
+  - 1
+  - 1
+  - 484
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+channel_first_inputs:
+- frames
+- keys
+channel_first_outputs:
+- output_0
+- output_1
+- output_2
+hub_model_ids_automated:
+  prod: mmd4xvdwm
+  dev: mn1k46dvm
+hub_input_dataset_ids_automated:
+  prod: dv914zjx9
+  dev: dp7lr01j7
+hub_input_channel_last_dataset_ids_automated:
+  prod: dv74gm0z7
+  dev: dw26vgk69

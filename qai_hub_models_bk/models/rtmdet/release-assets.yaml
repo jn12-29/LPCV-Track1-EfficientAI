@@ -1,0 +1,20 @@
+precisions:
+  w8a16_mixed_fp16:
+    universal_assets:
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/rtmdet-onnx-w8a16_mixed_fp16.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3
+  float:
+    universal_assets:
+      tflite:
+        s3_key: pre_release_assets/gh_actions/24598778341/rtmdet-tflite-float.zip
+        tool_versions:
+          qairt: 2.45.0.260326154327
+          litert: 1.4.2
+      onnx:
+        s3_key: pre_release_assets/gh_actions/24598778341/rtmdet-onnx-float.zip
+        tool_versions:
+          qairt: 2.42.0.251225135753_193295
+          onnx_runtime: 1.24.3

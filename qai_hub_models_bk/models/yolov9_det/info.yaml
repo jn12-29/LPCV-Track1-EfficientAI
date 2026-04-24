@@ -1,0 +1,40 @@
+name: YOLOv9-Detection
+id: yolov9_det
+status: published
+headline: Real-time object detection optimized for mobile and edge by Ultralytics.
+domain: Computer Vision
+description: Ultralytics YOLOv9 is a machine learning model that predicts bounding boxes and classes of objects in an image.
+use_case: Object Detection
+tags:
+- real-time
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models:
+- yolov6
+- yolov7
+- yolov8_det
+- yolov11_det
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: YOLOv9-T
+  Input resolution: 640x640
+  Model size (float): 8.84 MB
+  Model size (w8a8): 3.23 MB
+  Model size (w8a8_mixed_int16): 3.74 MB
+  Model size (w8a16): 3.25 MB
+license_type: agpl-3.0
+research_paper: https://docs.ultralytics.com/tasks/detect/
+research_paper_title: 'Ultralytics YOLOv9 Docs: Object Detection'
+source_repo: https://github.com/ultralytics/ultralytics/tree/main/ultralytics/models/yolo/detect
+license: https://github.com/ultralytics/ultralytics/blob/main/LICENSE
+imsdk_supported: true
+restrict_model_sharing: true

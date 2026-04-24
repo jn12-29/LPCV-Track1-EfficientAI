@@ -1,0 +1,25 @@
+metrics:
+- dataset_name: mpiigaze
+  dataset_link: http://datasets.d2.mpi-inf.mpg.de/MPIIGaze/MPIIGaze.tar.gz
+  dataset_split_description: evaluation subset
+  metric_name: Mean Angular Error
+  metric_description: Mean angular error between predicted and ground truth gaze directions. Lower is better.
+  metric_unit: MAE (Degrees)
+  metric_range:
+    min: 0.0
+  metric_enablement_threshold: 5.0
+  benchmark_value: 16.8
+  num_partial_samples: 500
+  partial_torch_metric: 16.9
+  device_metric:
+    Samsung Galaxy S25:
+      w8a16:
+        onnx:
+          partial_metric: 12.0
+      float:
+        tflite:
+          partial_metric: 16.9
+        qnn_dlc:
+          partial_metric: 16.9
+        onnx:
+          partial_metric: 16.9

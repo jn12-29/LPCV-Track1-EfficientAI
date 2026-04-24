@@ -1,0 +1,41 @@
+name: Llama-v3-8B-Instruct
+id: llama_v3_8b_instruct
+status: published
+headline: State-of-the-art large language model useful on a variety of language understanding and generation tasks.
+domain: Generative AI
+description: Llama 3 is a family of LLMs. The model is quantized to w4a16 (4-bit weights and 16-bit activations) and part of the model is quantized to w8a16 (8-bit weights and 16-bit activations) making it suitable for on-device deployment. For Prompt and output length specified below, the time to first token is Llama-PromptProcessor-Quantized's latency and average time per addition token is Llama-TokenGenerator-Quantized's latency.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models:
+- llama_v3_1_8b_instruct
+- llama_v3_2_3b_instruct
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input sequence length for Prompt Processor: '128'
+  Maximum context length: '4096'
+  Quantization Type: w4a16 + w8a16 (few layers)
+  Supported languages: English.
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt. The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of the prompt processor) and the upper bound is for a prompt using the full context length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token.
+license_type: llama3
+research_paper: https://ai.meta.com/blog/meta-llama-3/
+research_paper_title: 'LLaMA: Open and Efficient Foundation Language Models'
+source_repo: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/
+license: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/blob/main/LICENSE
+restrict_model_sharing: true
+model_type_llm: true
+llm_details:
+  call_to_action: View Readme
+  genie_compatible: true
+  devices: {}

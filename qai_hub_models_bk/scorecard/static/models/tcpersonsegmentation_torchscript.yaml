@@ -1,0 +1,37 @@
+id: tcpersonsegmentation_torchscript
+hub_model_id: mmdgpol3m
+hub_input_dataset_id: dd9p54rn7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://hub.tetra.ai/jobs/z5wwvz51
+domain: Computer Vision
+use_case: Semantic Segmentation
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 3
+  - 512
+  - 512
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+hub_model_ids_automated:
+  prod: mmdgpol3m
+  dev: mnw82rx3n
+hub_input_dataset_ids_automated:
+  prod: dd9p54rn7
+  dev: dj7d3p4p9
+hub_input_channel_last_dataset_ids_automated:
+  prod: dk7gqdpe2
+  dev: d67ork4g7

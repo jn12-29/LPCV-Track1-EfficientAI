@@ -1,0 +1,56 @@
+id: tcmultihead_torchscript
+hub_model_id: mnl3ryzon
+hub_input_dataset_id: d67oq16n9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: customer/cisco/multihead/profile_model.py
+domain: Multimodal
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: input
+  shape:
+  - 1
+  - 4
+  - 1280
+  - 720
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_7
+- output_8
+- output_9
+channel_first_inputs:
+- input
+channel_first_outputs:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_8
+- output_9
+hub_model_ids_automated:
+  prod: mnl3ryzon
+  dev: mnj4z7wdn
+hub_input_dataset_ids_automated:
+  prod: d67oq16n9
+  dev: dr9wp0v32
+hub_input_channel_last_dataset_ids_automated:
+  prod: dz2rrx8g2
+  dev: dx9e5r3m9

@@ -1,0 +1,31 @@
+id: tctc2memorylayer_torchscript
+hub_model_id: mqpx85g0m
+hub_input_dataset_id: dw2663kg2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 151
+  - 576
+  dtype: float32
+output_names:
+- output_0
+hub_model_ids_automated:
+  prod: mqpx85g0m
+  dev: mq8zo2rzq
+hub_input_dataset_ids_automated:
+  prod: dw2663kg2
+  dev: dd9prg1d2

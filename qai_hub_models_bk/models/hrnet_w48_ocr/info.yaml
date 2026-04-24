@@ -1,0 +1,48 @@
+name: HRNet-W48-OCR
+id: hrnet_w48_ocr
+status: published
+headline: Semantic segmentation in higher resolution.
+domain: Computer Vision
+description: HRNet-W48-OCR is a machine learning model that can segment images from the Cityscape dataset. It has lightweight and hardware-efficient operations and thus delivers significant speedup on diverse hardware platforms
+use_case: Semantic Segmentation
+tags:
+- bu-auto
+- real-time
+applicable_scenarios:
+- Automotive
+- Autonomous Driving
+- Camera
+related_models:
+- ffnet_54s
+- ffnet_78s
+- deeplabv3_plus_mobilenet
+- ddrnet23_slim
+- efficientvit_l2_seg
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- cityscapes
+technical_details:
+  Model checkpoint: hrnet_ocr_cs_8162_torch11.pth
+  Input resolution: 2048x1024
+  Number of output classes: '19'
+  Number of parameters: 70.3M
+  Model size (float): 268 MB
+  Model size (w8a16): 70.3 MB
+license_type: bsd-3-clause
+private_perf_form_factors:
+- Auto
+research_paper: https://arxiv.org/abs/1909.11065
+research_paper_title: 'Segmentation Transformer: Object-Contextual Representations for Semantic Segmentation'
+source_repo: https://github.com/HRNet/HRNet-Semantic-Segmentation
+license: https://github.com/HRNet/HRNet-Semantic-Segmentation/blob/HRNet-OCR/LICENSE
+numerics_benchmark:
+  dataset_name: cityscapes
+  metric_name: Mean Intersection Over Union
+  value: 81.6
+  unit: mIOU
+  source: https://github.com/HRNet/HRNet-Semantic-Segmentation

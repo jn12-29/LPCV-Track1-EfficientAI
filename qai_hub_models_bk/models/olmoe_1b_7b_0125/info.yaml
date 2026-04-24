@@ -1,0 +1,41 @@
+name: OLMoE-1B-7B-0125
+id: olmoe_1b_7b_0125
+status: pending
+status_reason: Pending legal review and performance number collection.
+headline: Efficient open Mixture-of-Experts language model for on-device text generation.
+domain: Generative AI
+use_case: Text Generation
+description: OLMoE is a fully open Mixture-of-Experts language model from the Allen Institute for AI (AllenAI). The model activates 1B parameters per token out of 7B total parameters, making it efficient while maintaining strong performance. The model is quantized to Q4_0 for on-device deployment.
+tags:
+- llm
+- generative-ai
+- moe
+source_repo: https://github.com/allenai/OLMoE
+license_type: apache-2.0
+technical_details:
+  Number of parameters: 7B total (1B active per token)
+  Model architecture: Sparse Mixture of Experts (MoE)
+  Quantization Type: Q4_0
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt.
+  Response Rate: Rate of response generation after the first response token.
+applicable_scenarios:
+- Dialogue
+- Content Generation
+research_paper: https://arxiv.org/abs/2409.02060
+research_paper_title: 'OLMoE: Open Mixture-of-Experts Language Models'
+license: https://github.com/allenai/OLMoE/blob/main/LICENSE
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: false
+has_animated_banner: false
+dataset: []
+restrict_model_sharing: false
+model_type_llm: true
+llm_details:
+  call_to_action: Download and View Readme
+  llama_cpp_compatible: true
+  llama_cpp_model_url: https://huggingface.co/allenai/OLMoE-1B-7B-0125-GGUF/resolve/main/OLMoE-1B-7B-0125-Q4_0.gguf
+  genie_compatible: false
+  devices: {}

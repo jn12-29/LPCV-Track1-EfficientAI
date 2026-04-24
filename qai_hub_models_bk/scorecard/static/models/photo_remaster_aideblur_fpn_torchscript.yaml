@@ -1,0 +1,43 @@
+id: photo_remaster_aideblur_fpn_torchscript
+hub_model_id: mq2l32ydn
+hub_input_dataset_id: d693oryl9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Computer Vision
+use_case: Image Editing
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 12
+  - 768
+  - 768
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+- output_1
+- output_2
+hub_model_ids_automated:
+  prod: mq2l32ydn
+  dev: mqv672dem
+hub_input_dataset_ids_automated:
+  prod: d693oryl9
+  dev: d6784zo69
+hub_input_channel_last_dataset_ids_automated:
+  prod: dv74gmn07
+  dev: dw26vkl69

@@ -1,0 +1,97 @@
+{% import 'common_template.j2' as common %}
+{{ header }}
+
+
+from __future__ import annotations
+import warnings
+
+import qai_hub as hub
+
+from qai_hub_models.models.{{ model_name }} import MODEL_ID, Model
+from qai_hub_models.utils.args import evaluate_parser, get_input_spec_kwargs, get_model_kwargs
+from qai_hub_models.utils.evaluate import evaluate_on_dataset
+from qai_hub_models.utils.input_spec import InputSpec
+from qai_hub_models.utils.inference import compile_model_from_args
+from qai_hub_models.models.common import Precision, TargetRuntime
+from qai_hub_models.models.{{ model_name }}.export import export_model
+{%- if model_status != "published" %}
+from qai_hub_models.utils.asset_loaders import query_yes_no, UNPUBLISHED_MODEL_WARNING
+{%- endif %}
+
+def main() -> None:
+    warnings.filterwarnings("ignore")
+{%- if model_status != "published" %}
+    print("WARNING:", UNPUBLISHED_MODEL_WARNING)
+    if not query_yes_no("Continue?"):
+        return
+{%- endif %}
+    eval_datasets = Model.eval_datasets()
+    supported_precision_runtimes : {{ common.write_supported_precision_runtimes(supported_precision_runtimes) }}
+    parser = evaluate_parser(
+        model_cls=Model,
+        supported_datasets=eval_datasets,
+        supported_precision_runtimes=supported_precision_runtimes,
+        {%- if not can_use_quantize_job or not supports_quantization %}uses_quantize_job=False,{% endif %}
+        {%- if can_use_quantize_job and supports_quantization and num_calibration_samples %}
+        num_calibration_samples = {{ num_calibration_samples }},
+        {%- endif %}
+        default_device="{{ default_device }}",
+    )
+    args = parser.parse_args()
+
+    model_kwargs = get_model_kwargs(Model, vars(args))
+    input_spec_kwargs = get_input_spec_kwargs(Model, vars(args))
+
+    if len(eval_datasets) == 0:
+        print("Model does not have evaluation dataset specified. Evaluating PSNR on a single sample.")
+        export_model(
+            device=args.device,
+            target_runtime=args.target_runtime,
+            skip_downloading=True,
+            skip_profiling=True,
+            compile_options=args.compile_options,
+            profile_options=args.profile_options,
+            {%- if can_use_quantize_job and num_calibration_samples %}
+            num_calibration_samples = args.num_calibration_samples,
+            {%- endif %}
+            **{**model_kwargs, **input_spec_kwargs}
+        )
+        return
+
+    compiled_model: hub.Model | None = None
+    {%- if can_use_quantize_job and supports_quantization %}
+    quantized_model: hub.Model | None = None
+    {%- endif %}
+    if not args.skip_device_accuracy{% if can_use_quantize_job and supports_quantization %} or args.compute_quant_cpu_accuracy{% endif %}:
+        if args.hub_model_id is not None:
+            compiled_model = hub.get_model(args.hub_model_id)
+        else:
+            compiled_model = compile_model_from_args(MODEL_ID, args, {**model_kwargs, **input_spec_kwargs})
+        {%- if can_use_quantize_job and supports_quantization %}
+        if args.precision != Precision.float:
+            quantized_model = compiled_model
+        {%- endif %}
+
+    torch_model = Model.from_pretrained(**get_model_kwargs(Model, vars(args)))
+    input_spec: InputSpec | None = None
+    if not args.skip_torch_accuracy and not compiled_model{% if can_use_quantize_job and supports_quantization %} and not quantized_model{% endif %}:
+        input_spec = torch_model.get_input_spec(**input_spec_kwargs)
+
+    evaluate_on_dataset(
+        evaluator_func=torch_model.get_evaluator,
+        dataset_name=args.dataset_name,
+        input_spec=input_spec,
+        torch_model=torch_model,
+        compiled_model=compiled_model if not args.skip_device_accuracy else None,
+        {%- if can_use_quantize_job and supports_quantization %}
+        quantized_model=quantized_model if args.compute_quant_cpu_accuracy else None,
+        {%- endif %}
+        hub_device=args.device,
+        samples_per_job=args.samples_per_job,
+        num_samples=args.num_samples,
+        seed=args.seed,
+        profile_options=args.profile_options,
+        use_cache=args.use_dataset_cache,
+    )
+if __name__ == "__main__":
+    main()

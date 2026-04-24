@@ -1,0 +1,22 @@
+id: statetransformer_onnx_run
+hub_model_id: mmdvp14om
+hub_input_dataset_id: dv91ll1x2
+type: ONNX
+bu_owner: auto
+sponsors:
+- msaripil@qti.qualcomm.com
+- ahmesyed@qti.qualcomm.com
+- svikas@qti.qualocmm.com
+context: StateTransformer is a state-of-the-art (SOTA) motion planning model of interest to the Auto BU. This model represents the out-of-box version before any optimizations or customizations are applied.
+source: Originally available at https://github.com/Tsinghua-MARS-Lab/StateTransformer.
+domain: Multimodal
+use_case: Driver Assistance
+tags: []
+enabled_device_form_factors:
+- Auto
+enabled_profile_runtimes:
+- qnn_dlc
+hub_model_ids_automated:
+  prod: mmdvp14om
+hub_input_dataset_ids_automated:
+  prod: dv91ll1x2

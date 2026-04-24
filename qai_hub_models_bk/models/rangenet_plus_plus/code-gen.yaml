@@ -1,0 +1,3 @@
+supported_precisions:
+- float
+has_on_target_demo: true

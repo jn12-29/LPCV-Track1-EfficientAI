@@ -1,0 +1,8 @@
+supported_precisions:
+- float
+- w8a8_mixed_fp16
+has_on_target_demo: true
+disabled_paths:
+  w8a8_mixed_fp16:
+    qnn_dlc:
+      scorecard_failure: 'Profiling Failure(s): jpr4m480g'

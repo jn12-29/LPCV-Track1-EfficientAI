@@ -1,0 +1,37 @@
+id: tctfv5_torchscript
+hub_model_id: mqy6xpd5m
+hub_input_dataset_id: dv74y4g07
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: customer/pangiam/tfv5/profile.py
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 3
+  - 112
+  - 112
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+hub_model_ids_automated:
+  prod: mqy6xpd5m
+  dev: mqkv9241m
+hub_input_dataset_ids_automated:
+  prod: dv74y4g07
+  dev: d09y5gd37
+hub_input_channel_last_dataset_ids_automated:
+  prod: dp701ykd2
+  dev: d67jrzgm9

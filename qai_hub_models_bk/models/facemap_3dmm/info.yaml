@@ -1,0 +1,29 @@
+name: Facial-Landmark-Detection
+id: facemap_3dmm
+status: published
+headline: Real-time 3D facial landmark detection optimized for mobile and edge.
+domain: Computer Vision
+description: Detects facial landmarks (eg, nose, mouth, etc.). This model's architecture was developed by Qualcomm. The model was trained by Qualcomm on a proprietary dataset of faces, but can be used on any image.
+use_case: Pose Estimation
+tags:
+- backbone
+applicable_scenarios:
+- Driver Monitor System
+- Face Tracking
+related_models:
+- resnet18
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input resolution: 128x128
+  Number of parameters: 5.42M
+  Model size (float): 20.7 MB
+  Model size (w8a8): 5.27 MB
+license_type: bsd-3-clause
+license: https://github.com/quic/ai-hub-models/blob/main/LICENSE

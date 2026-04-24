@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from typing import cast
+
+import numpy as np
+from PIL.Image import fromarray
+
+from qai_hub_models.models._shared.segmentation.app import SegmentationApp
+from qai_hub_models.models.unet_segmentation.demo import IMAGE_ADDRESS
+from qai_hub_models.models.unet_segmentation.demo import main as demo_main
+from qai_hub_models.models.unet_segmentation.model import (
+    MODEL_ASSET_VERSION,
+    MODEL_ID,
+    UNet,
+)
+from qai_hub_models.utils.asset_loaders import CachedWebModelAsset, load_image
+
+OUTPUT_ADDRESS = CachedWebModelAsset.from_asset_store(
+    MODEL_ID, MODEL_ASSET_VERSION, "test_output.png"
+)
+
+
+def test_task() -> None:
+    net = UNet.from_pretrained()
+
+    img = load_image(IMAGE_ADDRESS)
+    mask = cast(np.ndarray, SegmentationApp(net).predict(img, raw_output=True))
+
+    # Convert raw mask of 0s and 1s into a PIL Image
+    img = fromarray(mask[0].argmax(0) == 1)
+    expected_out = load_image(OUTPUT_ADDRESS)
+    np.testing.assert_allclose(np.array(img), np.array(expected_out))
+
+
+def test_demo() -> None:
+    demo_main(is_test=True)

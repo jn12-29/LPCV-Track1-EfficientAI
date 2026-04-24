@@ -1,0 +1,21 @@
+metrics:
+- dataset_name: cocobody
+  dataset_link: http://images.cocodataset.org/
+  dataset_split_description: val2017 split
+  metric_name: Mean Average Precision
+  metric_description: Mean Average Precision (across predicted classes).
+  metric_unit: mAP
+  metric_range:
+    min: 0.0
+    max: 100.0
+  metric_enablement_threshold: 10.0
+  benchmark_value: 58.9
+  num_partial_samples: 1000
+  partial_torch_metric: 64.8
+  device_metric:
+    Samsung Galaxy S25:
+      float:
+        qnn_context_binary:
+          partial_metric: 64.6
+        precompiled_qnn_onnx:
+          partial_metric: 64.6

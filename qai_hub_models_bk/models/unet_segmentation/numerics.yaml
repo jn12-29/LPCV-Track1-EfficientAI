@@ -1,0 +1,30 @@
+metrics:
+- dataset_name: carvana
+  dataset_link: https://www.kaggle.com/competitions/carvana-image-masking-challenge
+  dataset_split_description: train split
+  metric_name: Mean Intersection Over Union
+  metric_description: Overlap of predicted and expected segmentation divided by the union size.
+  metric_unit: mIOU
+  metric_range:
+    min: 0.0
+    max: 100.0
+  metric_enablement_threshold: 10.0
+  benchmark_value: 97.7
+  num_partial_samples: 100
+  partial_torch_metric: 97.7
+  device_metric:
+    Samsung Galaxy S25:
+      float:
+        tflite:
+          partial_metric: 97.7
+        qnn_dlc:
+          partial_metric: 97.7
+        onnx:
+          partial_metric: 97.7
+      w8a8:
+        tflite:
+          partial_metric: 94.6
+        qnn_dlc:
+          partial_metric: 94.6
+        onnx:
+          partial_metric: 94.6

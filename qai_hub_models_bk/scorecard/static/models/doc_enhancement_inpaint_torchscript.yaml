@@ -1,0 +1,39 @@
+id: doc_enhancement_inpaint_torchscript
+hub_model_id: mn7ev18om
+hub_input_dataset_id: dz2rnrpo7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Computer Vision
+use_case: Image Editing
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 4
+  - 512
+  - 512
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mn7ev18om
+  dev: mm6k1go5n
+hub_input_dataset_ids_automated:
+  prod: dz2rnrpo7
+  dev: d09y5ge37
+hub_input_channel_last_dataset_ids_automated:
+  prod: dq9kz5ld9
+  dev: d67jreyz9

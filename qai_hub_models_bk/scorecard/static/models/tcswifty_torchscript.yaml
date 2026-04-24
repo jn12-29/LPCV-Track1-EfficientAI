@@ -1,0 +1,59 @@
+id: tcswifty_torchscript
+hub_model_id: mnwgr7p3q
+hub_input_dataset_id: dr2qywml7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: '# Override this to use ct.RangeDim Customer uploaded to https://hub.tetra.ai/jobs/np1yn7pq'
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: input_1
+  shape:
+  - 5
+  - 3
+  - 352
+  - 352
+  dtype: float32
+- name: input_2
+  shape:
+  - 1
+  - 1452
+  - 32
+  dtype: float32
+- name: input_3
+  shape:
+  - 1
+  - 128
+  - 1452
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+channel_first_inputs:
+- input_1
+channel_first_outputs:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+hub_model_ids_automated:
+  prod: mnwgr7p3q
+  dev: mnggy5p0n
+hub_input_dataset_ids_automated:
+  prod: dr2qywml7
+  dev: dp70legl7
+hub_input_channel_last_dataset_ids_automated:
+  prod: dd9p4mgo9
+  dev: dq9kgl8o2

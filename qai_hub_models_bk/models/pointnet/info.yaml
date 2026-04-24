@@ -1,0 +1,26 @@
+name: PointNet
+id: pointnet
+status: published
+headline: Deep learning model for 3D object classification using point cloud data.
+domain: Computer Vision
+description: PointNet is a pioneering neural network architecture designed to directly consume unordered point cloud data for tasks such as classification and segmentation. It learns spatial features from raw 3D points without requiring voxelization or image projections.
+use_case: Semantic Segmentation
+tags:
+- bu-auto
+applicable_scenarios:
+  - Scenario detection
+related_models: []
+form_factors:
+  - Auto
+has_static_banner: true
+has_animated_banner: true
+dataset:
+  - ModelNet10
+technical_details:
+  Model checkpoint: save
+  Input resolution: 1x3x1024
+  Model size: 13.2 MB
+license_type: apache-2.0
+private_perf_form_factors:
+  - Auto
+license: https://github.com/nikitakaraevv/pointnet/blob/master/LICENSE

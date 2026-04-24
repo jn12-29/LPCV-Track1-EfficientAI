@@ -1,0 +1,380 @@
+{#
+    Shared Macros for Model README Generation
+
+    Common macros used by both the repository README and Hugging Face model card.
+    Includes model intro, license, references, community, and usage sections.
+#}
+
+
+{#
+    Generate the model introduction section.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    source_repo : str
+        URL to the original repository this model was sourced from.
+    model_url : str
+        URL to the model page on AI Hub.
+    qaihm_model_url : str, optional
+        URL to the model's folder in the AI Hub Models GitHub repository.
+    is_hf_readme : bool, optional
+        Whether generating for Hugging Face (default: False).
+#}
+{%- macro model_intro(
+    model_name,
+    source_repo,
+    model_url,
+    qaihm_model_url=None,
+    is_hf_readme=False
+) -%}
+{% if source_repo -%}
+This is based on the implementation of {{ model_name }} found [here]({{ source_repo }}).
+{% endif -%}
+{%- if is_hf_readme -%}
+This repository contains pre-exported model files optimized for Qualcomm® devices. You can use the [Qualcomm® AI Hub Models]({{ qaihm_model_url }}) library to export with custom configurations.
+{%- else -%}
+This repository contains scripts for optimized on-device export suitable to run on Qualcomm® devices.
+{%- endif %} More details on model performance across various devices, can be found [here]({{ '#performance-summary' if is_hf_readme else model_url }}).
+
+Qualcomm AI Hub Models uses [Qualcomm AI Hub Workbench](https://workbench.aihub.qualcomm.com) to compile, profile, and evaluate this model. [Sign up](https://myaccount.qualcomm.com/signup) to run these models on a hosted Qualcomm® device.
+{%- endmacro -%}
+
+
+{#
+    Generate a pip install code block.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier (e.g., "resnet50").
+    has_model_requirements : bool
+        Whether model has additional pip requirements.
+    pip_pre_build_reqs : str, optional
+        Pre-build pip requirements to install first.
+    pip_install_flags : str, optional
+        Additional flags for pip install command.
+    python_version_gte : str, optional
+        Minimum Python version (default: "3.10").
+    python_version_lt : str, optional
+        Maximum Python version (default: "3.14").
+#}
+{%- macro _pip_install_block(
+    model_id,
+    has_model_requirements,
+    pip_pre_build_reqs=None,
+    pip_install_flags=None,
+    python_version_gte=None,
+    python_version_lt=None
+) -%}
+{% set install_package = '"qai-hub-models[' ~ (model_id | replace('_', '-')) ~ ']"' if has_model_requirements else 'qai-hub-models' %}
+```bash
+# NOTE: {{ python_version_gte or '3.10' }} <= PYTHON_VERSION < {{ python_version_lt or '3.14' }} is supported.
+{% if pip_pre_build_reqs %}
+pip install {{ pip_pre_build_reqs }}
+{% endif %}
+pip install {{ install_package }}{{ ' ' ~ pip_install_flags if pip_install_flags else '' }}
+```
+{%- endmacro -%}
+
+
+{#
+    Generate package installation instructions.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier (e.g., "resnet50").
+    has_model_requirements : bool
+        Whether model has additional pip requirements.
+    pip_pre_build_reqs : str, optional
+        Pre-build pip requirements to install first.
+    pip_install_flags : str, optional
+        Additional flags for pip install command.
+    pip_install_flags_gpu : str, optional
+        GPU-specific pip install flags; if provided, shows GPU instructions.
+    python_version_gte : str, optional
+        Minimum Python version (default: "3.10").
+    python_version_lt : str, optional
+        Maximum Python version (default: "3.14").
+#}
+{%- macro package_instructions(
+    model_id,
+    has_model_requirements,
+    pip_pre_build_reqs=None,
+    pip_install_flags=None,
+    pip_install_flags_gpu=None,
+    python_version_gte=None,
+    python_version_lt=None
+) -%}
+Install the package via pip:
+{{ _pip_install_block(model_id, has_model_requirements, pip_pre_build_reqs, pip_install_flags, python_version_gte, python_version_lt) }}
+{%- if pip_install_flags_gpu %}
+
+For {{ model_id }}, some additional functionality can be faster or is available
+only with a GPU on the host machine.
+
+- 🟢 Exporting the model for on-device deployment (GPU not required)
+- 🟡 Running the demo (GPU recommended for speed, but not required)
+- 🟡 Running evaluation (GPU recommended for speed, but not required)
+- 🔴 Quantizing the model (GPU required)
+
+If you are quantizing your own variant of {{ model_id }}, a dedicated CUDA enabled
+GPU (40 GB VRAM for 3B models to 80 GB VRAM for 8B models) is recommended. A GPU
+can also increase the speed of evaluation and demo of your quantized model
+significantly but it not strictly required.
+
+Install the GPU package via pip:
+{{ _pip_install_block(model_id, has_model_requirements, pip_pre_build_reqs, pip_install_flags_gpu, python_version_gte, python_version_lt) }}
+{%- endif %}
+{%- endmacro -%}
+
+
+{#  Generate AI Hub Workbench configuration instructions.  #}
+{%- macro configure_aihub() -%}
+Sign-in to [Qualcomm® AI Hub Workbench](https://workbench.aihub.qualcomm.com/) with your
+Qualcomm® ID. Once signed in navigate to `Account -> Settings -> API Token`.
+
+With this API token, you can configure your client to run models on the cloud
+hosted devices.
+```bash
+qai-hub configure --api_token API_TOKEN
+```
+Navigate to [docs](https://workbench.aihub.qualcomm.com/docs/) for more information.
+{%- endmacro -%}
+
+
+{#
+    Generate the example and usage section with setup, demo, and export instructions.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier (e.g., "resnet50").
+    model_package : str
+        Python package path (e.g., "qai_hub_models.models.resnet50").
+    supported_precisions : list[str]
+        List of supported precisions (e.g., ["float", "int8"]).
+    has_on_target_demo : bool
+        Whether the model supports on-device demo.
+    has_model_requirements : bool
+        Whether model has additional pip requirements.
+    pip_pre_build_reqs : str, optional
+        Pre-build pip requirements to install first.
+    pip_install_flags : str, optional
+        Additional flags for pip install command.
+    pip_install_flags_gpu : str, optional
+        GPU-specific pip install flags.
+    python_version_gte : str, optional
+        Minimum Python version (default: "3.10").
+    python_version_lt : str, optional
+        Maximum Python version (default: "3.14").
+    readme_install_system_deps : str, optional
+        Text describing system-level dependencies to install.
+    is_hf_readme : bool, optional
+        Whether generating for Hugging Face (default: False).
+#}
+{%- macro example_and_usage(
+    model_id,
+    model_package,
+    supported_precisions,
+    has_on_target_demo,
+    has_model_requirements,
+    pip_pre_build_reqs=None,
+    pip_install_flags=None,
+    pip_install_flags_gpu=None,
+    python_version_gte=None,
+    python_version_lt=None,
+    readme_install_system_deps=None,
+    is_hf_readme=False
+) -%}
+{%- set precisions_str = "{ --quantize " ~ (supported_precisions | reject('equalto', 'float') | join(', ')) ~ " }" if supported_precisions and supported_precisions|length > 1 else "" -%}
+{%- set step = namespace(num=1) -%}
+## Setup
+{% if readme_install_system_deps %}
+### {{ step.num }}. Install System-Level Dependencies
+{%- set step.num = step.num + 1 %}
+
+{{ readme_install_system_deps }}
+{% endif %}
+### {{ step.num }}. Install the package
+{% set step.num = step.num + 1 %}
+{{ package_instructions(model_id, has_model_requirements, pip_pre_build_reqs, pip_install_flags, pip_install_flags_gpu, python_version_gte, python_version_lt) }}
+
+### {{ step.num }}. Configure Qualcomm® AI Hub Workbench
+{{ configure_aihub() }}
+
+## Run CLI Demo
+Run the following simple CLI demo to verify the model is working end to end:
+
+```bash
+python -m {{ model_package }}.demo{{ ' ' ~ precisions_str if precisions_str else '' }}
+```
+More details on the CLI tool can be found with the `--help` option.{% if not is_hf_readme %} See
+[demo.py](demo.py) for sample usage of the model including pre/post processing
+scripts. Please refer to our [general instructions on using
+models](../../../#getting-started) for more usage instructions.{% endif %}
+
+{% if has_on_target_demo %}
+
+By default, the demo will run locally in PyTorch. Pass `--eval-mode on-device` to the demo script to run the model on a cloud-hosted target device.
+{% endif %}
+
+## Export for on-device deployment
+To run the model on Qualcomm® devices, you must export the model for use with an edge runtime such as
+TensorFlow Lite, ONNX Runtime, or Qualcomm AI Engine Direct. Use the following command to export the model:
+```bash
+python -m {{ model_package }}.export{{ ' ' ~ precisions_str if precisions_str else '' }}
+```
+Additional options are documented with the `--help` option.
+{%- endmacro -%}
+
+
+{#
+    Generate the license section.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    license_url : str
+        URL to the license file.
+#}
+{%- macro license(model_name, license_url) -%}
+{% if license_url %}
+## License
+* The license for the original implementation of {{ model_name }} can be found
+  [here]({{ license_url }}).
+{%- endif %}
+{%- endmacro -%}
+
+
+{#
+    Generate the references section.
+
+    Parameters
+    ----------
+    research_paper_title : str
+        Title of the research paper.
+    research_paper_url : str
+        URL to the research paper.
+    source_repo : str
+        URL to the original repository this model was sourced from.
+#}
+{%- macro references(research_paper_title, research_paper_url, source_repo) -%}
+{% if research_paper_title or source_repo %}
+## References
+{% if research_paper_title and research_paper_url %}
+* [{{ research_paper_title }}]({{ research_paper_url }})
+{% endif %}
+{% if source_repo %}
+* [Source Model Implementation]({{ source_repo }})
+{%- endif %}
+{%- endif %}
+{%- endmacro -%}
+
+
+{#  Generate the community section with Slack and support links.  #}
+{%- macro community() -%}
+## Community
+* Join [our AI Hub Slack community](https://aihub.qualcomm.com/community/slack) to collaborate, post questions and learn more about on-device AI.
+* For questions or feedback please [reach out to us](mailto:ai-hub-support@qti.qualcomm.com).
+{%- endmacro -%}
+
+
+{#
+    Generate the llama.cpp runtime commands section for LLM models.
+
+    Parameters
+    ----------
+    llama_cpp_npu_command : str, optional
+        Command to run the model on HTP (NPU).
+    llama_cpp_gpu_command : str, optional
+        Command to run the model on GPU.
+    llama_cpp_cpu_command : str, optional
+        Command to run the model on CPU.
+    llama_cpp_model_url : str, optional
+        URL to download the GGUF model file.
+#}
+{%- macro llama_cpp_commands(
+    llama_cpp_npu_command=None,
+    llama_cpp_gpu_command=None,
+    llama_cpp_cpu_command=None,
+    llama_cpp_model_url=None
+) -%}
+{% if llama_cpp_npu_command or llama_cpp_gpu_command or llama_cpp_cpu_command %}
+## Run inference on-device with Llama.cpp
+
+The model can be run on-device using [llama.cpp](https://github.com/ggml-org/llama.cpp). Below are instructions for building Llama.cpp for Qualcomm powered chipsets, downloading the model, and running inference on different compute units.
+
+### Step 1: Build Llama.cpp for Qualcomm Powered Chipsets
+Follow the instructions at [llama.cpp Qualcomm build guide](https://github.com/ggml-org/llama.cpp/tree/master/docs/backend/snapdragon#readme) to build llama.cpp with Hexagon NPU support.
+
+{% if llama_cpp_model_url %}
+### Step 2: Download the model
+```bash
+curl -L -o model.gguf {{ llama_cpp_model_url }}
+```
+
+{% endif %}
+### Step 3: Push files to device
+```bash
+adb push <llama-cpp-install-dir>/ /data/local/tmp/llama.cpp/
+adb push model.gguf /data/local/tmp/llama.cpp/
+```
+
+### Step 4: Open device shell
+```bash
+adb shell
+cd /data/local/tmp/llama.cpp
+export LD_LIBRARY_PATH=/data/local/tmp/llama.cpp/lib:$LD_LIBRARY_PATH
+export ADSP_LIBRARY_PATH="/data/local/tmp/llama.cpp/lib;/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp"
+```
+
+### Step 5: Run the model
+{% if llama_cpp_cpu_command %}
+#### Run on CPU
+```bash
+{{ llama_cpp_cpu_command }}
+```
+{% endif %}
+{% if llama_cpp_gpu_command %}
+#### Run on GPU
+```bash
+{{ llama_cpp_gpu_command }}
+```
+{% endif %}
+{% if llama_cpp_npu_command %}
+#### Run on HTP (NPU)
+```bash
+{{ llama_cpp_npu_command }}
+```
+{% endif %}
+{%- endif %}
+{%- endmacro -%}
+
+
+{#  Generate the usage and limitations section for generative AI models.  #}
+{%- macro usage_and_limitations() -%}
+## Usage and Limitations
+
+This model may not be used for or in connection with any of the following applications:
+
+- Accessing essential private and public services and benefits;
+- Administration of justice and democratic processes;
+- Assessing or recognizing the emotional state of a person;
+- Biometric and biometrics-based systems, including categorization of persons based on sensitive characteristics;
+- Education and vocational training;
+- Employment and workers management;
+- Exploitation of the vulnerabilities of persons resulting in harmful behavior;
+- General purpose social scoring;
+- Law enforcement;
+- Management and operation of critical infrastructure;
+- Migration, asylum and border control management;
+- Predictive policing;
+- Real-time remote biometric identification in public spaces;
+- Recommender systems of social media platforms;
+- Scraping of facial images (from the internet or otherwise); and/or
+- Subliminal manipulation
+{%- endmacro -%}

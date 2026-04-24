@@ -1,0 +1,17 @@
+supported_precisions:
+- float
+- w8a16
+- w8a8
+has_on_target_demo: true
+global_requirements_incompatible: true
+pip_install_flags: git+https://github.com/w-hc/torch_audioset.git
+readme_install_system_deps: |
+  #### Linux
+  ```bash
+  sudo apt install ffmpeg
+  ```
+
+  #### Windows
+  ```
+  winget install ffmpeg
+  ```

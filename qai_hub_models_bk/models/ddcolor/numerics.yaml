@@ -1,0 +1,20 @@
+metrics:
+- dataset_name: imagenet_colorization
+  dataset_link: https://www.image-net.org/
+  dataset_split_description: validation split
+  metric_name: Colorfulness
+  metric_description: A measure of how varied the colors are in the image.
+  metric_unit: ''
+  metric_range:
+    min: 0.0
+  metric_enablement_threshold: 10.0
+  benchmark_value: 38.3
+  num_partial_samples: 500
+  partial_torch_metric: 38.3
+  device_metric:
+    Samsung Galaxy S25:
+      float:
+        tflite:
+          partial_metric: 29.4
+        qnn_dlc:
+          partial_metric: 38.5

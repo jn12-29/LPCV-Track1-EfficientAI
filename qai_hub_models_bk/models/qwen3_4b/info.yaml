@@ -1,0 +1,40 @@
+name: Qwen3-4B
+id: qwen3_4b
+status: published
+headline: State-of-the-art large language model useful on a variety of language understanding and generation tasks.
+domain: Generative AI
+description: The Qwen3-4B is a state-of-the-art multilingual base language model with 4 billion parameters, excelling in language understanding, generation, coding, and mathematics.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models:
+- qwen2_5_7b_instruct
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Input sequence length for Prompt Processor: '128'
+  Context lengths: '512,1024,2048,3072,4096'
+  Use: Initiate conversation with prompt-processor and then token generator for subsequent iterations.
+  Minimum QNN SDK version required: 2.45.0
+  Supported languages: 100+ languages and dialects.
+  TTFT: Time To First Token is the time it takes to generate the first response token. This is expressed as a range because it varies based on the length of the prompt. The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of the prompt processor) and the upper bound is for a prompt using the full context length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token. Measured on a short prompt with a long response (with thinking); may slow down when using longer context lengths.
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2505.09388
+research_paper_title: "Qwen3 Technical Report"
+source_repo: https://huggingface.co/Qwen/Qwen3-4B
+license: https://huggingface.co/Qwen/Qwen3-4B/blob/main/LICENSE
+model_type_llm: true
+llm_details:
+  call_to_action: View Readme
+  genie_compatible: true
+  devices: {}

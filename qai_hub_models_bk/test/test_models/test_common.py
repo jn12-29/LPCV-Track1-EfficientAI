@@ -1,0 +1,510 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+from __future__ import annotations
+
+from collections.abc import Generator
+from contextlib import contextmanager, nullcontext
+from typing import Any
+from unittest import mock
+
+import pytest
+from qai_hub import QuantizeDtype
+from qai_hub.public_api_pb2 import Framework
+
+from qai_hub_models.models.common import (
+    InferenceEngine,
+    Precision,
+    QAIRTVersion,
+    TargetRuntime,
+    _FloatDtype,
+)
+from qai_hub_models.utils.base_config import BaseQAIHMConfig
+
+
+class ConfigurationPropertyMock(mock.Mock):
+    def __get__(
+        self, obj: object, obj_type: type | None = None, *args: Any, **kwargs: Any
+    ) -> mock.Mock:
+        return self(obj, *args, **kwargs)
+
+
+@contextmanager
+def reset_hub_frameworks_patches(
+    frameworks: list[Framework],
+    default_qaihm_version: str | None = None,
+    default_engine_versions: dict[InferenceEngine, str] | None = None,
+    api_url: str | None = None,
+) -> Generator[None, None, None]:
+    def get_default_qairt_version(engine: InferenceEngine) -> QAIRTVersion:
+        if default_engine_versions is not None and (
+            version := default_engine_versions.get(engine)
+        ):
+            return QAIRTVersion(version)
+        return QAIRTVersion(default_qaihm_version or "0.0")
+
+    version_patch = mock.patch(
+        "qai_hub_models.models.common.InferenceEngine.default_qairt_version",
+        new=ConfigurationPropertyMock(side_effect=get_default_qairt_version),
+    )
+    api_url_patch = (
+        mock.patch("qai_hub.hub._global_client.config.api_url", api_url)
+        if api_url is not None
+        else nullcontext()
+    )
+    with (
+        mock.patch(
+            "qai_hub_models.models.common.get_framework_list",
+            mock.MagicMock(return_value=mock.MagicMock(frameworks=frameworks)),
+        ),
+        mock.patch("qai_hub_models.models.common.QAIRTVersion._FRAMEWORKS", {}),
+        mock.patch(
+            "qai_hub_models.models.common.QAIRTVersion._HUB_DEFAULT_FRAMEWORK", {}
+        ),
+        mock.patch(
+            "qai_hub.hub._global_client.config.api_url",
+            "https://workbench.aihub.qualcomm.com",
+        ),
+        version_patch,
+        api_url_patch,
+    ):
+        yield
+
+
+def test_precision_has_float() -> None:
+    # Standard precisions
+    assert not Precision.float.has_quantized_activations
+    assert Precision.float.has_float_activations
+    assert Precision.w8a8.has_quantized_activations
+    assert not Precision.w8a8.has_float_activations
+    assert Precision.w8a8_mixed_int16.has_quantized_activations
+    assert not Precision.w8a8_mixed_int16.has_float_activations
+    assert Precision.w8a16_mixed_int16.has_quantized_activations
+    assert not Precision.w8a16_mixed_int16.has_float_activations
+    assert Precision.w8a8_mixed_fp16.has_float_activations
+    assert Precision.w8a8_mixed_fp16.has_quantized_activations
+    assert Precision.w8a16_mixed_fp16.has_float_activations
+    assert Precision.w8a16_mixed_fp16.has_quantized_activations
+    assert not Precision.mixed.has_float_activations
+    assert Precision.mixed.has_quantized_activations
+    assert Precision.mixed_with_float.has_float_activations
+    assert Precision.mixed.has_quantized_activations
+
+
+def test_precision_eq() -> None:
+    # Standard precisions
+    assert Precision.float == Precision.float
+    assert Precision.float == Precision(None, None)
+    assert Precision.float != Precision.w8a8
+    assert Precision.w8a8 == Precision(QuantizeDtype.INT8, QuantizeDtype.INT8)
+    assert Precision.w8a16 == Precision(QuantizeDtype.INT8, QuantizeDtype.INT16)
+    assert Precision.w8a16 != Precision(QuantizeDtype.INT16, QuantizeDtype.INT8)
+    assert Precision.float != 2
+    assert Precision.w8a8_mixed_int16 == Precision(
+        QuantizeDtype.INT8, QuantizeDtype.INT8, QuantizeDtype.INT16
+    )
+    assert Precision.w8a16_mixed_int16 == Precision(
+        QuantizeDtype.INT8, QuantizeDtype.INT16, QuantizeDtype.INT16
+    )
+    assert Precision.w8a8_mixed_int16 != Precision.w8a8
+    assert Precision.w8a16_mixed_int16 != Precision.w8a16
+
+    # Mixed precisions
+    assert Precision.mixed == Precision(None, None, _custom_name="mixed")
+    assert Precision.mixed == Precision.mixed
+    assert Precision.mixed != Precision.mixed_with_float
+    assert Precision.mixed_with_float == Precision(
+        None, None, _custom_name="mixed_with_float"
+    )
+    assert Precision.mixed_with_float == Precision.mixed_with_float
+    assert Precision.mixed_with_float != Precision.w8a8
+
+
+def test_precision_parse_serialize() -> None:
+    # Standard precisions serialization
+    assert str(Precision.float) == "float"
+    assert str(Precision.w8a8) == "w8a8"
+    assert str(Precision.w8a16) == "w8a16"
+    assert str(Precision.w8a8_mixed_int16) == "w8a8_mixed_int16"
+    assert str(Precision.w8a16_mixed_int16) == "w8a16_mixed_int16"
+    assert str(Precision.w8a8_mixed_fp16) == "w8a8_mixed_fp16"
+    assert str(Precision.w8a16_mixed_fp16) == "w8a16_mixed_fp16"
+    assert str(Precision.mxfp4) == "mxfp4"
+
+    # Standard precisions parsing
+    assert Precision.parse("float") == Precision.float
+    assert Precision.parse("w8a8") == Precision.w8a8
+    assert Precision.parse("a8w8") == Precision.w8a8
+    assert Precision.parse("w8a16") == Precision.w8a16
+    assert Precision.parse("a16w8") == Precision.w8a16
+
+    assert Precision.parse("w8a8_mixed_int16") == Precision.w8a8_mixed_int16
+    assert Precision.parse("a8w8_mixed_int16") == Precision.w8a8_mixed_int16
+    assert Precision.parse("w8a16_mixed_int16") == Precision.w8a16_mixed_int16
+    assert Precision.parse("a16w8_mixed_int16") == Precision.w8a16_mixed_int16
+    assert Precision.parse("w8a8_mixed_fp16") == Precision.w8a8_mixed_fp16
+    assert Precision.parse("a8w8_mixed_fp16") == Precision.w8a8_mixed_fp16
+    assert Precision.parse("w8a16_mixed_fp16") == Precision.w8a16_mixed_fp16
+    assert Precision.parse("a16w8_mixed_fp16") == Precision.w8a16_mixed_fp16
+    assert Precision.parse("mxfp4") == Precision.mxfp4
+
+    assert Precision.parse("w4") == Precision(QuantizeDtype.INT4, None)
+    assert str(Precision.parse("w4")) == "w4"
+
+    assert Precision.parse("a16") == Precision(None, QuantizeDtype.INT16)
+    assert str(Precision.parse("a16")) == "a16"
+
+    # Variable precision parsing
+    assert Precision.parse("mixed") == Precision.mixed
+    assert Precision.parse("mixed_with_float") == Precision.mixed_with_float
+
+    # Invalid bit width
+    with pytest.raises(
+        ValueError, match=r"Unsupported bit width a24 for quantization activations"
+    ):
+        Precision.parse("w8a24")
+    with pytest.raises(
+        ValueError, match=r"Unsupported bit width a24 for quantization activations"
+    ):
+        Precision.parse("w8a24_mixed_int16")
+    # Invalid override precision dtype
+    with pytest.raises(ValueError, match=r"Invalid override type 'int8'"):
+        Precision.parse("w8a8_mixed_int8")
+    # Invalid override type
+    with pytest.raises(ValueError, match=r"Invalid override_type: QuantizeDtype.INT8"):
+        Precision(QuantizeDtype.INT8, QuantizeDtype.INT8, QuantizeDtype.INT8)
+
+
+def test_precision_pydantic_roundtrip() -> None:
+    # Verifies that precision values are roundtripped to and from config files correctly.
+
+    class PrecisionConfig(BaseQAIHMConfig):
+        precision: Precision
+
+    # Test standard precisions
+    for prec in [Precision.float, Precision.w8a8, Precision.w8a16, Precision.mxfp4]:
+        config = PrecisionConfig(precision=prec)
+        roundtripped = PrecisionConfig.model_validate_json(config.model_dump_json())
+        assert roundtripped.precision == prec, f"Roundtrip failed for {prec}"
+
+    # Test mxfp4 specifically (custom name precision)
+    mxfp4_config = PrecisionConfig(precision=Precision.mxfp4)
+    json_str = mxfp4_config.model_dump_json()
+    assert "mxfp4" in json_str
+    roundtripped_mxfp4 = PrecisionConfig.model_validate_json(json_str)
+    assert roundtripped_mxfp4.precision == Precision.mxfp4
+
+
+def test_qairt_version() -> None:
+    # Patch frameworks so this test continues to work regardless of AI Hub Workbench version changes.
+    frameworks = [
+        Framework(
+            name="QAIRT",
+            api_tags=[],
+            api_version="2.31",
+            full_version="2.31.0.250130151446_114721",
+        ),
+        Framework(
+            name="QAIRT",
+            api_tags=[QAIRTVersion.DEFAULT_AIHUB_TAG],
+            api_version="2.32",
+            full_version="2.32.6.250402152434_116405",
+        ),
+        Framework(
+            name="QAIRT",
+            api_tags=[QAIRTVersion.LATEST_AIHUB_TAG],
+            api_version="2.33",
+            full_version="2.33.0.250327124043_117917",
+        ),
+    ]
+
+    # Test working AI Hub Workbench instance
+    with reset_hub_frameworks_patches(frameworks):
+        # Get default from tag
+        ai_hub_default = QAIRTVersion.default()
+        assert ai_hub_default.tags == [QAIRTVersion.DEFAULT_AIHUB_TAG]
+        assert (
+            ai_hub_default.hub_option == ""
+        )  # empty because it's the workbench default
+        assert ai_hub_default.explicit_hub_option == "--qairt_version 2.32"
+        assert ai_hub_default == QAIRTVersion.DEFAULT_AIHUB_TAG
+        assert ai_hub_default == ai_hub_default.api_version
+        assert ai_hub_default == ai_hub_default.full_version
+        assert ai_hub_default.is_default
+        assert ai_hub_default.sdk_flavor is None
+
+        # Get default using the api version
+        aihub_default_api = QAIRTVersion(ai_hub_default.api_version)
+        assert ai_hub_default == aihub_default_api
+        assert aihub_default_api.is_default
+
+        # Get default using the full api version
+        aihub_default_fullapi = QAIRTVersion(ai_hub_default.full_version)
+        assert ai_hub_default == aihub_default_fullapi
+        assert aihub_default_fullapi.is_default
+        assert aihub_default_fullapi.sdk_flavor is None
+        assert aihub_default_fullapi != ai_hub_default.full_version + "-auto"
+
+        # Get default using the full api version (auto flavor)
+        aihub_default_fullapi_auto = QAIRTVersion(ai_hub_default.full_version + "-auto")
+        assert ai_hub_default != aihub_default_fullapi_auto
+        assert aihub_default_fullapi_auto.is_default
+        assert aihub_default_fullapi_auto.sdk_flavor == "auto"
+        assert aihub_default_fullapi != aihub_default_fullapi_auto
+        assert aihub_default_fullapi_auto == ai_hub_default.full_version + "-auto"
+        assert aihub_default_fullapi_auto != ai_hub_default.full_version
+
+        # 0.0 does not exist, so it returns the default as a backup
+        default_backup = QAIRTVersion("0.0", return_default_if_does_not_exist=True)
+        assert ai_hub_default == default_backup
+        assert default_backup.is_default
+
+        # Latest
+        latest = QAIRTVersion.latest()
+        assert latest.tags == [QAIRTVersion.LATEST_AIHUB_TAG]
+        assert latest.hub_option == f"--qairt_version {QAIRTVersion.LATEST_AIHUB_TAG}"
+        assert latest.explicit_hub_option == "--qairt_version 2.33"
+
+        # Untagged
+        standard_version = QAIRTVersion("2.31")
+        standard_version_2 = QAIRTVersion("2.31.0.25")
+        assert standard_version == standard_version_2
+        assert standard_version_2.api_version == standard_version.api_version
+        assert standard_version.hub_option == "--qairt_version 2.31"
+        assert standard_version.explicit_hub_option == "--qairt_version 2.31"
+
+        # All Versions
+        assert QAIRTVersion.all() == [QAIRTVersion(f.api_version) for f in frameworks]
+
+        # Version that does not exist
+        with pytest.raises(
+            ValueError,
+            match=r".*QAIRT version 0.0 is not supported by AI Hub Workbench\..*",
+        ):
+            QAIRTVersion("0.0")
+
+        # Version that does not exist (no verification)
+        assert (
+            QAIRTVersion("1.1", validate_exists_on_ai_hub=False).full_version == "1.1"
+        )
+
+    # This runtime does not have a runtime-specific QAIRT version override.
+    global_default_runtime = TargetRuntime.TFLITE
+
+    # Verify QAIHM default behavior
+    with reset_hub_frameworks_patches(frameworks, "2.33"):
+        # Test default
+        qaihm_default = global_default_runtime.default_qairt_version
+
+        assert qaihm_default.hub_option == "--qairt_version latest"
+        assert qaihm_default.explicit_hub_option == "--qairt_version 2.33"
+        assert qaihm_default != QAIRTVersion.default()
+        assert not qaihm_default.is_default
+
+    # Verify QAIHM default behavior with same version as the AI Hub Workbench default
+    with reset_hub_frameworks_patches(
+        frameworks, default_qaihm_version=ai_hub_default.api_version
+    ):
+        qaihm_default = global_default_runtime.default_qairt_version
+        assert (
+            qaihm_default.hub_option == ""
+        )  # empty because it's the workbench default
+        assert qaihm_default.explicit_hub_option == "--qairt_version 2.32"
+        assert qaihm_default == QAIRTVersion.default()
+        assert QAIRTVersion.DEFAULT_AIHUB_TAG in qaihm_default.tags
+
+    # Verify QAIHM default behavior when the QAIHM default has no tags on Hub
+    with reset_hub_frameworks_patches(frameworks, "2.31"):
+        qaihm_default = global_default_runtime.default_qairt_version
+        assert qaihm_default.hub_option == "--qairt_version 2.31"
+        assert qaihm_default.explicit_hub_option == "--qairt_version 2.31"
+
+    # Verify "too old" QAIHM default behavior
+    with reset_hub_frameworks_patches(frameworks, "2.30"):
+        with pytest.raises(
+            ValueError,
+            match=r".*QAIRT version 2.30 is not supported by AI Hub Workbench\..*",
+        ):
+            global_default_runtime.default_qairt_version  # noqa: B018
+
+        # fallback is to AI Hub Workbench default since the QAIHM default is not available
+        default_backup = QAIRTVersion("0.0", return_default_if_does_not_exist=True)
+        assert ai_hub_default == default_backup
+        assert default_backup.is_default
+
+
+def test_qairt_version_without_aihub_access() -> None:
+    # Patch frameworks so this test continues to work regardless of AI Hub Workbench version changes.
+    with reset_hub_frameworks_patches([], api_url=""):
+        # Get default from tag
+        ai_hub_default = QAIRTVersion.default()
+        assert ai_hub_default.tags == [QAIRTVersion.DEFAULT_AIHUB_TAG]
+        assert (
+            str(ai_hub_default)
+            == "QAIRT v0.0 | UNVERIFIED - NO AI HUB ACCESS | default"
+        )
+
+        # Get from full version
+        full_version = QAIRTVersion("2.31.0.250130151446_114721-auto")
+        assert full_version.api_version == "2.31"
+        assert full_version.full_version == "2.31.0.250130151446_114721"
+        assert full_version.sdk_flavor == "auto"
+
+        # Untagged
+        standard_version = QAIRTVersion("2.31")
+        assert str(standard_version) == "QAIRT v2.31 | UNVERIFIED - NO AI HUB ACCESS"
+
+        # If hub isn't available, any version is accepted, and the default backup is not used
+        zero_version = QAIRTVersion("0.0", return_default_if_does_not_exist=True)
+        zero_version_with_backup = QAIRTVersion(
+            "0.0", return_default_if_does_not_exist=True
+        )
+        assert (
+            str(zero_version)
+            == str(zero_version_with_backup)
+            == "QAIRT v0.0 | UNVERIFIED - NO AI HUB ACCESS"
+        )
+
+        # All Versions
+        assert QAIRTVersion.all() == []
+
+
+def test_qairt_version_pydantic_roundtrip() -> None:
+    """
+    Verifies that QAIRT versions are roundtripped to and from config files as-is,
+    and aren't auto-resolved to current AI Hub Workbench QAIRT versions.
+    """
+
+    class VersionConfig(BaseQAIHMConfig):
+        version: QAIRTVersion
+
+    full_version = QAIRTVersion(
+        "2.31.0.250130151446_114721-auto", validate_exists_on_ai_hub=False
+    )
+    assert (
+        VersionConfig.model_validate_json(
+            VersionConfig(version=full_version).model_dump_json()
+        ).version
+        == full_version
+    )
+
+    partial_version = QAIRTVersion("2.31.0-auto", validate_exists_on_ai_hub=False)
+    assert partial_version.full_version_with_flavor == "2.31.0-auto"
+    assert (
+        VersionConfig.model_validate_json(
+            VersionConfig(version=partial_version).model_dump_json()
+        ).version
+        == partial_version
+    )
+
+
+def test_precision_parse_override_type() -> None:
+    # Valid override types
+    assert Precision._parse_override_type("int16") == QuantizeDtype.INT16
+    assert Precision._parse_override_type("INT16") == QuantizeDtype.INT16
+    assert Precision._parse_override_type("fp16") == _FloatDtype.FP16
+    assert Precision._parse_override_type("FP16") == _FloatDtype.FP16
+
+    # None input returns None
+    assert Precision._parse_override_type(None) is None
+
+    # Invalid override types
+    with pytest.raises(ValueError, match=r"Invalid override type 'int8'"):
+        Precision._parse_override_type("int8")
+    with pytest.raises(ValueError, match=r"Invalid override type 'int32'"):
+        Precision._parse_override_type("int32")
+    with pytest.raises(ValueError, match=r"Invalid override type 'invalid'"):
+        Precision._parse_override_type("invalid")
+
+
+def test_precision_get_hub_quantize_options() -> None:
+    # w8a8 returns empty string (uses default mse_minimizer)
+    assert Precision.w8a8.get_hub_quantize_options() == ""
+
+    # w8a16 returns range_scheme min_max
+    assert Precision.w8a16.get_hub_quantize_options() == "--range_scheme min_max"
+
+    # w4a16 returns empty string (no special options)
+    assert Precision.w4a16.get_hub_quantize_options() == ""
+
+    # Mixed precision with int16 override
+    assert Precision.w8a8_mixed_int16.get_hub_quantize_options(10.0) == (
+        "--range_scheme min_max --lite_mp percentage=10.0;override_qtype=int16"
+    )
+    assert Precision.w8a16_mixed_int16.get_hub_quantize_options(15.5) == (
+        "--range_scheme min_max --lite_mp percentage=15.5;override_qtype=int16"
+    )
+
+    # Mixed precision with fp16 override
+    assert Precision.w8a8_mixed_fp16.get_hub_quantize_options(20.0) == (
+        "--range_scheme min_max --lite_mp percentage=20.0;override_qtype=fp16"
+    )
+    assert Precision.w8a16_mixed_fp16.get_hub_quantize_options(25.0) == (
+        "--range_scheme min_max --lite_mp percentage=25.0;override_qtype=fp16"
+    )
+
+    # Mixed precision without litemp_percentage raises error
+    with pytest.raises(
+        ValueError, match=r"litemp_percentage is required for mixed precision"
+    ):
+        Precision.w8a8_mixed_int16.get_hub_quantize_options()
+    with pytest.raises(
+        ValueError, match=r"litemp_percentage is required for mixed precision"
+    ):
+        Precision.w8a8_mixed_fp16.get_hub_quantize_options()
+
+
+def test_precision_from_quantize_job() -> None:
+    # Create a mock QuantizeJob
+    mock_job = mock.MagicMock()
+
+    # Test w8a8 precision (no override)
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT8
+    mock_job.options = ""
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a8
+
+    # Test w8a16 precision (no override)
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT16
+    mock_job.options = ""
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a16
+
+    # Test w8a8 with int16 override
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT8
+    mock_job.options = "--lite_mp percentage=10;override_qtype=int16"
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a8_mixed_int16
+
+    # Test w8a16 with int16 override
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT16
+    mock_job.options = (
+        "--range_scheme min_max --lite_mp percentage=15;override_qtype=int16"
+    )
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a16_mixed_int16
+
+    # Test w8a8 with fp16 override
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT8
+    mock_job.options = "--lite_mp percentage=20;override_qtype=fp16"
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a8_mixed_fp16
+
+    # Test w8a16 with fp16 override
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT16
+    mock_job.options = "--lite_mp percentage=25;override_qtype=fp16"
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a16_mixed_fp16
+
+    # Test w4a16 precision
+    mock_job.weights_dtype = QuantizeDtype.INT4
+    mock_job.activations_dtype = QuantizeDtype.INT16
+    mock_job.options = ""
+    assert Precision.from_quantize_job(mock_job) == Precision.w4a16
+
+    # Test override_qtype with uppercase (regex should still match)
+    mock_job.weights_dtype = QuantizeDtype.INT8
+    mock_job.activations_dtype = QuantizeDtype.INT8
+    mock_job.options = "--lite_mp override_qtype=INT16"
+    assert Precision.from_quantize_job(mock_job) == Precision.w8a8_mixed_int16

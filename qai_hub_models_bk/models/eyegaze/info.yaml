@@ -1,0 +1,38 @@
+name: EyeGaze
+id: eyegaze
+status: published
+headline: Eye gaze estimation from cropped eye images.
+domain: Computer Vision
+description: Predicts gaze direction (pitch, yaw) from 96x160 grayscale eye images using the EyeNet model.
+use_case: Gaze Estimation
+tags:
+- bu-auto
+- real-time
+applicable_scenarios:
+- Incabinet driver monitoring
+- Phone unlocking
+- Building access control
+related_models: []
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- mpiigaze
+technical_details:
+  Model checkpoint: checkpoint.pt
+  Input resolution: 96x160
+  Number of parameters: 2.58M
+  Model size (float): 9.6MB
+  Model size (w8a16): 3.3 MB
+license_type: bsd-3-clause
+source_repo: https://github.com/david-wb/gaze-estimation
+license: https://github.com/quic/ai-hub-models/blob/main/LICENSE
+numerics_benchmark:
+  dataset_name: mpiigaze
+  metric_name: Mean Angular Error
+  value: 16.8
+  unit: MAE (Degrees)
+  source: AI Hub Models Reference Eval

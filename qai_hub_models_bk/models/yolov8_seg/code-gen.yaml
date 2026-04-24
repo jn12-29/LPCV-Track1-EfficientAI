@@ -1,0 +1,13 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16:
+    onnx:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-15.200 mAP@0.5:0.95) above threshold (10.0 mAP@0.5:0.95)
+    qnn_dlc:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-15.200 mAP@0.5:0.95) above threshold (10.0 mAP@0.5:0.95)
+check_trace: false
+outputs_to_skip_validation:
+  '3': Boxes with low confidence disagree on class index between torch and on-device

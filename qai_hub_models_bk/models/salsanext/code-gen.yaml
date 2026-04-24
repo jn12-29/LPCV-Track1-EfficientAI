@@ -1,0 +1,9 @@
+supported_precisions:
+- float
+- w8a16
+disabled_paths:
+  w8a16:
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (1.76 mIOU) deviates from benchmark (49.5 mIOU) by -47.740 mIOU, threshold: 10.0 mIOU'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Device accuracy (2.1 mIOU) deviates from benchmark (49.5 mIOU) by -47.400 mIOU, threshold: 10.0 mIOU'

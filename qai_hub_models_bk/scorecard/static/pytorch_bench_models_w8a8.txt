@@ -1,0 +1,16 @@
+googlenet
+hrnet_pose
+inception_v3
+mobilenet_v2
+mobilenet_v3_large
+quicksrnetlarge
+quicksrnetmedium
+quicksrnetsmall
+regnet
+resnet101
+resnet18
+resnet50
+resnext101
+shufflenet_v2
+squeezenet1_1
+xlsr

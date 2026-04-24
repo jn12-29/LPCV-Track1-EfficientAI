@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from qai_hub_models.datasets.coco import CocoDataset, CocoDatasetClass
+from qai_hub_models.datasets.common import DatasetSplit
+from qai_hub_models.utils.input_spec import InputSpec
+
+
+class Coco91ClassDataset(CocoDataset):
+    """Wrapper class around the COCO dataset to extent to 91 categories."""
+
+    def __init__(
+        self,
+        split: DatasetSplit = DatasetSplit.TRAIN,
+        input_spec: InputSpec | None = None,
+        max_boxes: int = 100,
+        use_all_classes: CocoDatasetClass = CocoDatasetClass.ALL_CLASSES,
+    ) -> None:
+        super().__init__(split, input_spec, max_boxes, use_all_classes)

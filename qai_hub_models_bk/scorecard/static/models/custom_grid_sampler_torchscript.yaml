@@ -1,0 +1,56 @@
+id: custom_grid_sampler_torchscript
+hub_model_id: mq34gr1kn
+hub_input_dataset_id: d67j3nvw9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://review.qualcomm.com/#/admin/projects/qctaisw_models/public_pytorch/
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image1
+  shape:
+  - 1
+  - 3
+  - 224
+  - 224
+  dtype: float32
+- name: image2
+  shape:
+  - 1
+  - 3
+  - 224
+  - 224
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_7
+- output_8
+- output_9
+- output_10
+- output_11
+channel_first_inputs:
+- image1
+- image2
+hub_model_ids_automated:
+  prod: mq34gr1kn
+  dev: mqp3w1wjm
+hub_input_dataset_ids_automated:
+  prod: d67j3nvw9
+  dev: dj7d3ojj9
+hub_input_channel_last_dataset_ids_automated:
+  prod: dv74gmv07
+  dev: dr9w6q8m7

@@ -1,0 +1,41 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+- Snapdragon X Elite CRD
+- Dragonwing IQ-9075 EVK
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-qcs9075
+precisions:
+  w4:
+    components:
+      Qwen2.5-1.5B-Instruct:
+        performance_metrics:
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 7.91
+                time_to_first_token_range_milliseconds:
+                  min: 169.064
+                  max: 5410.048
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 23.14
+                time_to_first_token_range_milliseconds:
+                  min: 67.533
+                  max: 2161.056
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 13.195295333862305
+                time_to_first_token_range_milliseconds:
+                  min: 172.5948
+                  max: 5523.0336

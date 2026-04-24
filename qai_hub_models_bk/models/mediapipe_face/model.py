@@ -1,0 +1,480 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import torch
+
+from qai_hub_models.models._shared.mediapipe.utils import (
+    MediaPipePyTorchAsRoot,
+    mediapipe_detector_postprocess,
+)
+from qai_hub_models.models.common import Precision, SampleInputsType
+from qai_hub_models.utils.asset_loaders import (
+    CachedWebModelAsset,
+    find_replace_in_repo,
+    load_numpy,
+)
+from qai_hub_models.utils.base_model import (
+    BaseModel,
+    CollectionModel,
+    PretrainedCollectionModel,
+)
+from qai_hub_models.utils.input_spec import (
+    ColorFormat,
+    ImageMetadata,
+    InputSpec,
+    IoType,
+    TensorSpec,
+)
+from qai_hub_models.utils.set_env import set_temp_env
+
+MODEL_ID = __name__.split(".")[-2]
+MODEL_ASSET_VERSION = 3
+
+# Vertex indices can be found in
+# https://github.com/google/mediapipe/blob/0.8.1/mediapipe/modules/face_geometry/data/canonical_face_model_uv_visualization.png
+# Found in https://github.com/google/mediapipe/blob/v0.10.3/mediapipe/python/solutions/face_mesh.py
+FACE_LANDMARK_CONNECTIONS = [
+    # Lips.
+    (61, 146),
+    (146, 91),
+    (91, 181),
+    (181, 84),
+    (84, 17),
+    (17, 314),
+    (314, 405),
+    (405, 321),
+    (321, 375),
+    (375, 291),
+    (61, 185),
+    (185, 40),
+    (40, 39),
+    (39, 37),
+    (37, 0),
+    (0, 267),
+    (267, 269),
+    (269, 270),
+    (270, 409),
+    (409, 291),
+    (78, 95),
+    (95, 88),
+    (88, 178),
+    (178, 87),
+    (87, 14),
+    (14, 317),
+    (317, 402),
+    (402, 318),
+    (318, 324),
+    (324, 308),
+    (78, 191),
+    (191, 80),
+    (80, 81),
+    (81, 82),
+    (82, 13),
+    (13, 312),
+    (312, 311),
+    (311, 310),
+    (310, 415),
+    (415, 308),
+    # Left eye.
+    (263, 249),
+    (249, 390),
+    (390, 373),
+    (373, 374),
+    (374, 380),
+    (380, 381),
+    (381, 382),
+    (382, 362),
+    (263, 466),
+    (466, 388),
+    (388, 387),
+    (387, 386),
+    (386, 385),
+    (385, 384),
+    (384, 398),
+    (398, 362),
+    # Left eyebrow.
+    (276, 283),
+    (283, 282),
+    (282, 295),
+    (295, 285),
+    (300, 293),
+    (293, 334),
+    (334, 296),
+    (296, 336),
+    # Right eye.
+    (33, 7),
+    (7, 163),
+    (163, 144),
+    (144, 145),
+    (145, 153),
+    (153, 154),
+    (154, 155),
+    (155, 133),
+    (33, 246),
+    (246, 161),
+    (161, 160),
+    (160, 159),
+    (159, 158),
+    (158, 157),
+    (157, 173),
+    (173, 133),
+    # Right eyebrow.
+    (46, 53),
+    (53, 52),
+    (52, 65),
+    (65, 55),
+    (70, 63),
+    (63, 105),
+    (105, 66),
+    (66, 107),
+    # Face oval.
+    (10, 338),
+    (338, 297),
+    (297, 332),
+    (332, 284),
+    (284, 251),
+    (251, 389),
+    (389, 356),
+    (356, 454),
+    (454, 323),
+    (323, 361),
+    (361, 288),
+    (288, 397),
+    (397, 365),
+    (365, 379),
+    (379, 378),
+    (378, 400),
+    (400, 377),
+    (377, 152),
+    (152, 148),
+    (148, 176),
+    (176, 149),
+    (149, 150),
+    (150, 136),
+    (136, 172),
+    (172, 58),
+    (58, 132),
+    (132, 93),
+    (93, 234),
+    (234, 127),
+    (127, 162),
+    (162, 21),
+    (21, 54),
+    (54, 103),
+    (103, 67),
+    (67, 109),
+    (109, 10),
+]
+
+
+# Face detector model parameters.
+BATCH_SIZE = 1
+DETECT_SCORE_CLIPPING_THRESHOLD = 100  # Clip output scores to this maximum value.
+DETECT_DEFAULT_INCLUDE_POSTPROCESSING = False
+DETECT_DXY, DETECT_DSCALE = (
+    0,
+    1.1,
+)  # Modifiers applied to face detector output bounding box to encapsulate the entire face.
+LEFT_EYE_KEYPOINT_INDEX = 0  # The face detector outputs several keypoints. This is the keypoint index for the left eye.
+RIGHT_EYE_KEYPOINT_INDEX = 1  # The face detector outputs several keypoints. This is the keypoint index for the right eye.
+ROTATION_VECTOR_OFFSET_RADS = (
+    0  # Offset required when computing rotation of the detected face.
+)
+FACE_DETECTOR_SAMPLE_INPUTS_ADDRESS = CachedWebModelAsset.from_asset_store(
+    MODEL_ID, MODEL_ASSET_VERSION, "face_detector_inputs.npy"
+)
+LANDMARK_DETECTOR_SAMPLE_INPUTS_ADDRESS = CachedWebModelAsset.from_asset_store(
+    MODEL_ID, MODEL_ASSET_VERSION, "landmark_detector_inputs.npy"
+)
+
+
+def _apply_blazeface_fixes(repo_path: str) -> None:
+    """
+    Apply necessary fixes to the BlazeFace repository code.
+    These fixes include:
+    1. Changing return statement to return separate tensors as concat reduces the w8a8 accuracy
+    2. Changing padding to be symmetric for better quantization accuracy
+    """
+    find_replace_in_repo(
+        repo_path,
+        "blazeface.py",
+        "return [r, c]",
+        "return [r1, r2, c1, c2]",
+    )
+    find_replace_in_repo(
+        repo_path,
+        "blazeface.py",
+        'x = F.pad(x, (1, 2, 1, 2), "constant", 0)',
+        'x = F.pad(x, (2, 2, 2, 2), "constant", 0)',
+    )
+
+
+class FaceDetector(BaseModel):
+    """
+    Face detection model. Input is an image, output is
+    [bounding boxes & keypoints, box & kp scores]
+    """
+
+    def __init__(
+        self,
+        detector: Callable[
+            [torch.Tensor],
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        ],
+        anchors: torch.Tensor,
+        score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> None:
+        super().__init__()
+        self.detector = detector
+        self.anchors = anchors.view([*list(anchors.shape)[:-1], -1, 2])
+        self.include_postprocessing = include_postprocessing
+        self.score_clipping_threshold = score_clipping_threshold
+
+    def forward(
+        self, image: torch.Tensor
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        | tuple[torch.Tensor, torch.Tensor]
+    ):
+        """
+        Detector forward pass.
+
+        Parameters
+        ----------
+        image
+          RGB input image of shape (B, 3, H, W).  Range is [0-1].
+
+        Returns
+        -------
+        boxes_and_coordinates_and_scores: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor]
+            If self.include_postprocessing is False:
+                boxes_coords_1: torch.Tensor
+                    Boxes + Coords of shape [1, N1, 16] in pixel space
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (width, height))
+                    - indices [4-15] are the 10 keypoint coordinates ((x1,y1), (x2,y2), (x3,y3), (x4,y4), ...).
+
+                boxes_coords_2: torch.Tensor
+                    Boxes + Coords of shape [1, N2, 16] in pixel space
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (width, height))
+                    - indices [4-15] are the 10 keypoint coordinates ((x1,y1), (x2,y2), (x3,y3), (x4,y4), ...).
+
+                box_scores_1: torch.Tensor
+                    Raw model logits of shape [1, N1, 1] in pixel space
+
+                box_scores_2: torch.Tensor
+                    Raw model logits of shape [1, N2, 1] in pixel space
+
+            If self.include_postprocessing is True:
+                boxes_and_coordinates: torch.Tensor
+                    Detected boxes and coordinates in pixel space.
+                    Shape (B, N, 16). Where N is number of detections
+                    In the last dimension:
+                    - indices [0-3] are the box coordinates ((x_min, y_min), (x_max, y_max))
+                    - indices [4-15] are the 5 keypoint coordinates (x1,y1, x2,y2, x3,y3, x4,y4, x5,y5, x6,y6, x7,y7).
+
+                scores: torch.Tensor
+                    Clipped and sigmoid activated scores of shape (B, N).
+        """
+        box_coords1, box_coords2, box_scores1, box_scores2 = self.detector(image)
+
+        if self.include_postprocessing:
+            coords = torch.cat([box_coords1, box_coords2], dim=1)
+            scores = torch.cat([box_scores1, box_scores2], dim=1)
+            coords, scores = mediapipe_detector_postprocess(
+                coords,
+                scores,
+                self.score_clipping_threshold,
+                (image.shape[2], image.shape[3]),
+                self.anchors,
+            )
+            return coords, scores
+
+        return box_coords1, box_coords2, box_scores1, box_scores2
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        detector_weights: str = "blazefaceback.pth",
+        detector_anchors: str = "anchors_face_back.npy",
+        score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> FaceDetector:
+        with MediaPipePyTorchAsRoot() as repo_path:
+            _apply_blazeface_fixes(repo_path)
+            from blazeface import BlazeFace
+
+            face_detector = BlazeFace(back_model=True)
+            # Set the environment variable to force torch.load to use weights_only=False
+            # This is needed for PyTorch 2.8+ where the default changed to weights_only=True
+            with set_temp_env({"TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1"}):
+                face_detector.load_weights(detector_weights)
+            face_detector.load_anchors(detector_anchors)
+            return cls(
+                face_detector,
+                face_detector.anchors,
+                score_clipping_threshold,
+                include_postprocessing,
+            )
+
+    @staticmethod
+    def get_input_spec(batch_size: int = BATCH_SIZE) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type) of the face detector.
+        This can be used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return {
+            "image": TensorSpec(
+                shape=(batch_size, 3, 256, 256),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.RGB,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["box_coords_1", "box_coords_2", "box_scores_1", "box_scores_2"]
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["image"]
+
+    def _sample_inputs_impl(
+        self, input_spec: InputSpec | None = None
+    ) -> SampleInputsType:
+        return {"image": [load_numpy(FACE_DETECTOR_SAMPLE_INPUTS_ADDRESS)]}
+
+    def get_hub_quantize_options(
+        self, precision: Precision, other_options: str | None = None
+    ) -> str:
+        options = other_options or ""
+        if "--range_scheme" in options:
+            return options
+        return options + " --range_scheme min_max"
+
+    @staticmethod
+    def calibration_dataset_name() -> str:
+        return "human_faces"
+
+
+class FaceLandmarkDetector(BaseModel):
+    """
+    Face landmark detector model. Input is an image cropped to the face. The face must be upright
+    and un-tilted in the frame. Returns [landmark_scores, landmarks]
+    """
+
+    def __init__(
+        self,
+        detector: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+    ) -> None:
+        super().__init__()
+        self.detector = detector
+
+    def forward(self, image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.detector(image)
+
+    @classmethod
+    def from_pretrained(
+        cls, landmark_detector_weights: str = "blazeface_landmark.pth"
+    ) -> FaceLandmarkDetector:
+        with MediaPipePyTorchAsRoot() as repo_path:
+            # This conditional is unlikely to be hit, and breaks torch fx graph conversion
+            find_replace_in_repo(
+                repo_path, "blazeface_landmark.py", "if x.shape[0] == 0:", "if False:"
+            )
+
+            from blazeface_landmark import BlazeFaceLandmark
+
+            face_regressor = BlazeFaceLandmark()
+            # Set the environment variable to force torch.load to use weights_only=False
+            # This is needed for PyTorch 2.8+ where the default changed to weights_only=True
+            with set_temp_env({"TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1"}):
+                face_regressor.load_weights(landmark_detector_weights)
+            return cls(face_regressor)
+
+    @staticmethod
+    def get_input_spec(batch_size: int = BATCH_SIZE) -> InputSpec:
+        """
+        Returns the input specification (name -> (shape, type) of the face landmark detector.
+        This can be used to submit profiling job on Qualcomm AI Hub Workbench.
+        """
+        return {
+            "image": TensorSpec(
+                shape=(batch_size, 3, 192, 192),
+                dtype="float32",
+                io_type=IoType.IMAGE,
+                image_metadata=ImageMetadata(
+                    color_format=ColorFormat.RGB,
+                    value_range=(0.0, 1.0),
+                ),
+            ),
+        }
+
+    @staticmethod
+    def get_output_names() -> list[str]:
+        return ["scores", "landmarks"]
+
+    @staticmethod
+    def get_channel_last_inputs() -> list[str]:
+        return ["image"]
+
+    def _sample_inputs_impl(
+        self, input_spec: InputSpec | None = None
+    ) -> SampleInputsType:
+        return {"image": [load_numpy(LANDMARK_DETECTOR_SAMPLE_INPUTS_ADDRESS)]}
+
+    @staticmethod
+    def calibration_dataset_name() -> str:
+        return "human_faces_192"
+
+
+@CollectionModel.add_component(FaceDetector, "face_detector")
+@CollectionModel.add_component(FaceLandmarkDetector, "face_landmark_detector")
+class MediaPipeFace(PretrainedCollectionModel):
+    def __init__(
+        self,
+        face_detector: FaceDetector,
+        face_landmark_detector: FaceLandmarkDetector,
+    ) -> None:
+        super().__init__(face_detector, face_landmark_detector)
+        self.face_detector = face_detector
+        self.face_landmark_detector = face_landmark_detector
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        detector_weights: str = "blazefaceback.pth",
+        detector_anchors: str = "anchors_face_back.npy",
+        landmark_detector_weights: str = "blazeface_landmark.pth",
+        detector_score_clipping_threshold: float = DETECT_SCORE_CLIPPING_THRESHOLD,
+        include_detector_postprocessing: bool = DETECT_DEFAULT_INCLUDE_POSTPROCESSING,
+    ) -> MediaPipeFace:
+        """
+        Load mediapipe models from the source repository.
+        Returns tuple[
+            <source repository>.blazeface.BlazeFace,
+            BlazeFace Anchors,
+            <source repository>.blazeface_landmark.BlazeFaceLandmark,
+        ]
+        """
+        return cls(
+            FaceDetector.from_pretrained(
+                detector_weights,
+                detector_anchors,
+                detector_score_clipping_threshold,
+                include_detector_postprocessing,
+            ),
+            FaceLandmarkDetector.from_pretrained(landmark_detector_weights),
+        )

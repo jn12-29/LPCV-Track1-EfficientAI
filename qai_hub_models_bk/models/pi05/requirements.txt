@@ -1,0 +1,4 @@
+lerobot==0.4.1  # need --no-dep
+# Pi policy: custom transformers fork used by LeRobot
+transformers@git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
+matplotlib

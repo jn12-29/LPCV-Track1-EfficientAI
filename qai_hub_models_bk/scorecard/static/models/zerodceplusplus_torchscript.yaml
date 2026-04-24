@@ -1,0 +1,41 @@
+id: zerodceplusplus_torchscript
+hub_model_id: mnl3rr6en
+hub_input_dataset_id: dv74egpw2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://github.qualcomm.com/qualcomm-model-zoo-public-mirror/models-for-solutions/02-low-light-enhancement/Zero-DCE++
+domain: Computer Vision
+use_case: Image Editing
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 3
+  - 2160
+  - 3840
+  dtype: float32
+output_names:
+- output_0
+- output_1
+channel_first_inputs:
+- image
+channel_first_outputs:
+- output_0
+- output_1
+hub_model_ids_automated:
+  prod: mnl3rr6en
+  dev: mq21r3r7m
+hub_input_dataset_ids_automated:
+  prod: dv74egpw2
+  dev: dw9vxlj02
+hub_input_channel_last_dataset_ids_automated:
+  prod: dp701yvo2
+  dev: d09yjmmv9

@@ -1,0 +1,47 @@
+id: tcgandecoder_torchscript
+hub_model_id: mm54g8l9n
+hub_input_dataset_id: dz2rnr6o7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Sent from Lightricks
+domain: Generative AI
+use_case: Image Generation
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: ip_0
+  shape:
+  - 1
+  - 8
+  - 48
+  - 48
+  dtype: float32
+- name: ip_1
+  shape:
+  - 1
+  - 5
+  - 2048
+  dtype: float32
+- name: ip_2
+  shape:
+  - 1
+  - 12
+  - 768
+  - 768
+  dtype: float32
+output_names:
+- output_0
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mm54g8l9n
+  dev: mnl68r53n
+hub_input_dataset_ids_automated:
+  prod: dz2rnr6o7
+  dev: dv95jplm2

@@ -1,0 +1,47 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16:
+    tflite:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    qnn_context_binary:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    onnx:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    precompiled_qnn_onnx:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    genie:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    voice_ai:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_cpu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_gpu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_npu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+  float:
+    tflite:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    qnn_context_binary:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    onnx:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    precompiled_qnn_onnx:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    genie:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    voice_ai:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_cpu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_gpu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'
+    llama_cpp_npu:
+      scorecard_accuracy_failure: 'Torch accuracy (0.0 %) deviates from benchmark (60.0 %) by -60.000 %, threshold: 10.0 %'

@@ -1,0 +1,37 @@
+name: HRNetFace
+id: hrnet_face
+status: published
+headline: Comprehensive facial analysis by extracting face features.
+domain: Computer Vision
+description: Detects attributes (liveness, eye closeness, mask presence, glasses presence, sunglasses presence) that apply to a given face.
+use_case: Object Detection
+tags:
+- real-time
+applicable_scenarios:
+- Incabinet driver monitoring, phone unlocking, and building access control.
+related_models: []
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- cofw
+technical_details:
+  Model checkpoint: HR18-COFW.pth
+  Input resolution: 256x256
+  Number of parameters: 9.68M
+  Model size (float): 36.87MB
+  Model size (w8a8): 17.7 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/1908.07919
+research_paper_title: Deep High-Resolution Representation Learning for Visual Recognition
+source_repo: https://github.com/HRNet/HRNet-Facial-Landmark-Detection
+license: https://github.com/HRNet/HRNet-Facial-Landmark-Detection/blob/master/LICENCE
+numerics_benchmark:
+  dataset_name: cofw
+  metric_name: Normalized Mean Error
+  value: 0.0345
+  unit: NME
+  source: https://github.com/HRNet/HRNet-Facial-Landmark-Detection

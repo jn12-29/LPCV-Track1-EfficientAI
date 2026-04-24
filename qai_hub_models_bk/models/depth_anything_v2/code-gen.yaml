@@ -1,0 +1,12 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16:
+    onnx:
+      issue: Poor numerical accuracy https://github.com/qcom-ai-hub/tetracode/issues/14856
+  float:
+    tflite:
+      scorecard_failure: 'Compilation Failure(s): jpv1njorp'
+enable_pt2: true

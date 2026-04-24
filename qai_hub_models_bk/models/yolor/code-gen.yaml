@@ -1,0 +1,11 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  float:
+    tflite:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-47.200 mAP@0.5:0.95) above threshold (10.0 mAP@0.5:0.95)
+    qnn_dlc:
+      scorecard_accuracy_failure: Torch and On-device accuracy diff (-47.200 mAP@0.5:0.95) above threshold (10.0 mAP@0.5:0.95)
+check_trace: false

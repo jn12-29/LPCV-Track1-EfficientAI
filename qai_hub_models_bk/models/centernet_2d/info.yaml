@@ -1,0 +1,37 @@
+name: CenterNet-2D
+id: centernet_2d
+status: published
+headline: Object Detection.
+domain: Computer Vision
+description: CenterNet-2D is machine learning model that detects objects by finding their center points.
+use_case: Object Detection
+tags: []
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models: []
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- coco
+technical_details:
+  Model checkpoint: ctdet_coco_dla_2x.pth
+  Input resolution: 1 x 3 x 512 x 512
+  Number of parameters: 20.2M
+  Model size: 37.6 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/1904.07850
+research_paper_title: Objects as Points
+source_repo: https://github.com/xingyizhou/CenterNet
+license: https://github.com/xingyizhou/CenterNet/blob/master/LICENSE
+numerics_benchmark:
+  dataset_name: coco
+  metric_name: Mean Average Precision
+  value: 37.4
+  unit: mAP
+  source: https://github.com/xingyizhou/CenterNet

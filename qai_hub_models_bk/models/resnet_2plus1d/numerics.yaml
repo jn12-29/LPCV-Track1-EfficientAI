@@ -1,0 +1,30 @@
+metrics:
+- dataset_name: kinetics400
+  dataset_link: https://github.com/cvdfoundation/kinetics-dataset
+  dataset_split_description: part 0 of the validation split
+  metric_name: Top-1 Accuracy
+  metric_description: Percentage of top 1 model predictions that are correct.
+  metric_unit: '%'
+  metric_range:
+    min: 0.0
+    max: 100.0
+  metric_enablement_threshold: 10.0
+  benchmark_value: 49.0
+  num_partial_samples: 100
+  partial_torch_metric: 49.0
+  device_metric:
+    Samsung Galaxy S25:
+      w8a8:
+        tflite:
+          partial_metric: 50.0
+        qnn_dlc:
+          partial_metric: 51.0
+        onnx:
+          partial_metric: 51.0
+      float:
+        tflite:
+          partial_metric: 49.0
+        qnn_dlc:
+          partial_metric: 49.0
+        onnx:
+          partial_metric: 49.0

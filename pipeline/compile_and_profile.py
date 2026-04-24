@@ -84,7 +84,7 @@ def main():
         print("Text ONNX model validation failed ❌")
         print(e)
 
-    target_device = qai_hub.Device("XR2 Gen 2 (Proxy)")
+    target_device = qai_hub.Device("QCS8450 (Proxy)")
 
     # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")

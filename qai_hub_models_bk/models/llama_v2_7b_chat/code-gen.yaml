@@ -1,0 +1,43 @@
+is_aimet: true
+supported_precisions:
+- w4a16
+skip_scorecard: true
+skip_export: true
+global_requirements_incompatible: true
+additional_readme_section: |
+  ## Deploying Llama 2 on-device
+
+  Please follow the [LLM on-device deployment]({genie_url}) tutorial.
+
+  ## Sample output prompts generated on-device
+  1. --prompt "what is gravity?" --max-output-tokens 30
+  ~~~
+  -------- Response Summary --------
+  Prompt: what is gravity?
+  Response: Hello! I'm here to help you answer your question. Gravity is a fundamental force of nature that affects the behavior of objects with mass
+  ~~~
+
+  2. --prompt "what is 2+3?" --max-output-tokens 30
+  ~~~
+  -------- Response Summary --------
+  Prompt: what is 2+3?
+  Response: Of course! I'm happy to help! The answer to 2+3 is 5.
+  ~~~
+
+  3. --prompt "could you please write code for fibonacci series in python?" --max-output-tokens 100
+  ~~~
+  -------- Response Summary --------
+  Prompt: could you please write code for fibonacci series in python?
+  Response: Of course! Here is an example of how you could implement the Fibonacci sequence in Python:
+  ```
+  def fibonacci(n):
+      if n <= 1:
+          return n
+      else:
+          return fibonacci(n-1) + fibonacci(n-2)
+  ```
+  You can test the function by calling it with different values of `n`, like this:
+  ```
+  print(fibonacci(5))
+  ~~~
+skip_example_usage: true

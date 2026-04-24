@@ -1,0 +1,12 @@
+is_aimet: true
+supported_precisions:
+- float
+skip_scorecard: true
+skip_export: true
+global_requirements_incompatible: true
+additional_readme_section: |
+  ## Deploying Gemma-3n-E2B-it on-device
+
+  Please follow the [LLM on-device deployment]({genie_url}) tutorial.
+orchestrator_runtimes: []
+only_allow_orchestrator_runtimes: true

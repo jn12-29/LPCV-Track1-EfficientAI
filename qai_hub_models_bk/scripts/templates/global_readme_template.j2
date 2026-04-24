@@ -1,0 +1,190 @@
+{#
+    Global README Template
+
+    Generates the top-level README.md for the qai_hub_models repository.
+    Includes setup instructions, getting started guide, and the model directory table.
+#}
+{#
+    Render the global README.
+
+    Parameters
+    ----------
+    model_directory : list[dict]
+        List of domain dicts, each containing:
+        - name: str - Domain display name (e.g., "Computer Vision")
+        - sections: list[dict] - List of use case sections, each containing:
+            - title: str or None - Use case display name, or None for unsectioned domains
+            - rows: list[dict] - Model rows, each containing:
+                - name: str - Model display name
+                - model_url: str - URL to model page or README
+                - package_name: str - Python package name
+                - readme_path: str - Path to model README
+#}
+{% macro render(model_directory, include_relative_links=true) %}
+# [Qualcomm® AI Hub Models](https://aihub.qualcomm.com/)
+
+[![Release](https://img.shields.io/github/v/release/quic/ai-hub-models)](https://github.com/qualcomm/ai-hub-models/releases/latest)
+[![Tag](https://img.shields.io/github/v/tag/quic/ai-hub-models)](https://github.com/qualcomm/ai-hub-models/releases/latest)
+[![PyPi](https://img.shields.io/pypi/v/qai-hub-models)](https://pypi.org/project/qai-hub-models/)
+![Python 3.10, 3.11, 3.12, 3.13](https://img.shields.io/badge/python-3.10%20(Recommended)%2C%203.11%2C%203.12%2C%203.13-yellow)
+
+The Qualcomm® AI Hub Models are a collection of
+state-of-the-art machine learning models optimized for deployment on Qualcomm® devices.
+
+* [List of Models by Category](#model-directory)
+* [On-Device Performance Data](https://aihub.qualcomm.com/models)
+* [Device-Native Sample Apps](https://github.com/qualcomm/ai-hub-apps)
+
+See supported: [On-Device Runtimes](#on-device-runtimes), [Hardware Targets & Precision](#device-hardware--precision), [Chipsets](#chipsets), [Devices](#devices)
+
+&nbsp;
+
+## Setup
+
+### 1. Install Python Package
+
+The package is available via pip:
+
+```shell
+# NOTE for Snapdragon X Elite and Snapdragon X2 Elite users:
+# Only AMDx64 (64-bit) Python is supported on Windows.
+# Installation will fail when using Windows ARM64 Python.
+
+pip install qai_hub_models
+```
+
+Some models (e.g. {% if include_relative_links %}[YOLOv7](src/qai_hub_models/models/yolov7){% else %}YOLOv7{% endif %}) require
+additional dependencies. {% if include_relative_links %}View the model README (at [qai_hub_models/models/model_id](src/qai_hub_models/models/yolov7)) for installation instructions.{% else %}See the model's install instructions in the [GitHub repository](https://github.com/qualcomm/ai-hub-models).{% endif %}
+
+
+&nbsp;
+
+### 2. Configure AI Hub Workbench Access
+
+Many features of AI Hub Models _(such as model compilation, on-device profiling, etc.)_ require access to Qualcomm® AI Hub Workbench:
+
+-  [Create a Qualcomm® ID](https://myaccount.qualcomm.com/signup), and use it to [login to Qualcomm® AI Hub Workbench](https://workbench.aihub.qualcomm.com/).
+-  Configure your [API token](https://workbench.aihub.qualcomm.com/account/): `qai-hub configure --api_token API_TOKEN`
+
+&nbsp;
+
+## Getting Started
+
+### Export and Run A Model on a Physical Device
+
+All [models in our directory](#model-directory) can be compiled and profiled on a hosted
+Qualcomm® device:
+
+```shell
+pip install "qai_hub_models[yolov7]"
+
+python -m qai_hub_models.models.yolov7.export [--target-runtime ...] [--device ...] [--help]
+```
+
+_Using Qualcomm® AI Hub Workbench_, the export script will:
+
+1. **Compile** the model for the chosen device and target runtime (see: [Compiling Models on AI Hub Workbench](https://workbench.aihub.qualcomm.com/docs/hub/compile_examples.html)).
+2. If applicable, **Quantize** the model (see: [Quantization on AI Hub Workbench](https://workbench.aihub.qualcomm.com/docs/hub/quantize_examples.html))
+3. **Profile** the compiled model on a real device in the cloud (see: [Profiling Models on AI Hub Workbench](https://workbench.aihub.qualcomm.com/docs/hub/profile_examples.html)).
+4. **Run inference** with a sample input data on a real device in the cloud, and compare on-device model output with PyTorch output (see: [Running Inference on AI Hub Workbench](https://workbench.aihub.qualcomm.com/docs/hub/inference_examples.html))
+5. **Download** the compiled model to disk.
+
+&nbsp;
+
+### End-To-End Model Demos
+
+Most [models in our directory](#model-directory) contain CLI demos that run the model _end-to-end_:
+
+```shell
+pip install "qai_hub_models[yolov7]"
+# Predict and draw bounding boxes on the provided image
+python -m qai_hub_models.models.yolov7.demo [--image ...] [--eval-mode {fp,on-device}] [--help]
+```
+
+_End-to-end_ demos:
+1. **Preprocess** human-readable input into model input
+2. Run **model inference**
+3. **Postprocess** model output to a human-readable format
+
+**Many end-to-end demos use AI Hub Workbench to run inference on a real cloud-hosted device** _(with `--eval-mode on-device`)_. All end-to-end demos can also run locally via PyTorch (with `--eval-mode fp`).
+
+&nbsp;
+
+### Sample Applications
+
+**Native** applications that can run our models (with pre- and post-processing) on physical devices are published in the [AI Hub Apps repository](https://github.com/qualcomm/ai-hub-apps/).
+
+**Python** applications are defined for all models {% if include_relative_links %}[(from qai_hub_models.models.\<model_name> import App)](src/qai_hub_models/models/yolov7/app.py){% else %}(from qai_hub_models.models.\<model_name> import App){% endif %}. These apps wrap model inference with pre- and post-processing steps written using torch & numpy. **These apps are optimized to be an easy-to-follow example, rather than to minimize prediction time.**
+
+&nbsp;
+
+## Model Support Data
+
+### On-Device Runtimes
+
+| Runtime | Supported OS |
+| -- | -- |
+| [Qualcomm AI Engine Direct](https://www.qualcomm.com/developer/artificial-intelligence#overview) | Android, Linux, Windows
+| [LiteRT (TensorFlow Lite)](https://www.tensorflow.org/lite) | Android, Linux
+| [ONNX](https://onnxruntime.ai/docs/execution-providers/QNN-ExecutionProvider.html) | Android, Linux, Windows
+
+### Device Hardware & Precision
+
+| Device Compute Unit | Supported Precision |
+| -- | -- |
+| CPU | FP32, INT16, INT8
+| GPU | FP32, FP16
+| NPU (includes [Hexagon DSP](https://developer.qualcomm.com/software/hexagon-dsp-sdk/dsp-processor), [HTP](https://developer.qualcomm.com/hardware/qualcomm-innovators-development-kit/ai-resources-overview/ai-hardware-cores-accelerators)) | FP16*, INT16, INT8
+
+*Some older chipsets do not support fp16 inference on their NPU.
+
+### Chipsets
+* Snapdragon [8 Elite Gen 5](https://www.qualcomm.com/smartphones/products/8-series/snapdragon-8-elite-gen-5), [8 Elite](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms/snapdragon-8-elite-mobile-platform), [8 Gen 3](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms/snapdragon-8-gen-3-mobile-platform), [8 Gen 2](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms/snapdragon-8-gen-2-mobile-platform), and [8 Gen 1](https://www.qualcomm.com/products/mobile/snapdragon/smartphones/snapdragon-8-series-mobile-platforms/snapdragon-8-gen-1-mobile-platform) Mobile Platforms
+* [Snapdragon X2 Elite](https://www.qualcomm.com/laptops/products/snapdragon-x2-elite), [Snapdragon X Elite](https://www.qualcomm.com/products/mobile/snapdragon/pcs-and-tablets/snapdragon-x-elite) Compute Platforms
+* SA7255P, SA8295P, and SA8775P Automotive Platforms
+* [QCS 6490](https://www.qualcomm.com/products/internet-of-things/industrial/building-enterprise/qcs6490), [QCS 8250](https://www.qualcomm.com/products/internet-of-things/consumer/cameras/qcs8250), [QCS 9075](https://www.qualcomm.com/internet-of-things/products/iq9-series/iq-9075), and [QCS 8550](https://www.qualcomm.com/products/technology/processors/qcs8550) IoT Platforms
+* QCS8450 XR Platform
+
+and many more.
+
+### Devices
+* Samsung Galaxy S21, S22, S23, S24, and S25 Series
+* Xiaomi 12, 13, 15, and 17
+* Snapdragon X Elite CRD and Snapdragon X2 Elite CRD (Compute Reference Device)
+* Qualcomm RB3 Gen 2, RB5 Gen 2, IQ-8, IQ-9
+
+and many more.
+
+&nbsp;
+
+## Model Directory
+{% for domain in model_directory %}
+
+### {{ domain.name }}
+
+| Model | {% if include_relative_links %}README{% else %}Package{% endif %} |
+| -- | -- |
+{% for section in domain.sections %}
+{% if section.title %}
+| | |
+| **{{ section.title }}**
+{% else %}
+| | |
+{% endif %}
+{% for row in section.rows %}
+| [{{ row.name }}]({{ row.model_url }}) | {% if include_relative_links %}[{{ row.package_name }}]({{ row.readme_path }}){% else %}`{{ row.package_name }}`{% endif %} |
+{% endfor %}
+{% endfor %}
+{% endfor %}
+
+## Need help?
+Slack: https://aihub.qualcomm.com/community/slack
+
+GitHub Issues: https://github.com/qualcomm/ai-hub-models/issues
+
+Email: ai-hub-support@qti.qualcomm.com.
+
+## LICENSE
+
+Qualcomm® AI Hub Models is licensed under BSD-3. See the [LICENSE file]({% if include_relative_links %}LICENSE{% else %}https://github.com/qualcomm/ai-hub-models/blob/main/LICENSE{% endif %}).
+{% endmacro %}

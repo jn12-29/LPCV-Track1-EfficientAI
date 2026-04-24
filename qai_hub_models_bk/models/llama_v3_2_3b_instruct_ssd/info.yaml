@@ -1,0 +1,55 @@
+name: Llama-v3.2-3B-Instruct-SSD
+id: llama_v3_2_3b_instruct_ssd
+status: published
+headline: State-of-the-art large language model useful on a variety of language understanding
+  and generation tasks, with Self Speculative Decoding offering faster token rates.
+domain: Generative AI
+description: Llama 3 is a family of LLMs. The model is quantized to w4a16 (4-bit weights
+  and 16-bit activations) and part of the model is quantized to w8a16 (8-bit weights
+  and 16-bit activations) making it suitable for on-device deployment. This variant
+  uses Self Speculative Decoding (SSD), inference acceleration solution that achieves
+  on-target speed up with guaranteed output accuracy identical to the base model.
+  Choose this variant over llama_v3_2_3b_instruct for faster token generation on supported devices.
+use_case: Text Generation
+tags:
+- llm
+- generative-ai
+research_paper: https://www.llama.com/docs/model-cards-and-prompt-formats/llama3_2/
+research_paper_title: 'LLaMA: Open and Efficient Foundation Language Models'
+license: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/blob/main/LICENSE.txt
+source_repo: https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/
+technical_details:
+  Input sequence length for Prompt Processor: 128
+  Maximum context length: 4096
+  Quantization Type: w4 + w8 (few layers) with fp16 activations and w4a16 + w8a16 (few layers) are supported
+  Supported languages: English.
+  TTFT: Time To First Token is the time it takes to generate the first response token.
+    This is expressed as a range because it varies based on the length of the prompt.
+    The lower bound is for a short prompt (up to 128 tokens, i.e., one iteration of
+    the prompt processor) and the upper bound is for a prompt using the full context
+    length (4096 tokens).
+  Response Rate: Rate of response generation after the first response token.
+  Self Speculative Decoding (SSD): Single-model LLM inference acceleration solution
+    that achieves on-target speed up with guaranteed output accuracy identical to the
+    base model. Choose this variant over llama_v3_2_3b_instruct for faster token
+    generation on supported devices.
+applicable_scenarios:
+- Dialogue
+- Content Generation
+- Customer Support
+related_models:
+- llama_v3_2_3b_instruct
+- llama_v3_2_1b_instruct
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+license_type: llama3
+dataset: []
+restrict_model_sharing: true
+model_type_llm: true
+llm_details:
+  call_to_action: View Readme
+  genie_compatible: true
+  devices: {}

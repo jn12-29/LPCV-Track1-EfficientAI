@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2025 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+from qai_hub_models.models._shared.cityscapes_segmentation.demo import (
+    cityscapes_segmentation_demo,
+)
+from qai_hub_models.models.ffnet_54s.model import MODEL_ID, FFNet54S
+
+
+def main(is_test: bool = False) -> None:
+    cityscapes_segmentation_demo(FFNet54S, MODEL_ID, is_test=is_test)
+
+
+if __name__ == "__main__":
+    main()

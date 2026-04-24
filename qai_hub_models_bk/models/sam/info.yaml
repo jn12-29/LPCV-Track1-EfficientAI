@@ -1,0 +1,31 @@
+name: Segment-Anything-Model
+id: sam
+status: pending
+status_reason: No successful runtimes in scorecard (this field was auto-populated by the scorecard run)
+headline: High-quality segmentation mask generation around any object in an image with simple input prompt.
+domain: Computer Vision
+description: Transformer based encoder-decoder where prompts specify what to segment in an image thereby allowing segmentation without the need for additional training. The image encoder generates embeddings and the lightweight decoder operates on the embeddings for point and mask based image segmentation.
+use_case: Semantic Segmentation
+tags:
+- foundation
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: vit_l
+  Input resolution: 720p (720x1280)
+  Number of parameters (sam_decoder): 5.11M
+  Model size (sam_decoder): 19.6 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2304.02643
+research_paper_title: Segment Anything
+source_repo: https://github.com/facebookresearch/segment-anything
+license: https://github.com/facebookresearch/segment-anything/blob/main/LICENSE

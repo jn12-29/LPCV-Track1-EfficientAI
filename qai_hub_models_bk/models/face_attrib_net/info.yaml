@@ -1,0 +1,28 @@
+name: Facial-Attribute-Detection
+id: face_attrib_net
+status: published
+headline: Comprehensive facial analysis by extracting face features.
+domain: Computer Vision
+description: Detects attributes (eye closeness, mask presence, eyeglasses presence, sunglasses presence) that apply to a given face. This model's architecture was developed by Qualcomm. The model was trained by Qualcomm on a proprietary dataset of faces, but can be used on any image.
+use_case: Object Detection
+tags:
+- real-time
+- bu-iot
+applicable_scenarios:
+- Incabinet driver monitoring, phone unlocking, and building access control.
+related_models: []
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: multitask_FR_state_dict.pt
+  Input resolution: 128x128
+  Number of parameters: 12.1M
+  Model size (float): 46.3 MB
+  Model size (w8a8): 12.3 MB
+license_type: bsd-3-clause
+license: https://github.com/quic/ai-hub-models/blob/main/LICENSE

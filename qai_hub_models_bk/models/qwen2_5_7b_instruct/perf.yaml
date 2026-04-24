@@ -1,0 +1,36 @@
+supported_devices:
+- Snapdragon X Elite CRD
+- Dragonwing IQ-9075 EVK
+supported_chipsets:
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-qcs9075
+precisions:
+  w4a16:
+    components:
+      Qwen2.5-7B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite QRD:
+            qnn_context_binary:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 15.40274
+                time_to_first_token_range_milliseconds:
+                  min: 135.6538
+                  max: 4340.9216
+          Snapdragon X Elite CRD:
+            qnn_context_binary:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 12.33811
+                time_to_first_token_range_milliseconds:
+                  min: 174.9494
+                  max: 5598.3808
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 1.8125647068023683
+                time_to_first_token_range_milliseconds:
+                  min: 639.7722
+                  max: 20472.7104

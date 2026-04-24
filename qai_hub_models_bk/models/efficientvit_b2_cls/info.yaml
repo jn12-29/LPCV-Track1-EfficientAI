@@ -1,0 +1,47 @@
+name: EfficientViT-b2-cls
+id: efficientvit_b2_cls
+status: published
+headline: Imagenet classifier and general purpose backbone.
+domain: Computer Vision
+description: EfficientViT is a machine learning model that can classify images from the Imagenet dataset. It can also be used as a backbone in building more complex models for specific use cases.
+use_case: Image Classification
+tags:
+- backbone
+- bu-auto
+- real-time
+applicable_scenarios:
+- Medical Imaging
+- Anomaly Detection
+- Inventory Management
+related_models:
+- squeezenet1_1
+- densenet121
+- googlenet
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- imagenet-1k
+technical_details:
+  Model checkpoint: Imagenet
+  Input resolution: 224x224
+  Number of parameters: 24.3M
+  Model size (float): 92.9 MB
+license_type: bsd-3-clause
+private_perf_form_factors:
+- Auto
+research_paper: https://arxiv.org/abs/2205.14756
+research_paper_title: 'EfficientViT: Multi-Scale Linear Attention for High-Resolution Dense Prediction'
+source_repo: https://github.com/CVHub520/efficientvit
+license: https://github.com/CVHub520/efficientvit/blob/main/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: imagenet
+  metric_name: Top-1 Accuracy
+  value: 83.1
+  unit: '%'
+  source: https://huggingface.co/timm/efficientvit_b2.r288_in1k

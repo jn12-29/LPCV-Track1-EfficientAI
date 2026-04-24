@@ -1,0 +1,59 @@
+id: tcvoicefpie_torchscript
+hub_model_id: mn0lk8o9n
+hub_input_dataset_id: do7mr15m9
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: customer/microsoft/voice/AlignCRUSE/run_inference.py
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 482
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+- output_3
+- output_4
+- output_5
+- output_6
+- output_7
+- output_8
+- output_9
+- output_10
+- output_11
+- output_12
+- output_13
+- output_14
+- output_15
+- output_16
+- output_17
+- output_18
+- output_19
+- output_20
+- output_21
+- output_22
+- output_23
+- output_24
+- output_25
+- output_26
+- output_27
+- output_28
+- output_29
+hub_model_ids_automated:
+  prod: mn0lk8o9n
+  dev: mn1w2g0zm
+hub_input_dataset_ids_automated:
+  prod: do7mr15m9
+  dev: dd9pzvgn7

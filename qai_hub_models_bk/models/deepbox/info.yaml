@@ -1,0 +1,37 @@
+name: 3D-Deep-BOX
+id: deepbox
+status: published
+headline: Real-time 3D object detection.
+domain: Computer Vision
+description: 3D Deep Box is a machine learning model that predicts 3D bounding boxes and classes of objects in an image.
+use_case: Object Detection
+tags:
+- real-time
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models:
+- yolov3
+form_factors:
+- Phone
+- Tablet
+- IoT
+- XR
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: YOLOv3-tiny
+  Input resolution(YOLO): 224x640
+  Input resolution(VGG): 224x224
+  Number of parameters (yolo_2d_detection): 9.78M
+  Model size (yolo_2d_detection) (float): 37.3 MB
+  Number of parameters (vgg_3d_detection): 46.1M
+  Model size (vgg_3d_detection) (float): 176 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/1612.00496
+research_paper_title: 3D Bounding Box Estimation Using Deep Learning and Geometry
+source_repo: https://github.com/skhadem/3D-BoundingBox/
+license: https://github.com/skhadem/3D-BoundingBox/blob/master/LICENSE
+imsdk_supported: true

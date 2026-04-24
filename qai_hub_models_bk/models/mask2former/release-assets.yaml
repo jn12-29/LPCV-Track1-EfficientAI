@@ -1,0 +1,58 @@
+precisions:
+  float:
+    chipset_assets:
+      qualcomm-snapdragon-8gen3:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_snapdragon_8gen3.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite-for-galaxy:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_snapdragon_8_elite_for_galaxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-8-elite-gen5:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_snapdragon_8_elite_gen5.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x-elite:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_snapdragon_x_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-snapdragon-x2-elite:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_snapdragon_x2_elite.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-sa7255p:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_sa7255p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-sa8295p:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_sa8295p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-sa8775p:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_sa8775p.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs8550-proxy:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_qcs8550_proxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs9075:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_qcs9075.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327
+      qualcomm-qcs8450-proxy:
+        qnn_context_binary:
+          s3_key: pre_release_assets/gh_actions/24598778341/mask2former-qnn_context_binary-float-qualcomm_qcs8450_proxy.zip
+          tool_versions:
+            qairt: 2.45.0.260326154327

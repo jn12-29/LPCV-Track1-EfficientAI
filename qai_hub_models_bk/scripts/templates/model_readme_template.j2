@@ -1,0 +1,128 @@
+{#
+    Model README Template
+
+    Generates the README.md for each model in the qai_hub_models repository.
+    Includes installation instructions, usage examples, and model documentation.
+#}
+{% from 'shared/readme_macros.j2' import model_intro, license, references, community, usage_and_limitations, example_and_usage, llama_cpp_commands %}
+{#
+    Render the model README.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    model_headline : str
+        Short description for the title.
+    model_url : str
+        URL to the model page on AI Hub.
+    model_description : str
+        Full model description.
+    source_repo : str
+        URL to the original repository this model was sourced from.
+    license_url : str
+        URL to the license file.
+    research_paper_title : str
+        Title of the research paper.
+    research_paper_url : str
+        URL to the research paper.
+    include_gen_ai_terms : bool
+        Whether to include generative AI usage limitations.
+    additional_readme_section : str
+        Additional content to include in the README.
+    include_example_and_usage : bool
+        Whether to include example and usage section.
+    model_id : str, optional
+        Model identifier (e.g., "resnet50").
+    model_package : str, optional
+        Python package path.
+    supported_precisions : list[str], optional
+        List of supported precisions.
+    has_on_target_demo : bool, optional
+        Whether the model supports on-device demo.
+    has_model_requirements : bool, optional
+        Whether model has additional pip requirements.
+    pip_pre_build_reqs : str, optional
+        Pre-build pip requirements.
+    pip_install_flags : str, optional
+        Additional pip install flags.
+    pip_install_flags_gpu : str, optional
+        GPU-specific pip install flags.
+    python_version_gte : str, optional
+        Minimum Python version.
+    python_version_lt : str, optional
+        Maximum Python version.
+    llama_cpp_cpu_command : str, optional
+        Command to run the model on CPU with llama.cpp.
+    llama_cpp_gpu_command : str, optional
+        Command to run the model on GPU with llama.cpp.
+    llama_cpp_npu_command : str, optional
+        Command to run the model on HTP (NPU) with llama.cpp.
+    llama_cpp_model_url : str, optional
+        URL to download the GGUF model file for llama.cpp.
+    readme_install_system_deps : str, optional
+        Text describing system-level dependencies to install.
+#}
+{% macro render(
+    model_name,
+    model_headline,
+    model_url,
+    model_description,
+    source_repo,
+    license_url,
+    research_paper_title,
+    research_paper_url,
+    include_gen_ai_terms,
+    additional_readme_section,
+    include_example_and_usage,
+    model_id=None,
+    model_package=None,
+    supported_precisions=None,
+    has_on_target_demo=False,
+    has_model_requirements=False,
+    pip_pre_build_reqs=None,
+    pip_install_flags=None,
+    pip_install_flags_gpu=None,
+    python_version_gte=None,
+    python_version_lt=None,
+    llama_cpp_cpu_command=None,
+    llama_cpp_gpu_command=None,
+    llama_cpp_npu_command=None,
+    llama_cpp_model_url=None,
+    readme_install_system_deps=None,
+    model_status="published",
+    unpublished_model_warning=""
+) %}
+{% if model_status != "published" %}
+> [!WARNING]
+> {{ unpublished_model_warning }}
+
+{% endif %}
+# [{{ model_name }}: {{ model_headline }}]({{ model_url }})
+
+{{ model_description }}
+
+{{ model_intro(model_name, source_repo, model_url) }}
+{% if additional_readme_section %}
+
+{{ additional_readme_section }}
+{% endif %}
+{% if llama_cpp_npu_command or llama_cpp_gpu_command or llama_cpp_cpu_command %}
+
+{{ llama_cpp_commands(llama_cpp_npu_command, llama_cpp_gpu_command, llama_cpp_cpu_command, llama_cpp_model_url) }}
+{% endif %}
+{% if include_example_and_usage %}
+
+{{ example_and_usage(model_id, model_package, supported_precisions, has_on_target_demo, has_model_requirements, pip_pre_build_reqs, pip_install_flags, pip_install_flags_gpu, python_version_gte, python_version_lt, readme_install_system_deps) }}
+{% endif %}
+
+{{ license(model_name, license_url) }}
+
+{{ references(research_paper_title, research_paper_url, source_repo) }}
+
+{{ community() }}
+{% if include_gen_ai_terms %}
+
+{{ usage_and_limitations() }}
+{% endif %}
+{% endmacro %}

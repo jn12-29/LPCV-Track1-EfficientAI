@@ -1,0 +1,37 @@
+id: uniformer_torchscript
+hub_model_id: mq8eggdzq
+hub_input_dataset_id: dq9k6zq57
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://github.qualcomm.com/qualcomm-model-zoo-public-mirror/models-accuracy/tree/main/image_classification/uniformer
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: image
+  shape:
+  - 1
+  - 3
+  - 224
+  - 224
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- image
+hub_model_ids_automated:
+  prod: mq8eggdzq
+  dev: mqe751p5m
+hub_input_dataset_ids_automated:
+  prod: dq9k6zq57
+  dev: dz2r61jo2
+hub_input_channel_last_dataset_ids_automated:
+  prod: d693r80y9
+  dev: dr9w6wqm7

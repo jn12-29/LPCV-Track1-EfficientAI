@@ -1,0 +1,36 @@
+id: tcvoicealigncruse_torchscript
+hub_model_id: mngwxlp5m
+hub_input_dataset_id: dz7z1rp59
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: https://github.com/qcom-ai-hub/tetracode-customers/blob/main/microsoft/voice/AlignCRUSE/stft.py
+domain: Audio
+use_case: Speech Recognition
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: x
+  shape:
+  - 1
+  - 101
+  - 1446
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- x
+hub_model_ids_automated:
+  prod: mngwxlp5m
+  dev: mn0j7ek9m
+hub_input_dataset_ids_automated:
+  prod: dz7z1rp59
+  dev: d693e4nl2
+hub_input_channel_last_dataset_ids_automated:
+  prod: dr9won5w7
+  dev: dj7dq44p2

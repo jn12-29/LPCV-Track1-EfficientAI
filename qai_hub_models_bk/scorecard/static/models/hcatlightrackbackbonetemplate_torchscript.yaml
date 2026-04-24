@@ -1,0 +1,41 @@
+id: hcatlightrackbackbonetemplate_torchscript
+hub_model_id: mmr48076q
+hub_input_dataset_id: dk7g8ejy2
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Computer Vision
+use_case: Object Detection
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: template
+  shape:
+  - 1
+  - 3
+  - 128
+  - 128
+  dtype: float32
+output_names:
+- output_0
+- output_1
+- output_2
+channel_first_inputs:
+- template
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mmr48076q
+  dev: mnj4z7zyn
+hub_input_dataset_ids_automated:
+  prod: dk7g8ejy2
+  dev: dr9wp0jk2
+hub_input_channel_last_dataset_ids_automated:
+  prod: d09ye8z17
+  dev: d82nreeo9

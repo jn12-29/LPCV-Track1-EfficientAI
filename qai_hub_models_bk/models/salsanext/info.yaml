@@ -1,0 +1,33 @@
+name: SalsaNext
+id: salsanext
+status: published
+headline: Semantic segmentation model optimized for LiDAR point cloud data.
+domain: Computer Vision
+description: SalsaNext is a LiDAR-based model designed for efficient and accurate semantic segmentation.
+use_case: Semantic Segmentation
+tags:
+- bu-auto
+applicable_scenarios:
+- Self driving cars
+related_models: []
+form_factors:
+- Auto
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- SemanticKITTI
+technical_details:
+  Model checkpoint: SalsaNext
+  Input resolution: 1x5x64x2048
+  Number of parameters: 6.71M
+  Model size (float): 25.7 MB
+license_type: mit
+private_perf_form_factors:
+- Auto
+license: https://github.com/TiagoCortinhal/SalsaNext/blob/master/LICENSE
+numerics_benchmark:
+  dataset_name: semantic_kitti
+  metric_name: Mean Intersection Over Union
+  value: 49.5
+  unit: mIOU
+  source: AI Hub Models Reference Eval

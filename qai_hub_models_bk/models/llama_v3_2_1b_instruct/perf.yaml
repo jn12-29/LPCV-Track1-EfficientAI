@@ -1,0 +1,123 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+- Snapdragon X2 Elite CRD
+- Snapdragon X Elite CRD
+- SA8775P ADP
+- Dragonwing IQ-9075 EVK
+- SA8295P ADP
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-x2-elite
+- qualcomm-snapdragon-x-elite
+- qualcomm-sa8775p
+- qualcomm-qcs9075
+- qualcomm-sa8295p
+precisions:
+  w4:
+    components:
+      Llama-v3.2-1B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 38.83495864868164
+                time_to_first_token_range_milliseconds:
+                  min: 48.263400000000004
+                  max: 1544.4288000000001
+          SA8295P ADP:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 11.0
+                time_to_first_token_range_milliseconds:
+                  min: 225.0
+                  max: 7200.0
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 13.535644435882569
+                time_to_first_token_range_milliseconds:
+                  min: 144.9255
+                  max: 4637.616
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 37.40756950378418
+                time_to_first_token_range_milliseconds:
+                  min: 66.723
+                  max: 2135.136
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 18.5842004776001
+                time_to_first_token_range_milliseconds:
+                  min: 145.3581
+                  max: 4651.4592
+          Samsung Galaxy S25:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 32.220094871521
+                time_to_first_token_range_milliseconds:
+                  min: 72.52210000000001
+                  max: 2320.7072000000003
+  w4a16:
+    components:
+      Llama-v3.2-1B-Instruct:
+        performance_metrics:
+          Snapdragon 8 Elite Gen 5 QRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 73.18755187988282
+                time_to_first_token_range_milliseconds:
+                  min: 30.0987
+                  max: 963.1584
+          SA8775P ADP:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 32.61
+                time_to_first_token_range_milliseconds:
+                  min: 67.938
+                  max: 2174.016
+          Snapdragon X Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 24.226713943481446
+                time_to_first_token_range_milliseconds:
+                  min: 78.2621
+                  max: 2504.3872
+          Snapdragon X2 Elite CRD:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 80.99222183227539
+                time_to_first_token_range_milliseconds:
+                  min: 50.8182
+                  max: 1626.1824
+          Dragonwing IQ-9075 EVK:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 41.06846237182617
+                time_to_first_token_range_milliseconds:
+                  min: 53.6586
+                  max: 1717.0752
+          Samsung Galaxy S25:
+            genie:
+              llm_metrics:
+              - context_length: 4096
+                tokens_per_second: 58.379512786865234
+                time_to_first_token_range_milliseconds:
+                  min: 38.207
+                  max: 1222.624

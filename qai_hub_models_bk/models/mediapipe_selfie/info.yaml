@@ -1,0 +1,41 @@
+name: MediaPipe-Selfie-Segmentation
+id: mediapipe_selfie
+status: published
+headline: Segments the person from background in a selfie image and realtime background segmentation in video conferencing.
+domain: Computer Vision
+description: Light-weight model that segments a person from the background in square or landscape selfie and video conference imagery.
+use_case: Semantic Segmentation
+tags: []
+applicable_scenarios:
+- Camera
+- Instant Photo Studio
+- Video Conferencing
+- Personalized Marketing Content
+- Interactive Gaming Avatar
+- Real-time Portrait Editor
+- Dynamic Wallpaper Generator
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: Square
+  Input resolution (Square): 256x256
+  Input resolution (Landscape): 144x256
+  Number of output classes: '6'
+  Number of parameters: 106K
+  Model size (float): 447 KB
+license_type: apache-2.0
+research_paper: https://developers.google.com/mediapipe/solutions/vision/image_segmenter/
+research_paper_title: Image segmentation guide
+source_repo: https://github.com/google/mediapipe/tree/master/mediapipe/modules/selfie_segmentation
+license: https://github.com/google/mediapipe/blob/master/LICENSE
+numerics_benchmark:
+  dataset_name: human_matting
+  metric_name: Mean Intersection Over Union
+  value: 97.1
+  unit: mIOU
+  source: AI Hub Models Reference Eval

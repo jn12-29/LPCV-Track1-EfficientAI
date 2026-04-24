@@ -1,0 +1,23 @@
+id: petr_r50_oob_onnx
+hub_model_id: mmr4xvl6q
+hub_input_dataset_id: d09y1kov9
+type: ONNX
+bu_owner: auto
+sponsors:
+- ahmesyed@qti.qualcomm.com
+- svikas@qti.qualocmm.com
+context: PETR is a a SOTA model of interest to the Auto BU. This model represents the out-of-box version of this model before any optimizations applied.
+source: Originally available at https://github.com/exiawsh/StreamPETR. This model was exported from PyTorch to ONNX from the repository https://gitlab.qualcomm.com/auto.ai.sys/experiment/StreamPETR/-/tree/dev_PETR_OOB?ref_type=heads, which includes some modifications to resolve MMLabs framework dependencies and allow ONNX export.
+domain: Computer Vision
+use_case: Object Detection
+tags: []
+enabled_device_form_factors:
+- Auto
+enabled_profile_runtimes:
+- qnn_dlc
+hub_model_ids_automated:
+  prod: mmr4xvl6q
+  dev: mq8dwgwpm
+hub_input_dataset_ids_automated:
+  prod: d09y1kov9
+  dev: dz7zywp69

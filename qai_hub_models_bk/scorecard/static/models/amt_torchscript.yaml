@@ -1,0 +1,48 @@
+id: amt_torchscript
+hub_model_id: mqvx2y7xm
+hub_input_dataset_id: dr2qyw4o7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: 'https://github.com/MCG-NKU/AMT # `SmallUpdateBlock` in `rafts.py` must be edited to remove the rank 6 reshape before export.'
+domain: Computer Vision
+use_case: Image Classification
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: img0
+  shape:
+  - 1
+  - 3
+  - 336
+  - 576
+  dtype: float32
+- name: img1
+  shape:
+  - 1
+  - 3
+  - 336
+  - 576
+  dtype: float32
+- name: embt
+  shape:
+  - 1
+  - 1
+  - 1
+  - 1
+  dtype: float32
+output_names:
+- output_0
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mqvx2y7xm
+  dev: mnggy5d0n
+hub_input_dataset_ids_automated:
+  prod: dr2qyw4o7
+  dev: dp70le5l7

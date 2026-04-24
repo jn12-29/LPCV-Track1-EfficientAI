@@ -1,0 +1,222 @@
+{#
+    Hugging Face Model Card Macros
+
+    Macros specific to the Hugging Face model card template.
+    Includes getting started guide, model details, and performance table.
+#}
+
+
+{#
+    Format tool versions as a comma-separated string.
+
+    Parameters
+    ----------
+    tv : ToolVersions
+        Tool versions object with qairt, tflite, onnx_runtime fields.
+#}
+{%- macro _format_tool_versions(tv) -%}
+{%- set parts = [] -%}
+{%- if tv and tv.qairt -%}
+{%- set _ = parts.append('QAIRT ' ~ tv.qairt.api_version) -%}
+{%- endif -%}
+{%- if tv and tv.tflite -%}
+{%- set _ = parts.append('TFLite ' ~ tv.tflite) -%}
+{%- endif -%}
+{%- if tv and tv.onnx_runtime -%}
+{%- set _ = parts.append('ONNX Runtime ' ~ tv.onnx_runtime) -%}
+{%- endif -%}
+{{ parts | join(', ') }}
+{%- endmacro -%}
+
+
+{#
+    Generate the Download Links table (without section header).
+
+    Parameters
+    ----------
+    download_links : list[dict]
+        List of download link rows. Each row contains:
+        - runtime: Target runtime name (e.g., "TFLITE", "QNN_DLC")
+        - precision: Model precision (e.g., "float", "w8a8")
+        - chipset: Chipset name or "Universal"
+        - tool_versions: ToolVersions object
+        - download_url: URL to download the asset
+#}
+{%- macro _download_links_table(download_links) -%}
+| Runtime | Precision | Chipset | SDK Versions | Download |
+|---|---|---|---|---|
+{% for row in download_links %}
+| {{ row.runtime }} | {{ row.precision }} | {{ row.chipset }} | {{ _format_tool_versions(row.tool_versions) }} | [Download]({{ row.download_url }}){{ '\n' if not loop.last else '' }}
+{%- endfor %}
+{%- endmacro -%}
+
+
+{#
+    Generate text for downloading pre-exported model assets.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    model_url : str
+        URL to the model page on AI Hub.
+    download_links : list[dict]
+        List of download link rows.
+#}
+{%- macro _download_preexported(model_name, model_url, download_links) -%}
+{% if download_links %}
+Below are pre-exported model assets ready for deployment.
+
+{{ _download_links_table(download_links) }}
+
+For more device-specific assets and performance metrics, visit **[{{ model_name }} on Qualcomm® AI Hub]({{ model_url }})**.
+{% else %}
+Download pre-exported model assets from **[{{ model_name }} on Qualcomm® AI Hub]({{ model_url }})**.
+{% endif %}
+{%- endmacro -%}
+
+{#
+    Generate text for exporting with custom configurations.
+
+    Parameters
+    ----------
+    qaihm_model_url : str
+        URL to the model's folder in the AI Hub Models GitHub repository.
+#}
+{%- macro _export_custom(qaihm_model_url) -%}
+Use the [Qualcomm® AI Hub Models]({{ qaihm_model_url }}) Python library to compile and export the model with your own:
+- Custom weights (e.g., fine-tuned checkpoints)
+- Custom input shapes
+- Target device and runtime configurations
+{%- endmacro -%}
+
+{#
+    Generate a link to the GitHub repository.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    qaihm_model_url : str
+        URL to the model's folder in the AI Hub Models GitHub repository.
+#}
+{%- macro _github_link(model_name, qaihm_model_url) -%}
+See our repository for [{{ model_name }} on GitHub]({{ qaihm_model_url }}) for usage instructions.
+{%- endmacro -%}
+
+
+{#
+    Generate the Getting Started section with download and export options.
+
+    Parameters
+    ----------
+    model_name : str
+        Display name of the model.
+    model_url : str
+        URL to the model page on AI Hub.
+    qaihm_model_url : str
+        URL to the model's folder in the AI Hub Models GitHub repository.
+    download_links : list[dict], optional
+        List of download link rows (default: None).
+    is_precompiled : bool, optional
+        Whether model is precompiled only (default: False).
+    restrict_model_sharing : bool, optional
+        Whether model sharing is restricted due to licensing (default: False).
+    show_purchase_statement : bool, optional
+        Whether to show purchase/contact info (default: False).
+#}
+{%- macro getting_started(
+    model_name,
+    model_url,
+    qaihm_model_url,
+    download_links=None,
+    is_precompiled=False,
+    restrict_model_sharing=False,
+    show_purchase_statement=False
+) -%}
+## Getting Started
+{% if show_purchase_statement %}
+This model is available for purchase. Please [contact us](mailto:ai-hub-support@qti.qualcomm.com) to learn more about licensing options.
+{% elif restrict_model_sharing %}
+Due to licensing restrictions, we cannot distribute pre-exported model assets for this model.
+{{ _export_custom(qaihm_model_url) }}
+
+{{ _github_link(model_name, qaihm_model_url) }}
+{% elif is_precompiled %}
+{{ _download_preexported(model_name, model_url, download_links) }}
+{% else %}
+There are two ways to deploy this model on your device:
+
+### Option 1: Download Pre-Exported Models
+
+{{ _download_preexported(model_name, model_url, download_links) }}
+
+### Option 2: Export with Custom Configurations
+
+{{ _export_custom(qaihm_model_url) }}
+
+This option is ideal if you need to customize the model beyond the default configuration provided here.
+
+{{ _github_link(model_name, qaihm_model_url) }}
+{%- endif %}
+{%- endmacro -%}
+
+
+{#
+    Generate the Model Details section with type and stats.
+
+    Parameters
+    ----------
+    use_case : str
+        Model use case category (e.g., "Image Classification").
+    technical_details : dict[str, str]
+        Dictionary of technical details (e.g., {"Parameters": "25M"}).
+#}
+{%- macro model_details_section(use_case, technical_details) -%}
+## Model Details
+
+**Model Type:** {{ use_case }}
+
+**Model Stats:**
+{% for name, val in technical_details.items() %}
+- {{ name }}: {{ val }}{{ '\n' if not loop.last else '' }}
+{%- endfor %}
+{%- endmacro -%}
+
+
+{#
+    Generate the Performance Summary table.
+
+    Parameters
+    ----------
+    perf_rows : list[dict]
+        List of performance data rows. Each row contains:
+        - component: Model component name
+        - precision: Model precision (e.g., "INT8")
+        - device: Device name
+        - chipset: Chipset name
+        - runtime: Target runtime
+        For LLMs: context_length, tokens_per_second, time_to_first_token
+        For others: inference_time, peak_memory, compute_unit
+    is_llm : bool
+        Whether model is a large language model (affects table columns).
+#}
+{%- macro performance_table(perf_rows, is_llm) -%}
+## Performance Summary
+{% if perf_rows %}
+{% if is_llm %}
+| Model | Runtime | Precision | Chipset | Context Length | Response Rate (tokens per second) | Time To First Token (range, seconds)
+|---|---|---|---|---|---|---
+{% else %}
+| Model | Runtime | Precision | Chipset | Inference Time (ms) | Peak Memory Range (MB) | Primary Compute Unit
+|---|---|---|---|---|---|---
+{% endif %}
+{% for row in perf_rows %}
+{% if is_llm %}
+| {{ row.component }} | {{ row.runtime }} | {{ row.precision }} | {{ row.chipset }} | {{ row.context_length }} | {{ row.tokens_per_second }} | {{ row.time_to_first_token }}
+{%- else %}
+| {{ row.component }} | {{ row.runtime }} | {{ row.precision }} | {{ row.chipset }} | {{ row.inference_time }} | {{ row.peak_memory }} | {{ row.compute_unit }}
+{%- endif %}{{ '\n' if not loop.last else '' }}
+{%- endfor %}
+{%- endif %}
+{%- endmacro -%}

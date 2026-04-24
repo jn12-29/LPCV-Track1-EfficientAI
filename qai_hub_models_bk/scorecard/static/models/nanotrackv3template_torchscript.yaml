@@ -1,0 +1,39 @@
+id: nanotrackv3template_torchscript
+hub_model_id: mqk35747n
+hub_input_dataset_id: d67j1yjp7
+type: TORCHSCRIPT
+bu_owner: ai_hub
+sponsors:
+- qai-hub-models-contributors
+- shobitha@qti.qualcomm.com
+context: Moving model from bench to AI Hub Models Scorecard
+source: Unknown
+domain: Computer Vision
+use_case: Object Detection
+tags:
+- backbone
+enabled_devices:
+- default
+input_specs:
+- name: template
+  shape:
+  - 1
+  - 3
+  - 128
+  - 128
+  dtype: float32
+output_names:
+- output_0
+channel_first_inputs:
+- template
+channel_first_outputs:
+- output_0
+hub_model_ids_automated:
+  prod: mqk35747n
+  dev: mnw82r43n
+hub_input_dataset_ids_automated:
+  prod: d67j1yjp7
+  dev: dr2q60gl9
+hub_input_channel_last_dataset_ids_automated:
+  prod: do7mmnzl7
+  dev: d09yjydo9

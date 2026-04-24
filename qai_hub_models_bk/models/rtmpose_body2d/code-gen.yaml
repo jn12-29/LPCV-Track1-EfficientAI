@@ -1,0 +1,6 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+global_requirements_incompatible: true
+pip_pre_build_reqs: mmpose==1.2.0 --no-deps

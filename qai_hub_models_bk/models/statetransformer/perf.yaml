@@ -1,0 +1,143 @@
+supported_devices:
+- Snapdragon 8 Elite Gen 5 QRD
+- Samsung Galaxy S25
+- Samsung Galaxy S25 Ultra
+- Samsung Galaxy S25+
+- Samsung Galaxy S24
+- Samsung Galaxy S24 Ultra
+- Samsung Galaxy S24+
+- Samsung Galaxy S23
+- Samsung Galaxy S23 Ultra
+- Samsung Galaxy S23+
+- Samsung Galaxy S22 5G
+- Samsung Galaxy S22 Ultra 5G
+- Samsung Galaxy S22+ 5G
+- Samsung Galaxy Tab S8
+- Xiaomi 12
+- Xiaomi 12 Pro
+- Samsung Galaxy S21
+- Samsung Galaxy S21 Ultra
+- QCS8275 (Proxy)
+- QCS8550 (Proxy)
+- QCS8450 (Proxy)
+- XR2 Gen 2 (Proxy)
+- Dragonwing IQ-9075 EVK
+supported_chipsets:
+- qualcomm-snapdragon-8-elite-gen5
+- qualcomm-snapdragon-8-elite
+- qualcomm-snapdragon-8gen3
+- qualcomm-snapdragon-8gen2
+- qualcomm-snapdragon-8gen1
+- qualcomm-snapdragon-888
+- qualcomm-qcs8275-proxy
+- qualcomm-qcs8550-proxy
+- qualcomm-qcs8450-proxy
+- qualcomm-qcs9075
+precisions:
+  float:
+    components:
+      StateTransformer:
+        universal_assets:
+          tflite:
+            model_id: mq9j42l2n
+            tool_versions:
+              litert: 1.4.2
+        performance_metrics:
+          Dragonwing IQ-9075 EVK:
+            tflite:
+              job_id: jg937xx8g
+              job_status: Passed
+              inference_time_milliseconds: 791.123
+              estimated_peak_memory_range_mb:
+                min: 387
+                max: 808
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          QCS8275 (Proxy):
+            tflite:
+              job_id: jp34lwwng
+              job_status: Passed
+              inference_time_milliseconds: 907.385
+              estimated_peak_memory_range_mb:
+                min: 454
+                max: 465
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          QCS8450 (Proxy):
+            tflite:
+              job_id: jgdryzzzp
+              job_status: Passed
+              inference_time_milliseconds: 751.34
+              estimated_peak_memory_range_mb:
+                min: 299
+                max: 312
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          QCS8550 (Proxy):
+            tflite:
+              job_id: jgzxq44x5
+              job_status: Passed
+              inference_time_milliseconds: 542.199
+              estimated_peak_memory_range_mb:
+                min: 292
+                max: 687
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          Samsung Galaxy S24:
+            tflite:
+              job_id: jp83d46og
+              job_status: Passed
+              inference_time_milliseconds: 456.033
+              estimated_peak_memory_range_mb:
+                min: 239
+                max: 252
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          Samsung Galaxy S25:
+            tflite:
+              job_id: j5q7xmzog
+              job_status: Passed
+              inference_time_milliseconds: 353.547
+              estimated_peak_memory_range_mb:
+                min: 221
+                max: 236
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2
+          Snapdragon 8 Elite Gen 5 QRD:
+            tflite:
+              job_id: jgl0911mg
+              job_status: Passed
+              inference_time_milliseconds: 346.811
+              estimated_peak_memory_range_mb:
+                min: 215
+                max: 228
+              primary_compute_unit: CPU
+              layer_counts:
+                total: 2829
+                cpu: 2829
+              tool_versions:
+                litert: 1.4.2

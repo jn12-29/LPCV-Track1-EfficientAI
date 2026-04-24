@@ -1,0 +1,31 @@
+name: YamNet
+id: yamnet
+status: published
+headline: Audio Event classification Model.
+domain: Audio
+description: An audio event classifier trained on the AudioSet dataset to predict audio events from the AudioSet ontology employing the Mobilenet_v1 depthwise-separable convolution architecture.
+use_case: Audio Classification
+tags:
+- real-time
+applicable_scenarios:
+- Audio Recognition
+related_models: []
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: false
+dataset:
+- AudioSet-YouTube corpus
+technical_details:
+  Model checkpoint: yamnet.pth
+  Input resolution: 1x1x96x64
+  Number of parameters: 3.73M
+  Model size (float): 14.2 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/1704.04861
+research_paper_title: MobileNets Efficient Convolutional Neural Networks for Mobile Vision Applications
+source_repo: https://github.com/w-hc/torch_audioset
+license: https://github.com/w-hc/torch_audioset/blob/master/LICENSE
+imsdk_supported: true

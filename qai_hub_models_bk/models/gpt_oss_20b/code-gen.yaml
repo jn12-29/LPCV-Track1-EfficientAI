@@ -1,0 +1,10 @@
+supported_precisions:
+- mxfp4
+orchestrator_runtimes: [llama_cpp_cpu, llama_cpp_gpu, llama_cpp_npu]
+skip_hub_tests_and_scorecard: true
+skip_export: true
+skip_example_usage: true
+llama_cpp_cpu_command: 'GGML_HEXAGON_NDEV=0 llama-completion --model model.gguf --n-predict -1 --ctx-size 128 --system-prompt "You are a helpful assistant. Be helpful but brief." --prompt "Write a short poem about the stars and the vastness of space." --seed 1 --single-turn --no-display-prompt --n-gpu-layers 0'
+llama_cpp_gpu_command: 'GGML_HEXAGON_NDEV=0 llama-completion --model model.gguf --n-predict -1 --ctx-size 128 --system-prompt "You are a helpful assistant. Be helpful but brief." --prompt "Write a short poem about the stars and the vastness of space." --seed 1 --single-turn --no-display-prompt -fa off'
+llama_cpp_npu_command: 'GGML_HEXAGON_NDEV=4 llama-completion --model model.gguf --n-predict -1 --ctx-size 128 --system-prompt "You are a helpful assistant. Be helpful but brief." --prompt "Write a short poem about the stars and the vastness of space." --seed 1 --single-turn --no-display-prompt --no-mmap -t 6 --cpu-mask 0xfc --cpu-strict 1 -ctk q8_0 -ctv q8_0 -fa on --batch-size 128 --device "HTP0,HTP1,HTP2,HTP3"'
+only_allow_orchestrator_runtimes: true

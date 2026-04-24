@@ -1,0 +1,42 @@
+name: DDRNet23-Slim
+id: ddrnet23_slim
+status: published
+headline: Segment images or video by class in real-time on device.
+domain: Computer Vision
+description: DDRNet23Slim is a machine learning model that segments an image into semantic classes, specifically designed for road-based scenes. It is designed for the application of self-driving cars.
+use_case: Semantic Segmentation
+tags:
+- real-time
+applicable_scenarios:
+- Self-driving cars
+related_models:
+- unet_segmentation
+- fcn_resnet50
+form_factors:
+- Phone
+- Tablet
+- IoT
+has_static_banner: true
+has_animated_banner: true
+dataset:
+- cityscapes
+technical_details:
+  Model checkpoint: DDRNet23s_imagenet.pth
+  Inference latency: RealTime
+  Input resolution: 2048x1024
+  Number of output classes: '19'
+  Number of parameters: 6.13M
+  Model size (float): 21.7 MB
+  Model size (w8a8): 6.11 MB
+license_type: mit
+research_paper: https://arxiv.org/abs/2101.06085
+research_paper_title: Deep Dual-resolution Networks for Real-time and Accurate Semantic Segmentation of Road Scenes
+source_repo: https://github.com/chenjun2hao/DDRNet.pytorch
+license: https://github.com/chenjun2hao/DDRNet.pytorch/blob/main/LICENSE
+imsdk_supported: true
+numerics_benchmark:
+  dataset_name: cityscapes
+  metric_name: Mean Intersection Over Union
+  value: 77.4
+  unit: mIOU
+  source: https://github.com/ydhongHIT/DDRNet

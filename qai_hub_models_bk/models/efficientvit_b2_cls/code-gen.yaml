@@ -1,0 +1,20 @@
+supported_precisions:
+- float
+- w8a16_mixed_fp16
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16_mixed_fp16:
+    tflite:
+      issue: Revisit based on scorecard results. https://github.com/qcom-ai-hub/tetracode/issues/17039
+    qnn_dlc:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: Revisit based on scorecard results. https://github.com/qcom-ai-hub/tetracode/issues/17039
+    onnx:
+      scorecard_failure: No profile jobs found with default device Samsung Galaxy S25
+      issue: Revisit based on scorecard results. https://github.com/qcom-ai-hub/tetracode/issues/17039
+  w8a16:
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.1 %) deviates from benchmark (83.1 %) by -83.000 %, threshold: 10.0 %'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Device accuracy (0.1 %) deviates from benchmark (83.1 %) by -83.000 %, threshold: 10.0 %'

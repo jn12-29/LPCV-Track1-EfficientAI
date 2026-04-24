@@ -1,0 +1,6 @@
+supported_precisions:
+- float
+- w8a16_mixed_int16
+- w8a16
+- w8a8
+has_on_target_demo: true

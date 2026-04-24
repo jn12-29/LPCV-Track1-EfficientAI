@@ -1,0 +1,32 @@
+name: MobileSam
+id: mobilesam
+status: published
+headline: 'Faster Segment Anything: Towards lightweight SAM for mobile applications.'
+domain: Computer Vision
+description: Transformer based encoder-decoder where prompts specify what to segment in an image thereby allowing segmentation without the need for additional training. The image encoder generates embeddings and the lightweight decoder operates on the embeddings for point and mask based image segmentation.
+use_case: Semantic Segmentation
+tags:
+- foundation
+applicable_scenarios:
+- Factory Automation
+- Robotic Navigation
+- Camera
+related_models: []
+form_factors:
+- Phone
+- Tablet
+has_static_banner: true
+has_animated_banner: true
+dataset: []
+technical_details:
+  Model checkpoint: vit_t
+  Input resolution: 720p (720x1280)
+  Number of parameters (sam_encoder): 6.95M
+  Model size (sam_encoder) (float): 26.6 MB
+  Number of parameters (sam_decoder): 6.16M
+  Model size (sam_decoder) (float): 23.7 MB
+license_type: apache-2.0
+research_paper: https://arxiv.org/abs/2306.14289
+research_paper_title: Segment Anything
+source_repo: https://github.com/facebookresearch/segment-anything
+license: https://github.com/facebookresearch/segment-anything/blob/main/LICENSE

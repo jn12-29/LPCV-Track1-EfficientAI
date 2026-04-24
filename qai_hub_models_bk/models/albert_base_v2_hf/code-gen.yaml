@@ -1,0 +1,17 @@
+supported_precisions:
+- float
+- w8a16
+has_on_target_demo: true
+disabled_paths:
+  w8a16:
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (58.0 %) by -58.000 %, threshold: 10.0 %'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (58.0 %) by -58.000 %, threshold: 10.0 %'
+  float:
+    tflite:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (58.0 %) by -58.000 %, threshold: 10.0 %'
+    onnx:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (58.0 %) by -58.000 %, threshold: 10.0 %'
+    qnn_dlc:
+      scorecard_accuracy_failure: 'Device accuracy (0.0 %) deviates from benchmark (58.0 %) by -58.000 %, threshold: 10.0 %'
