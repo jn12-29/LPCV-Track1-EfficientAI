@@ -78,12 +78,20 @@ def cmd_train(args: argparse.Namespace) -> None:
     )
     img_batches = loader.get_image_batches()
     txt_batches = loader.get_text_batches()
-    print(f'Calibration: {len(img_batches) * args.calib_batch_size} images, '
-          f'{len(txt_batches) * args.calib_batch_size} texts')
+    print(f'Calibration: {len(loader.records)} records '
+          f'({len(img_batches)} image batches, {len(txt_batches)} text batches)')
 
     blocks = iter_mlp_blocks(model)
     done_set = set(relu_labels)
     skip_mode = args.skip_to is not None and args.skip_to not in done_set
+
+    if args.skip_to is not None and args.skip_to not in done_set:
+        all_labels = {info.label for info in blocks}
+        if args.skip_to not in all_labels:
+            raise ValueError(
+                f"--skip-to '{args.skip_to}' not found. "
+                f"Available: {[b.label for b in blocks]}"
+            )
 
     for info in tqdm(blocks, desc='Reconstructing MLP blocks'):
         if skip_mode:
