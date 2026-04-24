@@ -3,6 +3,7 @@ export CUDA_VISIBLE_DEVICES=${1:-0}
 
 export mode=${2:-"fp"}
 export op_types=${3:-""}
+export enable_graph_surgery=${4:-1}
 if [ "${mode}" == "fp" ]; then
     compile_ids_file=fp_compile_ids.json
     output_postfix=""
@@ -16,7 +17,14 @@ fi
 python pipeline/export_onnx.py \
   --model-name MobileCLIP2-B \
   --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt \
-  --output-postfix ""
+  --output-postfix ""\
+  --gelu-replacement relu
+
+if [ "${enable_graph_surgery}" == "1" ]; then
+    python pipeline/optimize_onnx_graph.py \
+      --input exported_MobileCLIP2-B_onnx/image_encoder.onnx \
+      --enable-vit-linear-gemm3d 
+fi
 
 if [ "${mode}" == "ptq" ]; then
     python ptq/quantize.py \

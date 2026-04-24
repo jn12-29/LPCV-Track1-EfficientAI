@@ -24,6 +24,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument(
+        "--gelu-replacement",
+        type=str,
+        default="relu",
+        choices=["none", "tanh", "relu"],
+        help="Replace GELU before export: none, tanh-approx GELU, or ReLU.",
+    )
+    parser.add_argument(
         "--output-postfix",
         type=str,
         default="",
@@ -81,6 +88,14 @@ def replace_gelu_with_tanh_approx(model: nn.Module) -> None:
         for name, child in parent.named_children():
             if isinstance(child, nn.GELU) and child.approximate == "none":
                 setattr(parent, name, nn.GELU(approximate="tanh"))
+
+
+def replace_gelu_with_relu(model: nn.Module) -> None:
+    """Replace all GELU modules with ReLU for faster inference."""
+    for parent in model.modules():
+        for name, child in parent.named_children():
+            if isinstance(child, nn.GELU):
+                setattr(parent, name, nn.ReLU())
 
 
 def _simplify_onnx(onnx_path: str) -> None:
@@ -200,6 +215,14 @@ def main() -> None:
         clip_model = reparameterize_model(clip_model)
 
     clip_model.eval()
+    if args.gelu_replacement == "relu":
+        replace_gelu_with_relu(clip_model)
+        print("Applied activation rewrite: GELU -> ReLU")
+    elif args.gelu_replacement == "tanh":
+        replace_gelu_with_tanh_approx(clip_model)
+        print("Applied activation rewrite: GELU -> GELU(tanh)")
+    else:
+        print("Activation rewrite disabled: keeping original GELU")
     export_encoders_to_onnx(clip_model, output_dir_name)
 
     if checkpoint_path:
