@@ -108,6 +108,41 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
 
 QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_encodings`) and are auto-detected on `--resume`.
 
+## MLP Reconstruction (GELU → ReLU)
+
+Replaces all MLP GELU activations with ReLU via layer-by-layer knowledge distillation, without quantization. Based on APHQ-ViT (CVPR 2025). Speeds up inference ~10–20% with <0.5% accuracy loss.
+
+```bash
+# Full reconstruction on pretrained S0 (~2 hours, 32 blocks)
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S0 \
+    --n-calib 1024 --n-iters 20000 \
+    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt
+
+# On top of a fine-tuned checkpoint
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S2 \
+    --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt \
+    --output checkpoints/MobileCLIP2-S2_mlp_relu.pt
+
+# Evaluate reconstructed model
+python mlp_reconstruction/run.py eval \
+    --checkpoint-path checkpoints/MobileCLIP2-S0_mlp_relu.pt --k 10
+
+# Resume after crash
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S0 \
+    --resume-from checkpoints/MobileCLIP2-S0_mlp_relu.pt.tmp \
+    --skip-to visual[s1b0] \
+    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt
+```
+
+Reconstruction proceeds **block by block** (serial). Each block: collect calibration activations → replace GELU with ReLU → distill (`L_Direct + 2×L_Clamp`) → save intermediate checkpoint (`.tmp`). Calibration data is read from `build_datasets/data/vg_llm_contrastive.jsonl`.
+
+Key options: `--n-calib` (default 1024), `--n-iters` (default 20000), `--lr` (default 1e-3), `--aph-mode uniform|magnitude`.
+
+Block counts: S0 = 32 (12 text + 20 visual), S2 = 56, B = 24.
+
 ## `eval_remote.py` Modes
 
 | Mode  | Arguments                         | Description                                                  |
