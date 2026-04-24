@@ -27,7 +27,7 @@ def compile_model(model, name, device, input_specs) -> str:
         name=name,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io",
+        options="--target_runtime qnn_dlc --truncate_64bit_io --force_channel_last_input image",
     )
     compile_job.modify_sharing(add_emails=["lowpowervision@gmail.com"])
     print(f"Job {compile_job.job_id} shared with lowpowervision@gmail.com")
@@ -47,7 +47,7 @@ def main():
     model_name = args.model_name
     postfix = args.postfix
 
-    # --- Configuration ---
+    #· --- Configuration ---
     ONNX_DIR = f"exported_{model_name}_onnx"
     # ---------------------
 
@@ -96,18 +96,18 @@ def main():
             target_device,
             {"image": (1, 3, 224, 224)},
         )
-        txt_compile_future = executor.submit(
-            compile_model,
-            onnx_txt_model,
-            model_name + f"_text_encoder{postfix}",
-            target_device,
-            {"text": ((1, 77), "int64")},
-        )
+        # txt_compile_future = executor.submit(
+        #     compile_model,
+        #     onnx_txt_model,
+        #     model_name + f"_text_encoder{postfix}",
+        #     target_device,
+        #     {"text": ((1, 77), "int64")},
+        # )
         img_id = img_compile_future.result()
-        txt_id = txt_compile_future.result()
+        # txt_id = txt_compile_future.result()
 
     print(f"Image compilation job ID: {img_id}")
-    print(f"Text compilation job ID: {txt_id}")
+    # print(f"Text compilation job ID: {txt_id}")
 
     # Wait for both compile jobs to finish, then submit profile jobs in parallel
     print("\nWaiting for compilation and submitting profiling jobs to QAI Hub...")
@@ -127,11 +127,11 @@ def main():
         img_profile_future = executor.submit(
             _wait_and_profile, img_id, model_name + f"_image_encoder{postfix}"
         )
-        txt_profile_future = executor.submit(
-            _wait_and_profile, txt_id, model_name + f"_text_encoder{postfix}"
-        )
+        # txt_profile_future = executor.submit(
+        #     _wait_and_profile, txt_id, model_name + f"_text_encoder{postfix}"
+        # )
         img_profile_id = img_profile_future.result()
-        txt_profile_id = txt_profile_future.result()
+        # txt_profile_id = txt_profile_future.result()
 
     print("Profiling jobs submitted for both models.")
 
@@ -140,9 +140,9 @@ def main():
             "model_name": model_name,
             "postfix": postfix,
             "image_compile_id": img_id,
-            "text_compile_id": txt_id,
+            # "text_compile_id": txt_id,
             "image_profile_id": img_profile_id,
-            "text_profile_id": txt_profile_id,
+            # "text_profile_id": txt_profile_id,
         }
         with open(args.ids_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

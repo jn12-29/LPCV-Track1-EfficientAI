@@ -37,7 +37,7 @@ if [ "${mode}" == "ptq" ]; then
     --output-suffix "${output_postfix}" \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl \
     --image-base-dir ./ \
-    --calib-size 10 \
+    --calib-size 1000 \
     --val-size 100 \
     --seed 42 \
     --calib-method percentile \
@@ -62,7 +62,8 @@ python pipeline/eval_remote.py \
   --calib-size 1000 \
   --val-size 100 \
   --seed 42 \
-  --k 7
+  --k 7 \
+  --image-channel-last
 
 # python pipeline/eval_remote.py \
 #   --model-name MobileCLIP2-B \

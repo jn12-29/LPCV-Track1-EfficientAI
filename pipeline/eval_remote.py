@@ -42,13 +42,14 @@ TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
 
 DEFAULT_IMAGE_DATASET_ID = "d2qe36jl2"
 DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
+DEFAULT_TEXT_COMPILED_ID = "jpx7wd93g"
 
 
 # ---------------------------------------------------------------------------
 # Dataset upload
 # ---------------------------------------------------------------------------
 
-def _upload_image_dataset() -> str:
+def _upload_image_dataset(image_channel_last: bool = False) -> str:
     """Preprocess and upload the image dataset; return dataset ID."""
     print("Processing images...")
     image_names = []
@@ -60,7 +61,10 @@ def _upload_image_dataset() -> str:
     for name in image_names:
         img = Image.open(IMAGE_DIR / name)
         tensor = preprocess_image(img).unsqueeze(0)  # (1, 3, 224, 224)
-        images.append(tensor.numpy())
+        arr = tensor.numpy()
+        if image_channel_last:
+            arr = np.transpose(arr, (0, 2, 3, 1))  # (1, 224, 224, 3)
+        images.append(arr)
 
     print(f"  {len(images)} images, shape {images[0].shape}, dtype {images[0].dtype}")
     print("Uploading image dataset to QAI Hub...")
@@ -89,10 +93,12 @@ def _upload_text_dataset(model_name: str, text_dtype: str) -> str:
     return text_dataset.dataset_id
 
 
-def upload_datasets(model_name: str, text_dtype: str) -> tuple[str, str]:
+def upload_datasets(
+    model_name: str, text_dtype: str, image_channel_last: bool = False
+) -> tuple[str, str]:
     """Upload image and text datasets to QAI Hub in parallel; return their IDs."""
     with ThreadPoolExecutor(max_workers=2) as executor:
-        img_future = executor.submit(_upload_image_dataset)
+        img_future = executor.submit(_upload_image_dataset, image_channel_last)
         txt_future = executor.submit(_upload_text_dataset, model_name, text_dtype)
         img_ds_id = img_future.result()
         txt_ds_id = txt_future.result()
@@ -108,6 +114,7 @@ def build_ptq_valid_eval_data(
     seed: int,
     model_name: str,
     text_dtype: str,
+    image_channel_last: bool = False,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[list[int]]]:
     records = load_jsonl_records(jsonl_path=jsonl_path, image_base_dir=image_base_dir)
     _, val_records = split_calib_val(
@@ -121,7 +128,10 @@ def build_ptq_valid_eval_data(
     for rec in val_records:
         img = Image.open(rec["_resolved_path"]).convert("RGB")
         tensor = preprocess_image(img).unsqueeze(0)
-        images.append(tensor.numpy())
+        arr = tensor.numpy()
+        if image_channel_last:
+            arr = np.transpose(arr, (0, 2, 3, 1))  # (1, 224, 224, 3)
+        images.append(arr)
 
     all_texts: list[str] = []
     text_to_idx: dict[str, int] = {}
@@ -151,6 +161,7 @@ def upload_ptq_valid_datasets(
     seed: int,
     model_name: str,
     text_dtype: str,
+    image_channel_last: bool = False,
 ) -> tuple[str, str, list[list[int]]]:
     images, tokenized_texts, positive_indices = build_ptq_valid_eval_data(
         jsonl_path=jsonl_path,
@@ -160,6 +171,7 @@ def upload_ptq_valid_datasets(
         seed=seed,
         model_name=model_name,
         text_dtype=text_dtype,
+        image_channel_last=image_channel_last,
     )
     image_dataset = qai_hub.upload_dataset({"image": images})
     text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
@@ -220,6 +232,11 @@ def parse_args() -> argparse.Namespace:
         help="Token dtype for uploaded text dataset. Use int32 with --truncate_64bit_io compile.",
     )
     parser.add_argument("--k", type=int, default=10)
+    parser.add_argument(
+        "--image-channel-last",
+        action="store_true",
+        help="If set, transpose image input from NCHW to NHWC before dataset upload.",
+    )
     return parser.parse_args()
 
 
@@ -231,10 +248,16 @@ if __name__ == "__main__":
     positive_indices = None
 
     if (args.image_compiled_id is None or args.text_compiled_id is None) and args.ids_file:
-        with open(args.ids_file, "r", encoding="utf-8") as f:
-            ids_payload = json.load(f)
-        args.image_compiled_id = ids_payload.get("image_compile_id")
-        args.text_compiled_id = ids_payload.get("text_compile_id")
+        try:
+            with open(args.ids_file, "r", encoding="utf-8") as f:
+                ids_payload = json.load(f)
+            args.image_compiled_id = ids_payload.get("image_compile_id")
+            args.text_compiled_id = ids_payload.get("text_compile_id")
+        except Exception as e:
+            print(f"Warning: failed to read ids file '{args.ids_file}': {e}")
+
+    if args.text_compiled_id is None:
+        args.text_compiled_id = DEFAULT_TEXT_COMPILED_ID
 
     if use_existing:
         tasks = {"text": args.text_inference_id, "image": args.image_inference_id}
@@ -275,11 +298,13 @@ if __name__ == "__main__":
                     seed=args.seed,
                     model_name=args.model_name,
                     text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
                 )
             else:
                 img_ds_id, txt_ds_id = upload_datasets(
                     model_name=args.model_name,
                     text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
                 )
             print()
         else:
@@ -294,6 +319,7 @@ if __name__ == "__main__":
                     seed=args.seed,
                     model_name=args.model_name,
                     text_dtype=args.text_dtype,
+                    image_channel_last=args.image_channel_last,
                 )
 
         if args.save_dataset_ids_file:
