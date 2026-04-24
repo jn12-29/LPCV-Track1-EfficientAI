@@ -42,22 +42,22 @@ fi
 #   --batch-size 1 \
 #   --model-name MobileCLIP2-B
 
-# if [ "${mode}" == "ptq" ]; then
-#     python ptq/quantize.py \
-#     --onnx-dir exported_MobileCLIP2-B_onnx \
-#     --output-suffix "${output_postfix}" \
-#     --ptq-scheme "${ptq_scheme}" \
-#     --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl \
-#     --image-base-dir ./ \
-#     --calib-size 10 \
-#     --val-size 100 \
-#     --seed 42 \
-#     --no-quantize-text \
-#     --op-types "${op_types}" \
-#     --model-name MobileCLIP2-B
-# fi
-
 if [ "${mode}" == "ptq" ]; then
+    python ptq/quantize.py \
+    --onnx-dir exported_MobileCLIP2-B_onnx \
+    --output-suffix "${output_postfix}" \
+    --ptq-scheme "${ptq_scheme}" \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl \
+    --image-base-dir ./ \
+    --calib-size 10 \
+    --val-size 100 \
+    --seed 42 \
+    --no-quantize-text \
+    --op-types "${op_types}" \
+    --model-name MobileCLIP2-B
+fi
+
+if [ "${mode}" == "ptq_2" ]; then
   python vit/export_image.py \
     --onnx-path "exported_MobileCLIP2-B_onnx/image_encoder.onnx" \
     --model-name MobileCLIP2-B \
@@ -79,13 +79,7 @@ fi
 
 python pipeline/eval_remote.py \
   --model-name MobileCLIP2-B \
-  --image-compiled-id "$(python - <<'PY'
-import json
-with open("'"${compile_ids_file}"'", "r", encoding="utf-8") as f:
-    print(json.load(f)["image_compile_id"])
-PY
-)" \
-  --text-compiled-id "${fixed_text_compile_id}" \
+  --ids-file "${compile_ids_file}" \
   --upload-dataset \
   --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl  \
   --image-base-dir ./ \

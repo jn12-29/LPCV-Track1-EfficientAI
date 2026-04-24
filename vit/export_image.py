@@ -11,6 +11,7 @@ import qai_hub as hub
 from PIL import Image
 from qai_hub_models import Precision, TargetRuntime
 from qai_hub_models.configs.tool_versions import ToolVersions
+from qai_hub_models.utils.args import export_parser
 
 import sys
 sys.path.append("/mnt/sata1/charles/LPCV-Track1-EfficientAI")
@@ -19,8 +20,6 @@ from ptq.dataset import load_jsonl_records, split_calib_val
 from utils.preprocess import preprocess_image
 from vit.export import (
     compile_model,
-    download_model,
-    inference_model,
     link_model,
     profile_model,
     quantize_model,  # imported intentionally; see note in _quantize_for_mobileclip
@@ -78,24 +77,53 @@ class MobileClipImageAdapter:
         return
 
 
+class MobileCLIP2BImageModelConfig:
+    """Parser-only model config for MobileCLIP2-B image export CLI."""
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_name: str = "MobileCLIP2-B",
+    ) -> "MobileCLIP2BImageModelConfig":
+        _ = model_name
+        return cls()
+
+
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="MobileCLIP2-B image-only export pipeline via vit.export helpers")
-    p.add_argument("--onnx-path", type=str, default="exported_MobileCLIP2-B_onnx/image_encoder.onnx")
-    p.add_argument("--model-name", type=str, default="MobileCLIP2-B")
-    p.add_argument("--device", type=str, default="XR2 Gen 2 (Proxy)")
-    p.add_argument("--precision", type=str, default="w8a8", choices=["float", "w8a8", "w8a16"])
-    p.add_argument(
-        "--target-runtime",
-        type=str,
-        default="qnn_dlc",
-        choices=["onnx", "qnn_dlc", "qnn_context_binary", "precompiled_qnn_onnx", "tflite"],
+    supported_precision_runtimes: dict[Precision, list[TargetRuntime]] = {
+        Precision.float: [
+            TargetRuntime.TFLITE,
+            TargetRuntime.QNN_DLC,
+            TargetRuntime.QNN_CONTEXT_BINARY,
+            TargetRuntime.ONNX,
+            TargetRuntime.PRECOMPILED_QNN_ONNX,
+        ],
+        Precision.w8a8_mixed_int16: [
+            TargetRuntime.ONNX,
+        ],
+        Precision.w8a16: [
+            TargetRuntime.QNN_DLC,
+            TargetRuntime.QNN_CONTEXT_BINARY,
+            TargetRuntime.ONNX,
+            TargetRuntime.PRECOMPILED_QNN_ONNX,
+        ],
+        Precision.w8a8: [
+            TargetRuntime.TFLITE,
+            TargetRuntime.QNN_DLC,
+            TargetRuntime.QNN_CONTEXT_BINARY,
+            TargetRuntime.ONNX,
+            TargetRuntime.PRECOMPILED_QNN_ONNX,
+        ],
+    }
+    # Keep CLI behavior aligned with vit/export.py.
+    p = export_parser(
+        model_cls=MobileCLIP2BImageModelConfig,
+        export_fn=export_model,
+        supported_precision_runtimes=supported_precision_runtimes,
+        default_export_device="XR2 Gen 2 (Proxy)",
     )
-    p.add_argument("--compile-options", type=str, default="--truncate_64bit_io")
-    p.add_argument("--profile-options", type=str, default="--max_profiler_iterations 100")
-    p.add_argument("--skip-profiling", action="store_true")
-    p.add_argument("--skip-inferencing", action="store_true")
-    p.add_argument("--skip-downloading", action="store_true")
-    p.add_argument("--output-dir", type=str, default="export_assets_mobileclip_image")
+    # Extra args required by this image-only ONNX pipeline.
+    p.add_argument("--onnx-path", type=str, default="exported_MobileCLIP2-B_onnx/image_encoder.onnx")
     p.add_argument("--ids-file", type=str, default="ptq_compile_ids.json")
     p.add_argument("--jsonl-path", type=str, default="./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl")
     p.add_argument("--image-base-dir", type=str, default="./")
@@ -107,6 +135,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _to_precision(name: str) -> Precision:
+    if isinstance(name, Precision):
+        return name
     if name == "float":
         return Precision.float
     if name == "w8a8":
@@ -117,6 +147,8 @@ def _to_precision(name: str) -> Precision:
 
 
 def _to_runtime(name: str) -> TargetRuntime:
+    if isinstance(name, TargetRuntime):
+        return name
     for rt in TargetRuntime:
         if rt.value == name:
             return rt
@@ -129,11 +161,22 @@ def _build_calibration_dataset(
     image_base_dir: str,
     input_name: str,
     calib_size: int,
+    num_calibration_samples: int | None,
     val_size: int,
     seed: int,
 ) -> hub.Dataset:
     records = load_jsonl_records(jsonl_path=jsonl_path, image_base_dir=image_base_dir)
-    calib_records, _ = split_calib_val(records, calib_size=calib_size, val_size=val_size, seed=seed)
+    effective_calib_size = (
+        num_calibration_samples if num_calibration_samples is not None else calib_size
+    )
+    calib_records, _ = split_calib_val(
+        records,
+        calib_size=effective_calib_size,
+        val_size=val_size,
+        seed=seed,
+    )
+    if num_calibration_samples is not None:
+        calib_records = calib_records[:effective_calib_size]
     samples: list[np.ndarray] = []
     for rec in calib_records:
         img = Image.open(rec["_resolved_path"]).convert("RGB")
@@ -147,7 +190,13 @@ def _quantize_for_mobileclip(
     adapter: MobileClipImageAdapter,
     model_name: str,
     precision: Precision,
-    args: argparse.Namespace,
+    jsonl_path: str,
+    image_base_dir: str,
+    calib_size: int,
+    num_calibration_samples: int | None,
+    val_size: int,
+    seed: int,
+    quantize_options: str,
 ) -> hub.Model:
     if precision == Precision.float:
         return source_onnx_model
@@ -157,12 +206,13 @@ def _quantize_for_mobileclip(
     # explicit JSONL-based calibration samples, so direct submit_quantize_job is required.
     _ = quantize_model
     dataset = _build_calibration_dataset(
-        jsonl_path=args.jsonl_path,
-        image_base_dir=args.image_base_dir,
+        jsonl_path=jsonl_path,
+        image_base_dir=image_base_dir,
         input_name=adapter.input_name,
-        calib_size=args.calib_size,
-        val_size=args.val_size,
-        seed=args.seed,
+        calib_size=calib_size,
+        num_calibration_samples=num_calibration_samples,
+        val_size=val_size,
+        seed=seed,
     )
     if precision == Precision.w8a16:
         act_dtype = hub.QuantizeDtype.INT16
@@ -174,6 +224,7 @@ def _quantize_for_mobileclip(
         weights_dtype=hub.QuantizeDtype.INT8,
         activations_dtype=act_dtype,
         name=f"{model_name}_{str(precision)}_quantize",
+        options=quantize_options,
     )
     qjob.wait()
     if qjob.get_status().failure:
@@ -184,9 +235,71 @@ def _quantize_for_mobileclip(
     return quantized
 
 
-def main() -> None:
-    args = _parse_args()
-    onnx_path = Path(args.onnx_path)
+def export_model(
+    device: hub.Device,
+    precision: Precision = Precision.float,
+    target_runtime: TargetRuntime = TargetRuntime.QNN_DLC,
+    compile_options: str = "--truncate_64bit_io",
+    quantize_options: str = "",
+    profile_options: str = "--max_profiler_iterations 100",
+    skip_compiling: bool = False,
+    skip_profiling: bool = False,
+    model_name: str = "MobileCLIP2-B",
+    onnx_path: str = "exported_MobileCLIP2-B_onnx/image_encoder.onnx",
+    ids_file: str = "ptq_compile_ids.json",
+    jsonl_path: str = "./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl",
+    image_base_dir: str = "./",
+    calib_size: int = 10,
+    num_calibration_samples: int | None = None,
+    val_size: int = 100,
+    seed: int = 42,
+    text_compile_id: str = "jp01nr62g",
+    **additional_model_kwargs: Any,
+) -> None:
+    """
+    Export MobileCLIP2-B image encoder via ONNX->QAI Hub pipeline.
+
+    Parameters
+    ----------
+    device
+        Device for export/compile/profile (for example, hub.Device("XR2 Gen 2 (Proxy)")).
+    precision
+        Quantization precision. Use float to skip quantization.
+    target_runtime
+        Runtime target for compile/link.
+    compile_options
+        Additional options passed to compile submission.
+    quantize_options
+        Additional options passed to quantize submission.
+    profile_options
+        Additional options passed to profile submission.
+    skip_compiling
+        If set, does compiling after optional quantization.
+    skip_profiling
+        If set, skips profiling on target device.
+    model_name
+        Base model name used in job naming and metadata payload.
+    onnx_path
+        Path to image encoder ONNX model.
+    ids_file
+        Output JSON path for compile IDs.
+    jsonl_path
+        JSONL dataset path used to build calibration samples.
+    image_base_dir
+        Base directory for resolving image paths in JSONL records.
+    calib_size
+        Calibration split size used when num_calibration_samples is not provided.
+    num_calibration_samples
+        Optional explicit calibration sample count override.
+    val_size
+        Validation split size used by split helper.
+    seed
+        Random seed for calibration/validation split.
+    text_compile_id
+        Text compile ID written alongside image compile ID in ids_file.
+    """
+    _ = additional_model_kwargs
+    onnx_path = Path(onnx_path)
     if not onnx_path.exists():
         raise FileNotFoundError(f"Missing ONNX: {onnx_path}")
 
@@ -195,29 +308,42 @@ def main() -> None:
     input_name = model_proto.graph.input[0].name
 
     adapter = MobileClipImageAdapter(input_name=input_name)
-    device = hub.Device(args.device)
-    precision = _to_precision(args.precision)
-    target_runtime = _to_runtime(args.target_runtime)
-    model_name = f"{args.model_name}_image"
+    device = device if isinstance(device, hub.Device) else hub.Device(device)
+    precision = _to_precision(precision)
+    target_runtime = _to_runtime(target_runtime)
+    model_name = f"{model_name}_image"
 
     src_model = hub.upload_model(str(onnx_path), name=f"{model_name}_onnx")
-    quantized_or_source = _quantize_for_mobileclip(
-        source_onnx_model=src_model,
-        adapter=adapter,
-        model_name=model_name,
-        precision=precision,
-        args=args,
-    )
+    quantized_model: hub.Model | None = None
+    if precision != Precision.float:
+        quantized_model = _quantize_for_mobileclip(
+            source_onnx_model=src_model,
+            adapter=adapter,
+            model_name=model_name,
+            precision=precision,
+            jsonl_path=jsonl_path,
+            image_base_dir=image_base_dir,
+            calib_size=calib_size,
+            num_calibration_samples=num_calibration_samples,
+            val_size=val_size,
+            seed=seed,
+            quantize_options=quantize_options,
+        )
 
+    if skip_compiling:
+        print("Skipping compile due to --skip-compiling.")
+        return
+
+    # Keep the compile call style aligned with vit.export.export_model().
     compile_job = compile_model(
-        model=adapter,
-        model_name=f"{model_name}_{precision.value}",
-        device=device,
-        target_runtime=target_runtime,
-        precision=precision,
-        source_model=quantized_or_source,
+        adapter,
+        f"{model_name}_{str(precision)}",
+        device,
+        target_runtime,
+        precision,
+        source_model=quantized_model or src_model,
         input_spec=adapter.get_input_spec(),
-        extra_options=args.compile_options,
+        extra_options=compile_options,
     )
     compiled_model = compile_job.get_target_model()
     if compiled_model is None:
@@ -229,7 +355,7 @@ def main() -> None:
         link_job = link_model(
             compiled_model=compiled_model,
             device=device,
-            model_name=f"{model_name}_{precision.value}",
+            model_name=f"{model_name}_{str(precision)}",
             model=adapter,
             target_runtime=target_runtime,
         )
@@ -238,59 +364,29 @@ def main() -> None:
             raise RuntimeError(f"Link failed: {link_job.url}")
         target_model = linked
 
-    profile_job = None
-    if not args.skip_profiling:
-        profile_job = profile_model(
-            model_name=f"{model_name}_{precision.value}",
+    if not skip_profiling:
+        profile_model(
+            model_name=f"{model_name}_{str(precision)}",
             device=device,
-            options=args.profile_options,
+            options=profile_options,
             target_model=target_model,
-        )
-
-    inference_job = None
-    if not args.skip_inferencing:
-        inference_job = inference_model(
-            inputs=adapter.sample_inputs(adapter.get_input_spec()),
-            model_name=f"{model_name}_{precision.value}",
-            device=device,
-            options=args.profile_options,
-            target_model=target_model,
-        )
-
-    tool_versions = None
-    if profile_job is not None and profile_job.wait():
-        tool_versions = ToolVersions.from_job(profile_job)
-    elif inference_job is not None and inference_job.wait():
-        tool_versions = ToolVersions.from_job(inference_job)
-    elif compile_job.wait():
-        tool_versions = ToolVersions.from_job(compile_job)
-
-    download_path = None
-    if (not args.skip_downloading) and (tool_versions is not None):
-        download_path = download_model(
-            output_dir=Path(args.output_dir) / f"{model_name}_{precision.value}_{target_runtime.value}",
-            model=adapter,
-            runtime=target_runtime,
-            precision=precision,
-            tool_versions=tool_versions,
-            target_model=target_model,
-            model_name=model_name,
-            zip_assets=False,
         )
 
     payload = {
-        "model_name": args.model_name,
-        "precision": args.precision,
-        "target_runtime": args.target_runtime,
+        "model_name": model_name.removesuffix("_image"),
+        "precision": str(precision),
+        "target_runtime": target_runtime.value,
         "image_compile_id": compile_job.job_id,
-        "image_profile_id": profile_job.job_id if profile_job else None,
-        "image_inference_id": inference_job.job_id if inference_job else None,
-        "text_compile_id": args.text_compile_id,
-        "download_path": str(download_path) if download_path else None,
+        "text_compile_id": text_compile_id,
     }
-    with open(args.ids_file, "w", encoding="utf-8") as f:
+    with open(ids_file, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"Saved ids to {args.ids_file}")
+    print(f"Saved ids to {ids_file}")
+
+
+def main() -> None:
+    args = _parse_args()
+    export_model(**vars(args))
 
 
 if __name__ == "__main__":
