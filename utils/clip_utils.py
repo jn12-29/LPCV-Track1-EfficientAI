@@ -14,6 +14,8 @@ def _load_clip(
     checkpoint_path: Optional[str] = None,
     pretrained: Optional[str] = None,
     qat_config: Optional["QATConfig"] = None,
+    relu_image: bool = False,
+    relu_text: bool = False,
 ) -> Tuple:
     """Load a CLIP model, optionally from a fine-tuned or QAT checkpoint.
 
@@ -25,13 +27,20 @@ def _load_clip(
       - Regular checkpoint (no "qat_enabled" key): weights loaded before QAT wrap.
       - QAT checkpoint ("qat_enabled": True): weights and encodings loaded after
         QAT wrap so the reparameterized structure matches.
+      - MLP-reconstruction checkpoint ("relu_blocks" key): ReLU structure applied
+        before weight loading; relu_image / relu_text flags set accordingly.
 
     Args:
         model_name: open_clip model name, e.g. 'MobileCLIP2-S0'.
         device: target device.
-        checkpoint_path: path to a .pt file (regular or QAT, auto-detected).
+        checkpoint_path: path to a .pt file (regular, QAT, or MLP-reconstruction,
+            auto-detected).
         pretrained: explicit pretrained tag; auto-selected when None.
         qat_config: QATConfig instance; when provided the model is QAT-wrapped.
+        relu_image: replace GELU with ReLU in all visual-encoder MLP blocks.
+            Overridden by relu_blocks metadata when checkpoint_path is provided.
+        relu_text: replace GELU with ReLU in all text-encoder MLP blocks.
+            Overridden by relu_blocks metadata when checkpoint_path is provided.
 
     Returns:
         (model, preprocess, tokenizer)
@@ -65,9 +74,27 @@ def _load_clip(
     qat_encodings = None
 
     if checkpoint_path:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         is_qat_ckpt = isinstance(checkpoint, dict) and checkpoint.get("qat_enabled", False)
+        is_relu_ckpt = isinstance(checkpoint, dict) and "relu_blocks" in checkpoint
         state_dict = checkpoint.get("model_state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+
+        # MLP-reconstruction checkpoint: apply ReLU structure before loading weights.
+        if is_relu_ckpt:
+            from mlp_reconstruction.mlp_blocks import apply_relu_blocks
+            relu_labels = checkpoint["relu_blocks"]
+            apply_relu_blocks(model, relu_labels)
+            relu_image = any(lbl.startswith("visual[") for lbl in relu_labels)
+            relu_text = any(lbl.startswith("text[") for lbl in relu_labels)
+            print(f"Detected MLP-reconstruction checkpoint: {len(relu_labels)} ReLU blocks "
+                  f"(image={relu_image}, text={relu_text})")
+        elif relu_image or relu_text:
+            # Regular checkpoint + explicit ReLU flags: apply structure before weight load.
+            from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu
+            for info in iter_mlp_blocks(model):
+                if (info.encoder == "visual" and relu_image) or (info.encoder == "text" and relu_text):
+                    replace_gelu_with_relu(info)
+            print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
 
         if is_qat_ckpt:
             # Defer loading until after QAT wrap (structure is reparameterized).
@@ -82,6 +109,14 @@ def _load_clip(
                 print(f"  Missing keys: {len(missing)}")
             if unexpected:
                 print(f"  Unexpected keys: {len(unexpected)}")
+    else:
+        # No checkpoint: apply ReLU from explicit flags.
+        if relu_image or relu_text:
+            from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu
+            for info in iter_mlp_blocks(model):
+                if (info.encoder == "visual" and relu_image) or (info.encoder == "text" and relu_text):
+                    replace_gelu_with_relu(info)
+            print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
 
     model.eval().to(device)
 
