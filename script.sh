@@ -131,3 +131,43 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
     --checkpoint-path ./checkpoints/<qat_run>/MobileCLIP2-B_finetuned.pt \
     --output-postfix _qat_w8a8
 
+# ── MLP Reconstruction (GELU → ReLU + distillation) ───────────────────────────
+
+# Run full reconstruction for S0 pretrained (~2 hours, 32 blocks × 20000 iters)
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S0 \
+    --n-calib 1024 --n-iters 20000 \
+    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt \
+    --device cuda --log-every 500
+
+# Run on top of a fine-tuned checkpoint
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S2 \
+    --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt \
+    --n-calib 1024 --n-iters 20000 \
+    --output checkpoints/MobileCLIP2-S2_mlp_relu.pt \
+    --device cuda
+
+# Resume after crash (load .tmp checkpoint, restart from a specific block)
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S0 \
+    --resume-from checkpoints/MobileCLIP2-S0_mlp_relu.pt.tmp \
+    --skip-to visual[s1b0] \
+    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt \
+    --device cuda
+
+# Eval reconstructed model on sample_data (torch)
+python mlp_reconstruction/run.py eval \
+    --checkpoint-path checkpoints/MobileCLIP2-S0_mlp_relu.pt --k 10
+
+# Export reconstructed model to ONNX (first load checkpoint into a temp script,
+# or use eval_local.py after patching _load_clip to call load_reconstructed_model)
+# Typical approach: load via load_reconstructed_model(), then export_encoders_to_onnx()
+
+# Smoke test (64 samples, 200 iters, only first 2 blocks)
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-S0 \
+    --n-calib 64 --n-iters 200 --log-every 50 \
+    --output /tmp/smoke_test.pt --device cuda \
+    --skip-to visual[s0b1]
+

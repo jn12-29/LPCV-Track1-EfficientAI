@@ -98,6 +98,18 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 3. Training loop unchanged; `save_checkpoint(sim=sim)` saves QAT state
 4. ONNX export (`--export-onnx`): extracts base weights from QuantSim model into fresh reparameterized model, exports via `export_encoders_to_onnx()`
 
+### MLP Reconstruction (`mlp_reconstruction/`)
+
+Replaces all MLP GELU activations with ReLU and recovers accuracy via layer-by-layer distillation (APHQ-ViT, CVPR 2025). No quantization. Entry point: `mlp_reconstruction/run.py train/eval`.
+
+- **`mlp_reconstruction/mlp_blocks.py`** — `MLPBlockInfo` dataclass; `iter_mlp_blocks(model)` enumerates all text + visual MLP blocks (32 for S0, 56 for S2, 24 for B); `replace_gelu_with_relu(info)`; `apply_relu_blocks(model, relu_labels)` restores ReLU structure before loading a reconstructed checkpoint.
+- **`mlp_reconstruction/calibrate.py`** — `VGCalibrationLoader(jsonl_path, project_root, tokenizer, n_calib, batch_size)` reads image–text pairs from `vg_llm_contrastive.jsonl`; `collect_mlp_io(model, info, image_batches, text_batches, device)` captures per-block input X and GELU output O via forward hooks (hook on `mlp.conv` for FastVit, pre-hook on `mlp` otherwise).
+- **`mlp_reconstruction/aph.py`** — `compute_aph_weights(O_GELU, mode='uniform')` returns H_bar importance weights; shape (D,) for text/ViT, (C,) for FastVit.
+- **`mlp_reconstruction/distill.py`** — `distill_mlp(model, info, X_all, O_all, ...)` replaces GELU with ReLU in-place and optimizes fc1/fc2 via `L_Direct + 2×L_Clamp` (Adam, per-batch 99th-percentile clamp threshold); `verify_reconstruction(...)` returns mean cosine similarity.
+- **`mlp_reconstruction/run.py`** — CLI: `train` (serial block-by-block distillation with crash recovery via `--resume-from` + `--skip-to`) and `eval` (Recall@K via `RetrievalEvalDataset`). `load_reconstructed_model(path, device)` rebuilds ReLU structure then loads state dict.
+
+Checkpoint format: `{'model_state_dict': ..., 'model_name': ..., 'relu_blocks': [list of labels]}`. GELU and ReLU have no parameters so state_dict is identical in size — `relu_blocks` is the only structural hint needed on reload.
+
 ### Dataset builder (`build_datasets/`)
 
 Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Outputs flat contrastive JSONL records consumed directly by `train/finetune.py` and `train/analyze_hard_negatives.py`. Config and prompts are in `DEFINE.py`; the builder script is `vlm_dataset_builder.py`.
