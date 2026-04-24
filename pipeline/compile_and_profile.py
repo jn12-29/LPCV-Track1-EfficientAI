@@ -98,7 +98,7 @@ def main():
     # Submit compilation jobs in parallel
     print("\nSubmitting compilation jobs to QAI Hub...")
     # Only enable force_channel_last for quantized image variants.
-    image_force_channel_last = "image" if postfix else None
+    image_force_channel_last = "image" 
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         img_compile_future = executor.submit(
