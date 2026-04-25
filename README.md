@@ -115,25 +115,26 @@ Replaces all MLP GELU activations with ReLU via layer-by-layer knowledge distill
 ```bash
 # Full reconstruction on pretrained S0 (~2 hours, 32 blocks)
 # Output auto-generated: checkpoints/{model}__{config}__{timestamp}/mlp_relu.pt
-python mlp_reconstruction/run.py train \
+# Recall@K eval runs automatically at the end (--skip-eval to disable)
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-S0 --gpu-id 2 \
     --n-calib 1024 --n-iters 20000
 
 # On top of a fine-tuned checkpoint
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-S2 --gpu-id 2 \
     --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt
 
-# Evaluate reconstructed model
-python mlp_reconstruction/run.py eval \
-    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt --k 10
+# Evaluate reconstructed model separately
+python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10 \
+    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
 # Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
 python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
     --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
 # Resume after crash
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-S0 --gpu-id 2 \
     --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
     --skip-to visual[s1b0]

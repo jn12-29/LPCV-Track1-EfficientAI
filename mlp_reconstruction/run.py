@@ -130,11 +130,6 @@ def _plot_reconstruction_metrics(
     print(f"Plot saved: {out_path}")
 
 
-# ---------------------------------------------------------------------------
-# Subcommands
-# ---------------------------------------------------------------------------
-
-
 def cmd_train(args: argparse.Namespace) -> None:
     from utils.clip_utils import _load_clip
     from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu
@@ -286,25 +281,23 @@ def cmd_train(args: argparse.Namespace) -> None:
 
     _plot_reconstruction_metrics(metrics_history, output_path.parent)
 
+    if not args.skip_eval:
+        from pipeline.eval_local import run_clip_retrieval_eval
 
-def cmd_eval(args: argparse.Namespace) -> None:
-    from pipeline.eval_local import run_clip_retrieval_eval
-
-    device = _resolve_device(args)
-    ckpt_meta = torch.load(args.checkpoint_path, map_location="cpu", weights_only=False)
-    model_name = ckpt_meta["model_name"]
-    metrics = run_clip_retrieval_eval(
-        root_dir=args.root_dir,
-        image_to_text_csv=args.image_to_text_csv,
-        textnums_to_texts_csv=args.textnums_to_texts_csv,
-        model_name=model_name,
-        batch_size=args.batch_size,
-        k=args.k,
-        device=str(device),
-        checkpoint_path=args.checkpoint_path,
-    )
-    for name, value in metrics.items():
-        print(f"{name}: {value:.4f}")
+        log_message("=== Auto eval after training ===")
+        metrics = run_clip_retrieval_eval(
+            root_dir=args.eval_root_dir,
+            image_to_text_csv=args.eval_image_to_text_csv,
+            textnums_to_texts_csv=args.eval_textnums_to_texts_csv,
+            model_name=args.model_name,
+            batch_size=args.eval_batch_size,
+            k=args.eval_k,
+            device=str(device),
+            checkpoint_path=args.output,
+        )
+        for name, value in metrics.items():
+            log_message(f"  {name}: {value:.4f}")
+            print(f"{name}: {value:.4f}")
 
 
 # ---------------------------------------------------------------------------
@@ -314,84 +307,67 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MLP Reconstruction for MobileCLIP2")
-    sub = p.add_subparsers(dest="command", required=True)
-
-    t = sub.add_parser("train", help="Run MLP reconstruction distillation")
-    t.add_argument("--model-name", default="MobileCLIP2-S0")
-    t.add_argument("--checkpoint-path", default=None)
-    t.add_argument(
-        "--calib-jsonl", default="build_datasets/data/vg_llm_contrastive.jsonl"
-    )
-    t.add_argument("--project-root", default=".")
-    t.add_argument("--n-calib", type=int, default=1024)
-    t.add_argument("--calib-batch-size", type=int, default=32)
-    t.add_argument("--output-dir", default="checkpoints")
-    t.add_argument(
+    p.add_argument("--model-name", default="MobileCLIP2-S0")
+    p.add_argument("--checkpoint-path", default=None)
+    p.add_argument("--calib-jsonl", default="build_datasets/data/vg_llm_contrastive.jsonl")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--n-calib", type=int, default=1024)
+    p.add_argument("--calib-batch-size", type=int, default=32)
+    p.add_argument("--output-dir", default="checkpoints")
+    p.add_argument(
         "--output",
         default=None,
         help="Full output path. If omitted, auto-generated as "
         "{output-dir}/{model}__{config}__{timestamp}/mlp_relu.pt",
     )
-    t.add_argument(
-        "--gpu-id", type=int, default=None, metavar="N", help="GPU index (e.g. 2)"
-    )
-    t.add_argument(
+    p.add_argument("--gpu-id", type=int, default=None, metavar="N", help="GPU index (e.g. 2)")
+    p.add_argument(
         "--no-relu-image",
         action="store_true",
         help="Skip visual-encoder reconstruction (default: reconstruct both)",
     )
-    t.add_argument(
+    p.add_argument(
         "--no-relu-text",
         action="store_true",
         help="Skip text-encoder reconstruction (default: reconstruct both)",
     )
-    t.add_argument("--lr", type=float, default=1e-3)
-    t.add_argument("--batch-size", type=int, default=32)
-    t.add_argument("--n-iters", type=int, default=20000)
-    t.add_argument(
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--n-iters", type=int, default=20000)
+    p.add_argument(
         "--alpha",
         type=float,
         default=0.0,
         help="L_Clamp loss weight (0=disable; use >0 only when targeting QAT/quantization)",
     )
-    t.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
-    t.add_argument("--log-every", type=int, default=500)
-    t.add_argument(
+    p.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
+    p.add_argument("--log-every", type=int, default=500)
+    p.add_argument(
         "--early-stop-patience",
         type=int,
-        default=3,
+        default=5,
         metavar="N",
         help="Stop after N log-intervals without improvement (0=disable)",
     )
-    t.add_argument(
+    p.add_argument(
         "--early-stop-delta",
         type=float,
         default=5e-4,
         help="Min relative EMA-loss improvement to reset patience counter",
     )
-    t.add_argument("--skip-to", default=None)
-    t.add_argument("--resume-from", default=None)
-
-    e = sub.add_parser("eval", help="Evaluate a reconstructed checkpoint")
-    e.add_argument("--checkpoint-path", required=True)
-    e.add_argument("--root-dir", default="sample_data")
-    e.add_argument("--image-to-text-csv", default="sample_data/img_list.csv")
-    e.add_argument("--textnums-to-texts-csv", default="sample_data/txt_list.csv")
-    e.add_argument("--k", type=int, default=10)
-    e.add_argument("--batch-size", type=int, default=64)
-    e.add_argument(
-        "--gpu-id", type=int, default=None, metavar="N", help="GPU index (e.g. 2)"
-    )
-
+    p.add_argument("--skip-to", default=None)
+    p.add_argument("--resume-from", default=None)
+    p.add_argument("--skip-eval", action="store_true", help="Skip auto eval after training")
+    p.add_argument("--eval-root-dir", default="sample_data")
+    p.add_argument("--eval-image-to-text-csv", default="sample_data/img_list.csv")
+    p.add_argument("--eval-textnums-to-texts-csv", default="sample_data/txt_list.csv")
+    p.add_argument("--eval-k", type=int, default=10)
+    p.add_argument("--eval-batch-size", type=int, default=64)
     return p.parse_args()
 
 
 def main() -> None:
-    args = parse_args()
-    if args.command == "train":
-        cmd_train(args)
-    elif args.command == "eval":
-        cmd_eval(args)
+    cmd_train(parse_args())
 
 
 if __name__ == "__main__":

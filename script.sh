@@ -37,7 +37,7 @@ python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
 CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt
 
-CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt
+CUDA_VISIBLE_DEVICES=7 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_img__20260425_220823/mlp_relu.pt
 
 # eval local (onnx) do not support yet
 python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
@@ -141,29 +141,30 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 
 # ── MLP Reconstruction (GELU → ReLU + distillation) ───────────────────────────
 
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 4 \
     --n-calib 1024 --n-iters 20000 --log-every 500 --aph-mode magnitude
 
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 7 \
     --n-calib 1024 --n-iters 20000 --log-every 500 --aph-mode magnitude --no-relu-text
 
 # Run on top of a fine-tuned checkpoint
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 2 \
     --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt \
     --n-calib 1024 --n-iters 20000
 
 # Resume after crash (load .tmp checkpoint, restart from a specific block)
-python mlp_reconstruction/run.py train \
+python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 2 \
     --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
     --skip-to visual[s1b0]
 
 # Eval reconstructed model on sample_data (torch)
-python mlp_reconstruction/run.py eval --gpu-id 2 \
-    --checkpoint-path checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt --k 10
+python pipeline/eval_local.py --gpu-id 2 \
+    --model-name MobileCLIP2-B --k 10 \
+    --checkpoint-path checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt
 
 # Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
 python pipeline/export_onnx.py --model-name MobileCLIP2-B \
