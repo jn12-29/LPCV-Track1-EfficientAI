@@ -92,6 +92,7 @@ def run_clip_retrieval_eval(
     device: str | None = None,
     checkpoint_path: str | None = None,
     onnx_dir: str | Path | None = None,
+    print_model: bool = False,
 ) -> Dict[str, float]:
     root_dir = Path(root_dir)
     device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -120,6 +121,8 @@ def run_clip_retrieval_eval(
         text_embeds = _encode_texts_onnx(txt_sess, tokenizer, eval_data.texts, batch_size=1)
     else:
         model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
+        if print_model:
+            print(model)
         image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size)
         text_embeds = _encode_texts_torch(model, tokenizer, eval_data.texts, device_obj, batch_size)
 
@@ -152,6 +155,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-S0_onnx). "
              "If set, uses ONNX inference instead of PyTorch.",
     )
+    parser.add_argument(
+        "--print-model", action="store_true",
+        help="Print model architecture after loading (torch mode only).",
+    )
     return parser.parse_args()
 
 
@@ -167,6 +174,7 @@ def main() -> None:
         device=args.device,
         checkpoint_path=args.checkpoint_path,
         onnx_dir=args.onnx_dir,
+        print_model=args.print_model,
     )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
