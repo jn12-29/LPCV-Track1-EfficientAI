@@ -91,13 +91,6 @@ def verify_onnx(
         )
 
 
-def replace_gelu_with_tanh_approx(model: nn.Module) -> None:
-    for parent in model.modules():
-        for name, child in parent.named_children():
-            if isinstance(child, nn.GELU) and child.approximate == "none":
-                setattr(parent, name, nn.GELU(approximate="tanh"))
-
-
 def _simplify_onnx(onnx_path: str) -> None:
     model = onnx.load(onnx_path)
     before_nodes = len(model.graph.node)
@@ -117,6 +110,33 @@ def _simplify_onnx(onnx_path: str) -> None:
         print(f"  Simplification failed (kept original): {onnx_path}")
 
 
+def _export_encoder_onnx(
+    encoder: nn.Module,
+    dummy: torch.Tensor,
+    onnx_path: str,
+    input_name: str,
+    output_name: str,
+    pt_feat: torch.Tensor,
+) -> None:
+    """Export one encoder to ONNX, simplify, and verify against PyTorch output."""
+    print(f"\nExporting to {onnx_path}...")
+    torch.onnx.export(
+        encoder.cpu(),
+        dummy.cpu(),
+        onnx_path,
+        input_names=[input_name],
+        output_names=[output_name],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+    )
+    _simplify_onnx(onnx_path)
+    verify_onnx(onnx_path, {input_name: dummy.cpu()}, pt_feat)
+
+
 def _split_clip_onnx(
     full_onnx_path: str,
     inputs: list,
@@ -128,8 +148,6 @@ def _split_clip_onnx(
 
     Determines which graph output belongs to the image vs text path by BFS from each input.
     """
-    import onnx
-
     model_proto = onnx.load(full_onnx_path)
     graph = model_proto.graph
 
@@ -177,8 +195,6 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
     import shutil
     import tempfile
 
-    import onnx
-
     os.makedirs(output_dir, exist_ok=True)
     dummy_image = torch.zeros(1, 3, 224, 224, dtype=torch.float32)
     dummy_text = torch.zeros(1, 77, dtype=torch.long)
@@ -216,7 +232,7 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
 
 
 def export_encoders_to_onnx(
-    clip_model: nn.Module, output_dir: str, max_text_len: int
+    clip_model: nn.Module, output_dir: str, max_text_len: int = 77
 ) -> None:
     """Export image and text encoders to ONNX.
 
@@ -239,39 +255,8 @@ def export_encoders_to_onnx(
     image_onnx_path = os.path.join(output_dir, "image_encoder.onnx")
     text_onnx_path = os.path.join(output_dir, "text_encoder.onnx")
 
-    print(f"\nExporting Image Encoder to {image_onnx_path}...")
-    torch.onnx.export(
-        image_encoder.cpu(),
-        dummy_image.cpu(),
-        image_onnx_path,
-        input_names=["image"],
-        output_names=["embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-    )
-    _simplify_onnx(image_onnx_path)
-    verify_onnx(image_onnx_path, {"image": dummy_image.cpu()}, pt_img_feat)
-
-    print(f"\nExporting Text Encoder to {text_onnx_path}...")
-    torch.onnx.export(
-        text_encoder.cpu(),
-        dummy_text.cpu(),
-        text_onnx_path,
-        input_names=["text"],
-        output_names=["text_embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-    )
-    _simplify_onnx(text_onnx_path)
-    verify_onnx(text_onnx_path, {"text": dummy_text.cpu()}, pt_txt_feat)
+    _export_encoder_onnx(image_encoder, dummy_image, image_onnx_path, "image", "embedding", pt_img_feat)
+    _export_encoder_onnx(text_encoder, dummy_text, text_onnx_path, "text", "text_embedding", pt_txt_feat)
 
     print(f"\nExport complete → {output_dir}")
 
@@ -279,53 +264,29 @@ def export_encoders_to_onnx(
 def main() -> None:
     args = parse_args()
 
-    if args.output_postfix:
-        output_dir_name = f"exported_{args.model_name}{args.output_postfix}_onnx"
-    else:
-        output_dir_name = f"exported_{args.model_name}_onnx"
+    output_dir_name = (
+        f"exported_{args.model_name}{args.output_postfix}_onnx"
+        if args.output_postfix
+        else f"exported_{args.model_name}_onnx"
+    )
     print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
 
-    device = torch.device("cpu")
+    clip_model, _, _ = _load_clip(
+        model_name=args.model_name,
+        device=torch.device("cpu"),
+        checkpoint_path=args.checkpoint_path,
+    )
 
-    checkpoint_path = args.checkpoint_path
-    is_qat_ckpt = False
-    if checkpoint_path:
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
-        is_qat_ckpt = isinstance(ckpt, dict) and ckpt.get("qat_enabled", False)
-
-    if is_qat_ckpt:
-        # QAT checkpoint: rebuild QuantSim with saved encodings and export with Q/DQ nodes.
-        from utils.qat_utils import QATConfig, wrap_model_for_qat
-
-        saved_args = ckpt.get("args", {})
-        qat_config = QATConfig(
-            enabled=True,
-            weight_bw=ckpt.get("qat_weight_bw", saved_args.get("qat_weight_bw", 8)),
-            act_bw=ckpt.get("qat_act_bw", saved_args.get("qat_act_bw", 8)),
-            quant_scheme=saved_args.get("qat_quant_scheme", "tf_enhanced"),
-            calib_samples=saved_args.get("qat_calib_samples", 1024),
-        )
-        qat_encodings = ckpt.get("qat_encodings")
-        clip_model, _, _ = _load_clip(model_name=args.model_name, device=device)
-        # wrap_model_for_qat reparameterizes and creates QuantSim; encodings skip calibration.
-        clip_model = wrap_model_for_qat(
-            clip_model, qat_config, device, qat_encodings=qat_encodings
-        )
-        sim = clip_model._qat_sim
-        print(f"Loaded QAT checkpoint: {checkpoint_path}")
+    sim = getattr(clip_model, "_qat_sim", None)
+    if sim is not None:
         export_quantized_encoders_to_onnx(sim, output_dir_name)
     else:
-        clip_model, _, _ = _load_clip(
-            model_name=args.model_name,
-            device=device,
-            checkpoint_path=checkpoint_path,
-        )
         clip_model = reparameterize_model(clip_model)
         clip_model.eval()
         export_encoders_to_onnx(clip_model, output_dir_name, args.max_text_len)
 
-    if checkpoint_path:
-        print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
+    if args.checkpoint_path:
+        print(f"Exported from checkpoint: {Path(args.checkpoint_path).resolve()}")
 
 
 if __name__ == "__main__":

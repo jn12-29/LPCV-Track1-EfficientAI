@@ -20,7 +20,7 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt --output-postfix _260423
 
-python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt --output-postfix _260424_0 --max-text-len 40
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt --output-postfix _260425_0 --max-text-len 40
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
@@ -28,16 +28,18 @@ python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2_260418
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260424_0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260425_0
+
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep400_lr1e-06_wd0.2_acc32_hn4_hnw0.5_seed0__20260417_184009/checkpoint_latest_epoch_126.pt
+CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt
 
-CUDA_VISIBLE_DEVICES=6 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt
+CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_100.pt
 
-# eval local (onnx)
+# eval local (onnx) do not support yet
 python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
 
 # eval remote (Mode A: upload + infer)
@@ -82,6 +84,12 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=295
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 1,2,3,5 --batch-size 256 --accum-freq 30 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4
+
+torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 256 --accum-freq 60 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4 \
+    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
@@ -133,41 +141,32 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 
 # ── MLP Reconstruction (GELU → ReLU + distillation) ───────────────────────────
 
-# Run full reconstruction for S0 pretrained (~2 hours, 32 blocks × 20000 iters)
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S0 \
-    --n-calib 1024 --n-iters 20000 \
-    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt \
-    --device cuda --log-every 500
+    --model-name MobileCLIP2-B --gpu-id 4 \
+    --n-calib 1024 --n-iters 20000 --log-every 500 --aph-mode magnitude
+
+python mlp_reconstruction/run.py train \
+    --model-name MobileCLIP2-B --gpu-id 7 \
+    --n-calib 1024 --n-iters 20000 --log-every 500 --aph-mode magnitude --no-relu-text
 
 # Run on top of a fine-tuned checkpoint
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S2 \
+    --model-name MobileCLIP2-B --gpu-id 2 \
     --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt \
-    --n-calib 1024 --n-iters 20000 \
-    --output checkpoints/MobileCLIP2-S2_mlp_relu.pt \
-    --device cuda
+    --n-calib 1024 --n-iters 20000
 
 # Resume after crash (load .tmp checkpoint, restart from a specific block)
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S0 \
-    --resume-from checkpoints/MobileCLIP2-S0_mlp_relu.pt.tmp \
-    --skip-to visual[s1b0] \
-    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt \
-    --device cuda
+    --model-name MobileCLIP2-B --gpu-id 2 \
+    --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
+    --skip-to visual[s1b0]
 
 # Eval reconstructed model on sample_data (torch)
-python mlp_reconstruction/run.py eval \
-    --checkpoint-path checkpoints/MobileCLIP2-S0_mlp_relu.pt --k 10
+python mlp_reconstruction/run.py eval --gpu-id 2 \
+    --checkpoint-path checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_uniform__20260425_182033/mlp_relu.pt --k 10
 
-# Export reconstructed model to ONNX (first load checkpoint into a temp script,
-# or use eval_local.py after patching _load_clip to call load_reconstructed_model)
-# Typical approach: load via load_reconstructed_model(), then export_encoders_to_onnx()
+# Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
+python pipeline/export_onnx.py --model-name MobileCLIP2-B \
+    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
-# Smoke test (64 samples, 200 iters, only first 2 blocks)
-python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S0 \
-    --n-calib 64 --n-iters 200 --log-every 50 \
-    --output /tmp/smoke_test.pt --device cuda \
-    --skip-to visual[s0b1]
 

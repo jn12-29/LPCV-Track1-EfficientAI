@@ -114,32 +114,36 @@ Replaces all MLP GELU activations with ReLU via layer-by-layer knowledge distill
 
 ```bash
 # Full reconstruction on pretrained S0 (~2 hours, 32 blocks)
+# Output auto-generated: checkpoints/{model}__{config}__{timestamp}/mlp_relu.pt
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S0 \
-    --n-calib 1024 --n-iters 20000 \
-    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt
+    --model-name MobileCLIP2-S0 --gpu-id 2 \
+    --n-calib 1024 --n-iters 20000
 
 # On top of a fine-tuned checkpoint
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S2 \
-    --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt \
-    --output checkpoints/MobileCLIP2-S2_mlp_relu.pt
+    --model-name MobileCLIP2-S2 --gpu-id 2 \
+    --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt
 
 # Evaluate reconstructed model
 python mlp_reconstruction/run.py eval \
-    --checkpoint-path checkpoints/MobileCLIP2-S0_mlp_relu.pt --k 10
+    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt --k 10
+
+# Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
+python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
+    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
 # Resume after crash
 python mlp_reconstruction/run.py train \
-    --model-name MobileCLIP2-S0 \
-    --resume-from checkpoints/MobileCLIP2-S0_mlp_relu.pt.tmp \
-    --skip-to visual[s1b0] \
-    --output checkpoints/MobileCLIP2-S0_mlp_relu.pt
+    --model-name MobileCLIP2-S0 --gpu-id 2 \
+    --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
+    --skip-to visual[s1b0]
 ```
 
 Reconstruction proceeds **block by block** (serial). Each block: collect calibration activations → replace GELU with ReLU → distill (`L_Direct + 2×L_Clamp`) → save intermediate checkpoint (`.tmp`). Calibration data is read from `build_datasets/data/vg_llm_contrastive.jsonl`.
 
-Key options: `--n-calib` (default 1024), `--n-iters` (default 20000), `--lr` (default 1e-3), `--aph-mode uniform|magnitude`.
+Each run writes into the checkpoint directory: `train.log`, `run_config.json`, `metrics.csv`, `metrics.jsonl`, and `reconstruction_curves.png` (cosine similarity and final loss per block).
+
+Key options: `--gpu-id` (single GPU), `--n-calib` (default 1024), `--n-iters` (default 20000), `--lr` (default 1e-3), `--aph-mode uniform|magnitude`, `--output-dir` (default `checkpoints`), `--output` (overrides auto-generated path).
 
 Block counts: S0 = 32 (12 text + 20 visual), S2 = 56, B = 24.
 
@@ -162,7 +166,7 @@ Block counts: S0 = 32 (12 text + 20 visual), S2 = 56, B = 24.
 
 ### Pipeline (`pipeline/`)
 
-- **`pipeline/export_onnx.py`** — exports image/text encoders to ONNX opset 18; exposes `export_encoders_to_onnx()` for reuse. Supports regular and QAT checkpoints via `--checkpoint-path`.
+- **`pipeline/export_onnx.py`** — exports image/text encoders to ONNX opset 18, simplifies, verifies. Key arg: `--max-text-len N` (default 77) — ONNX external I/O stays `(1, 77)` per competition spec, but the text encoder internally truncates tokens to `(1, N)` and attn_mask to `(N, N)` before the transformer, so the compiled model attends over only N positions (faster for short texts). All checkpoint types auto-detected via `--checkpoint-path`.
 - **`pipeline/compile_and_profile.py`** — submits ONNX to QAI Hub (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results.
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference, Recall@K. Three modes: A/B/C.
@@ -209,6 +213,6 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 
 - `reparameterize_model()` from `timm.utils` must be called before ONNX export — this folds multi-branch conv structures. For QAT, it is called automatically inside `wrap_model_for_qat()` before QuantSim creation.
 - For QAT checkpoints, the model must be reparameterized before QuantSim is created so the state dict key names match. `_load_clip()` handles this automatically.
-- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position to ensure consistent input regardless of tokenizer padding.
+- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position to ensure consistent input regardless of tokenizer padding. With `--max-text-len N < 77`, it additionally slices `token_ids[:, :N]` and truncates `attn_mask` to `(N, N)` — the ONNX graph still accepts `(1, 77)` externally but computes attention over only N positions, reducing latency.
 - QAI Hub auto-converts to fp16 during compilation.
 - The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` for all MobileCLIP2 variants.

@@ -196,7 +196,11 @@ def run_training(args) -> None:
             checkpoint_path=getattr(args, "resume", None),
             pretrained=args.pretrained,
             qat_config=qat_config,
+            relu_image=getattr(args, "relu_image", False),
+            relu_text=getattr(args, "relu_text", False),
         )
+        relu_labels = getattr(model, "_relu_blocks", None)
+
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
 
@@ -447,6 +451,7 @@ def run_training(args) -> None:
                     args=args,
                     metrics_history=metrics_history,
                     sim=sim,
+                    relu_labels=relu_labels,
                 )
                 previous_latest_path = latest_path
 
@@ -466,6 +471,7 @@ def run_training(args) -> None:
                         args=args,
                         metrics_history=metrics_history,
                         sim=sim,
+                        relu_labels=relu_labels,
                     )
                     if export_onnx:
                         _export_onnx_checkpoint(
@@ -489,6 +495,7 @@ def run_training(args) -> None:
                 args=args,
                 metrics_history=metrics_history,
                 sim=sim,
+                relu_labels=relu_labels,
             )
             run_config["finished_at"] = current_timestamp()
             run_config["final_weights_path"] = str(final_weights_path.resolve())
