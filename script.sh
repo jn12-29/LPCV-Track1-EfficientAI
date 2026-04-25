@@ -88,7 +88,7 @@ torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=295
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 256 --accum-freq 60 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4 \
-    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
+    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc4096_magnitude_all__20260426_004517/mlp_relu.pt
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
@@ -142,7 +142,18 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 7 \
-    --n-calib 2048 --n-iters 20000 --log-every 500 --aph-mode uniform
+    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform --no-relu-stem
+
+python mlp_reconstruction/run.py \
+    --model-name MobileCLIP2-B --gpu-id 7 \
+    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform --no-relu-stem \
+    --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
+
+# Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
+python mlp_reconstruction/run.py \
+    --model-name MobileCLIP2-B --gpu-id 3 \
+    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform \
+    --no-relu-stem
 
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 7 \
