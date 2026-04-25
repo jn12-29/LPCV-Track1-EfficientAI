@@ -36,7 +36,7 @@ python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
 CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc60_hn4_hnw1_seed0__20260425_203708/checkpoint_epoch_065.pt
-CUDA_VISIBLE_DEVICES=7 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_img__20260425_220823/mlp_relu.pt
+CUDA_VISIBLE_DEVICES=7 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 # eval local (onnx) do not support yet
 python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
@@ -88,7 +88,7 @@ torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=295
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 256 --accum-freq 60 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4 \
-    --resume ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc60_hn4_hnw1_seed0__20260425_203708/checkpoint_latest_epoch_071.pt
+    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
@@ -141,8 +141,8 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 # ── MLP Reconstruction (GELU → ReLU + distillation) ───────────────────────────
 
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 4 \
-    --n-calib 1024 --n-iters 20000 --log-every 500 --aph-mode magnitude
+    --model-name MobileCLIP2-B --gpu-id 7 \
+    --n-calib 2048 --n-iters 20000 --log-every 500 --aph-mode uniform
 
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 7 \
@@ -150,9 +150,9 @@ python mlp_reconstruction/run.py \
 
 # Run on top of a fine-tuned checkpoint
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 2 \
-    --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt \
-    --n-calib 1024 --n-iters 20000
+    --model-name MobileCLIP2-B --gpu-id 4 \
+    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform \
+    --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 # Resume after crash (load .tmp checkpoint, restart from a specific block)
 python mlp_reconstruction/run.py \

@@ -309,7 +309,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MLP Reconstruction for MobileCLIP2")
     p.add_argument("--model-name", default="MobileCLIP2-S0")
     p.add_argument("--checkpoint-path", default=None)
-    p.add_argument("--calib-jsonl", default="build_datasets/data/vg_llm_contrastive.jsonl")
+    p.add_argument(
+        "--calib-jsonl", default="build_datasets/data/vg_llm_contrastive.jsonl"
+    )
     p.add_argument("--project-root", default=".")
     p.add_argument("--n-calib", type=int, default=1024)
     p.add_argument("--calib-batch-size", type=int, default=32)
@@ -320,7 +322,9 @@ def parse_args() -> argparse.Namespace:
         help="Full output path. If omitted, auto-generated as "
         "{output-dir}/{model}__{config}__{timestamp}/mlp_relu.pt",
     )
-    p.add_argument("--gpu-id", type=int, default=None, metavar="N", help="GPU index (e.g. 2)")
+    p.add_argument(
+        "--gpu-id", type=int, default=None, metavar="N", help="GPU index (e.g. 2)"
+    )
     p.add_argument(
         "--no-relu-image",
         action="store_true",
@@ -332,7 +336,7 @@ def parse_args() -> argparse.Namespace:
         help="Skip text-encoder reconstruction (default: reconstruct both)",
     )
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--n-iters", type=int, default=20000)
     p.add_argument(
         "--alpha",
@@ -345,19 +349,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--early-stop-patience",
         type=int,
-        default=5,
+        default=8,
         metavar="N",
         help="Stop after N log-intervals without improvement (0=disable)",
     )
     p.add_argument(
         "--early-stop-delta",
         type=float,
-        default=5e-4,
+        default=1e-4,
         help="Min relative EMA-loss improvement to reset patience counter",
     )
     p.add_argument("--skip-to", default=None)
     p.add_argument("--resume-from", default=None)
-    p.add_argument("--skip-eval", action="store_true", help="Skip auto eval after training")
+    p.add_argument(
+        "--skip-eval", action="store_true", help="Skip auto eval after training"
+    )
     p.add_argument("--eval-root-dir", default="sample_data")
     p.add_argument("--eval-image-to-text-csv", default="sample_data/img_list.csv")
     p.add_argument("--eval-textnums-to-texts-csv", default="sample_data/txt_list.csv")
