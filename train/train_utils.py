@@ -49,7 +49,6 @@ def format_config_value(value: Any) -> str:
 
 
 def build_config_stamp(args) -> str:
-    import argparse
     config_stamp = "_".join(
         [
             f"bs{args.batch_size}",
@@ -117,6 +116,7 @@ def save_checkpoint(
     args,
     metrics_history: List[MetricsRow],
     sim=None,
+    relu_labels: List[str] | None = None,
 ) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -129,6 +129,8 @@ def save_checkpoint(
         "args": vars(args),
         "metrics_history": metrics_history,
     }
+    if relu_labels:
+        payload["relu_blocks"] = relu_labels
     if sim is not None:
         from utils.qat_utils import get_qat_encodings_json
         payload["qat_enabled"] = True

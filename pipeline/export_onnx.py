@@ -29,6 +29,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Suffix appended to exported ONNX filenames and output directory.",
     )
+    parser.add_argument(
+        "--max-text-len",
+        type=int,
+        default=77,
+        help="Maximum number of tokens for text input. Can speed up inference for short text scene",
+    )
     return parser.parse_args()
 
 
@@ -42,9 +48,15 @@ class OpenClipVisionEncoder(nn.Module):
 
 
 class OpenClipTextEncoder(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, max_text_len: int = 77):
         super().__init__()
         self.model = model
+        self.max_text_len = max_text_len
+        if (getattr(model.text, "attn_mask", None) is not None) and (max_text_len < 77):
+            self.model.text.attn_mask = self.model.text.attn_mask[
+                :max_text_len, :max_text_len
+            ]
+            print(f"Truncated text attn_mask to [{max_text_len}, {max_text_len}]")
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         token_ids = token_ids.to(dtype=torch.int64)
@@ -53,7 +65,10 @@ class OpenClipTextEncoder(nn.Module):
             token_ids.shape[-1], device=token_ids.device
         ).unsqueeze(0)
         mask = (positions <= eot_pos).to(token_ids.dtype)
-        return self.model.encode_text(token_ids * mask)
+        token_ids = token_ids * mask
+        if self.max_text_len < token_ids.shape[-1]:
+            token_ids = token_ids[:, : self.max_text_len]
+        return self.model.encode_text(token_ids)
 
 
 def verify_onnx(
@@ -76,13 +91,6 @@ def verify_onnx(
         )
 
 
-def replace_gelu_with_tanh_approx(model: nn.Module) -> None:
-    for parent in model.modules():
-        for name, child in parent.named_children():
-            if isinstance(child, nn.GELU) and child.approximate == "none":
-                setattr(parent, name, nn.GELU(approximate="tanh"))
-
-
 def _simplify_onnx(onnx_path: str) -> None:
     model = onnx.load(onnx_path)
     before_nodes = len(model.graph.node)
@@ -102,7 +110,130 @@ def _simplify_onnx(onnx_path: str) -> None:
         print(f"  Simplification failed (kept original): {onnx_path}")
 
 
-def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
+def _export_encoder_onnx(
+    encoder: nn.Module,
+    dummy: torch.Tensor,
+    onnx_path: str,
+    input_name: str,
+    output_name: str,
+    pt_feat: torch.Tensor,
+) -> None:
+    """Export one encoder to ONNX, simplify, and verify against PyTorch output."""
+    print(f"\nExporting to {onnx_path}...")
+    torch.onnx.export(
+        encoder.cpu(),
+        dummy.cpu(),
+        onnx_path,
+        input_names=[input_name],
+        output_names=[output_name],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+    )
+    _simplify_onnx(onnx_path)
+    verify_onnx(onnx_path, {input_name: dummy.cpu()}, pt_feat)
+
+
+def _split_clip_onnx(
+    full_onnx_path: str,
+    inputs: list,
+    outputs: list,
+    image_onnx_path: str,
+    text_onnx_path: str,
+) -> None:
+    """Split a combined CLIP ONNX (from AIMET sim.export) into separate encoder files.
+
+    Determines which graph output belongs to the image vs text path by BFS from each input.
+    """
+    model_proto = onnx.load(full_onnx_path)
+    graph = model_proto.graph
+
+    consumer_map: dict = {}
+    for node in graph.node:
+        for inp in node.input:
+            if inp:
+                consumer_map.setdefault(inp, []).extend(o for o in node.output if o)
+
+    output_set = {o.name for o in graph.output}
+
+    def reachable_graph_outputs(start: str) -> set:
+        visited, queue, reached = set(), [start], set()
+        while queue:
+            t = queue.pop()
+            if t in visited:
+                continue
+            visited.add(t)
+            if t in output_set:
+                reached.add(t)
+            queue.extend(consumer_map.get(t, []))
+        return reached
+
+    img_outs = reachable_graph_outputs(inputs[0])
+    txt_outs = reachable_graph_outputs(inputs[1])
+    img_out = next(iter(img_outs)) if img_outs else outputs[0]
+    txt_out = next(iter(txt_outs)) if txt_outs else outputs[1]
+
+    print(f"  Image path: {inputs[0]} → {img_out}")
+    print(f"  Text  path: {inputs[1]} → {txt_out}")
+
+    onnx.utils.extract_model(full_onnx_path, image_onnx_path, [inputs[0]], [img_out])
+    onnx.utils.extract_model(full_onnx_path, text_onnx_path, [inputs[1]], [txt_out])
+    print(f"  Saved {image_onnx_path}")
+    print(f"  Saved {text_onnx_path}")
+
+
+def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
+    """Export image and text encoders with Q/DQ nodes via AIMET sim.export().
+
+    AIMET converts fake-quant (QuantizeDequantize) nodes into real ONNX
+    QuantizeLinear + DequantizeLinear ops.  The combined ONNX is then split
+    into image_encoder.onnx and text_encoder.onnx using graph connectivity.
+    """
+    import shutil
+    import tempfile
+
+    os.makedirs(output_dir, exist_ok=True)
+    dummy_image = torch.zeros(1, 3, 224, 224, dtype=torch.float32)
+    dummy_text = torch.zeros(1, 77, dtype=torch.long)
+
+    # AIMET export requires model and dummy inputs on the same device.
+    model_device = next(sim.model.parameters()).device
+    sim.model.cpu()
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            print("\nExporting quantized ONNX via AIMET (Q/DQ nodes preserved)...")
+            sim.export(tmp_dir, "model", (dummy_image, dummy_text))
+
+            full_onnx = os.path.join(tmp_dir, "model.onnx")
+            model_proto = onnx.load(full_onnx)
+            inputs = [i.name for i in model_proto.graph.input]
+            outputs = [o.name for o in model_proto.graph.output]
+            print(f"  Inputs : {inputs}")
+            print(f"  Outputs: {outputs}")
+
+            if len(inputs) >= 2 and len(outputs) >= 2:
+                image_onnx = os.path.join(output_dir, "image_encoder.onnx")
+                text_onnx = os.path.join(output_dir, "text_encoder.onnx")
+                _split_clip_onnx(full_onnx, inputs, outputs, image_onnx, text_onnx)
+            else:
+                combined = os.path.join(output_dir, "combined_quantized.onnx")
+                shutil.copy(full_onnx, combined)
+                print(
+                    f"  Cannot split (inputs={inputs}, outputs={outputs}), "
+                    f"saved combined → {combined}"
+                )
+    finally:
+        sim.model.to(model_device)
+
+    print(f"\nExport complete → {output_dir}")
+
+
+def export_encoders_to_onnx(
+    clip_model: nn.Module, output_dir: str, max_text_len: int = 77
+) -> None:
     """Export image and text encoders to ONNX.
 
     clip_model must already be reparameterized and in eval mode.
@@ -111,7 +242,7 @@ def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
     device = next(clip_model.parameters()).device
 
     image_encoder = OpenClipVisionEncoder(clip_model).eval()
-    text_encoder = OpenClipTextEncoder(clip_model).eval()
+    text_encoder = OpenClipTextEncoder(clip_model, max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
     dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
@@ -124,39 +255,8 @@ def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
     image_onnx_path = os.path.join(output_dir, "image_encoder.onnx")
     text_onnx_path = os.path.join(output_dir, "text_encoder.onnx")
 
-    print(f"\nExporting Image Encoder to {image_onnx_path}...")
-    torch.onnx.export(
-        image_encoder.cpu(),
-        dummy_image.cpu(),
-        image_onnx_path,
-        input_names=["image"],
-        output_names=["embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-    )
-    _simplify_onnx(image_onnx_path)
-    verify_onnx(image_onnx_path, {"image": dummy_image.cpu()}, pt_img_feat)
-
-    print(f"\nExporting Text Encoder to {text_onnx_path}...")
-    torch.onnx.export(
-        text_encoder.cpu(),
-        dummy_text.cpu(),
-        text_onnx_path,
-        input_names=["text"],
-        output_names=["text_embedding"],
-        opset_version=18,
-        do_constant_folding=True,
-        dynamic_axes=None,
-        verbose=False,
-        export_params=True,
-        training=torch.onnx.TrainingMode.EVAL,
-    )
-    _simplify_onnx(text_onnx_path)
-    verify_onnx(text_onnx_path, {"text": dummy_text.cpu()}, pt_txt_feat)
+    _export_encoder_onnx(image_encoder, dummy_image, image_onnx_path, "image", "embedding", pt_img_feat)
+    _export_encoder_onnx(text_encoder, dummy_text, text_onnx_path, "text", "text_embedding", pt_txt_feat)
 
     print(f"\nExport complete → {output_dir}")
 
@@ -164,46 +264,29 @@ def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str) -> None:
 def main() -> None:
     args = parse_args()
 
-    if args.output_postfix:
-        output_dir_name = f"exported_{args.model_name}{args.output_postfix}_onnx"
-    else:
-        output_dir_name = f"exported_{args.model_name}_onnx"
+    output_dir_name = (
+        f"exported_{args.model_name}{args.output_postfix}_onnx"
+        if args.output_postfix
+        else f"exported_{args.model_name}_onnx"
+    )
     print(f"Saving ONNX files to directory: {os.path.abspath(output_dir_name)}")
 
-    device = torch.device("cpu")
+    clip_model, _, _ = _load_clip(
+        model_name=args.model_name,
+        device=torch.device("cpu"),
+        checkpoint_path=args.checkpoint_path,
+    )
 
-    checkpoint_path = args.checkpoint_path
-    is_qat_ckpt = False
-    if checkpoint_path:
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
-        is_qat_ckpt = isinstance(ckpt, dict) and ckpt.get("qat_enabled", False)
-
-    if is_qat_ckpt:
-        # QAT checkpoint: load into reparameterized base model by filtering keys.
-        from utils.qat_utils import extract_base_model_state_dict
-        clip_model, _, _ = _load_clip(model_name=args.model_name, device=device)
-        clip_model = reparameterize_model(clip_model)
-        qat_state_dict = ckpt.get("model_state_dict", ckpt)
-        filtered = extract_base_model_state_dict(qat_state_dict, clip_model)
-        missing, unexpected = clip_model.load_state_dict(filtered, strict=False)
-        print(f"Loaded QAT checkpoint: {checkpoint_path}")
-        if missing:
-            print(f"  Missing keys: {len(missing)}")
-        if unexpected:
-            print(f"  Unexpected keys: {len(unexpected)}")
+    sim = getattr(clip_model, "_qat_sim", None)
+    if sim is not None:
+        export_quantized_encoders_to_onnx(sim, output_dir_name)
     else:
-        clip_model, _, _ = _load_clip(
-            model_name=args.model_name,
-            device=device,
-            checkpoint_path=checkpoint_path,
-        )
         clip_model = reparameterize_model(clip_model)
+        clip_model.eval()
+        export_encoders_to_onnx(clip_model, output_dir_name, args.max_text_len)
 
-    clip_model.eval()
-    export_encoders_to_onnx(clip_model, output_dir_name)
-
-    if checkpoint_path:
-        print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
+    if args.checkpoint_path:
+        print(f"Exported from checkpoint: {Path(args.checkpoint_path).resolve()}")
 
 
 if __name__ == "__main__":

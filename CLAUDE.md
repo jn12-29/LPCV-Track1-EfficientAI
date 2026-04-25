@@ -71,7 +71,7 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 ### Pipeline (`pipeline/`)
 
 - **`pipeline/dataset.py`** — `RetrievalEvalDataset` (per-image or per-text iteration; `get_image_to_text_eval_data()` returns all texts + per-image positive indices) and `ImageTextRetrievalDataset` (positive pairs).
-- **`pipeline/export_onnx.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder`, exports to ONNX opset 18, verifies outputs. Exposes `export_encoders_to_onnx(clip_model, output_dir)` for reuse. Handles QAT checkpoints via `--checkpoint-path` (auto-detects, extracts base weights).
+- **`pipeline/export_onnx.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder`, exports to ONNX opset 18, simplifies, verifies. Key arg: `--max-text-len N` (default 77) — the ONNX external I/O is always `(1, 77)` as required by the competition, but internally the text encoder truncates tokens to `(1, N)` and attn_mask to `(N, N)` before the transformer, so the compiled model only attends over N positions (faster when real texts are short). All checkpoint types auto-detected via `--checkpoint-path` (`_load_clip` handles regular / QAT / relu-reconstruction).
 - **`pipeline/compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results with `lowpowervision@gmail.com`.
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference submission, and Recall@K. Three modes: (A) upload + infer, (B) infer with existing dataset IDs, (C) reuse inference job outputs.
@@ -97,6 +97,18 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 2. If `_qat_needs_calibration`: call `calibrate_quantsim()` before DDP wrap
 3. Training loop unchanged; `save_checkpoint(sim=sim)` saves QAT state
 4. ONNX export (`--export-onnx`): extracts base weights from QuantSim model into fresh reparameterized model, exports via `export_encoders_to_onnx()`
+
+### MLP Reconstruction (`mlp_reconstruction/`)
+
+Replaces all MLP GELU activations with ReLU and recovers accuracy via layer-by-layer distillation (APHQ-ViT, CVPR 2025). No quantization. Entry point: `mlp_reconstruction/run.py train/eval`.
+
+- **`mlp_reconstruction/mlp_blocks.py`** — `MLPBlockInfo` dataclass; `iter_mlp_blocks(model)` enumerates all text + visual MLP blocks (32 for S0, 56 for S2, 24 for B); `replace_gelu_with_relu(info)`; `apply_relu_blocks(model, relu_labels)` restores ReLU structure before loading a reconstructed checkpoint.
+- **`mlp_reconstruction/calibrate.py`** — `VGCalibrationLoader(jsonl_path, project_root, tokenizer, n_calib, batch_size)` reads image–text pairs from `vg_llm_contrastive.jsonl`; `collect_mlp_io(model, info, image_batches, text_batches, device)` captures per-block input X and GELU output O via forward hooks (hook on `mlp.conv` for FastVit, pre-hook on `mlp` otherwise).
+- **`mlp_reconstruction/aph.py`** — `compute_aph_weights(O_GELU, mode='uniform')` returns H_bar importance weights; shape (D,) for text/ViT, (C,) for FastVit.
+- **`mlp_reconstruction/distill.py`** — `distill_mlp(model, info, X_all, O_all, ...)` replaces GELU with ReLU in-place and optimizes fc1/fc2 via `L_Direct + 2×L_Clamp` (Adam, per-batch 99th-percentile clamp threshold); `verify_reconstruction(...)` returns mean cosine similarity.
+- **`mlp_reconstruction/run.py`** — CLI: `train` (serial block-by-block distillation with crash recovery via `--resume-from` + `--skip-to`) and `eval` (Recall@K via `RetrievalEvalDataset`). Both subcommands support `--gpu-id` (single GPU). Output path auto-generated as `{output_dir}/{model}__{config}__{timestamp}/mlp_relu.pt`; `--output` overrides. `_load_clip` is used directly for all checkpoint loading. Each run writes `train.log`, `run_config.json`, `metrics.csv`, `metrics.jsonl`, and `reconstruction_curves.png` into the checkpoint directory (reuses `train.train_utils` and `train.metrics`). `distill_mlp` step logs go to the same log file via `log_fn=log_message`.
+
+Checkpoint format: `{'model_state_dict': ..., 'model_name': ..., 'relu_blocks': [list of labels], 'relu_image': bool, 'relu_text': bool}`. GELU and ReLU have no parameters so state_dict is identical in size — `relu_blocks` is the only structural hint needed on reload.
 
 ### Dataset builder (`build_datasets/`)
 
@@ -134,6 +146,6 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 
 - `reparameterize_model()` from `timm.utils` must be called before ONNX export. For QAT, it is called automatically inside `wrap_model_for_qat()` — do not call it again afterward (would break fake quant nodes).
 - QAT checkpoint loading: the model must be reparameterized before QuantSim is created so the state dict key names match. `_load_clip()` handles this — regular checkpoints are loaded before reparameterize; QAT checkpoints are loaded after.
-- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position (argmax) to ensure consistent input regardless of tokenizer padding style.
+- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position (argmax) to ensure consistent input regardless of tokenizer padding style. With `--max-text-len N < 77`, it additionally slices `token_ids[:, :N]` and truncates `attn_mask` to `(N, N)` — the ONNX graph still accepts `(1, 77)` externally (fixed by competition spec) but computes attention over only N positions, reducing latency on short texts.
 - QAI Hub auto-converts to fp16 during compilation.
 - The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` regardless of which MobileCLIP2 variant is used — all variants share the same tokenizer.

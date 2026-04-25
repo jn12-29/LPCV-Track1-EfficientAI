@@ -19,3 +19,7 @@ openai
 #   pip install aimet-torch  (CPU or auto-detect CUDA)
 # See https://github.com/quic/aimet/blob/develop/packaging/install.md for GPU wheels.
 aimet-torch
+nvitop
+modelscope
+huggingface_hub 
+ujson

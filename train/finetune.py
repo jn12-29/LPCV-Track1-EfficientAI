@@ -85,6 +85,17 @@ def parse_args() -> argparse.Namespace:
         choices=["hinge", "logsigmoid"],
     )
 
+    # --- Freeze ---
+    parser.add_argument(
+        "--freeze-modules",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated top-level module names to freeze (requires_grad=False). "
+            "Example: --freeze-modules visual  or  --freeze-modules visual,transformer"
+        ),
+    )
+
     # --- Resume ---
     parser.add_argument(
         "--resume",
@@ -92,6 +103,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path to a checkpoint (.pt) to resume from. Supports regular and QAT checkpoints (auto-detected).",
     )
+
+    # --- ReLU MLP ---
+    parser.add_argument("--relu-image", action="store_true", help="Replace GELU with ReLU in all visual-encoder MLP blocks.")
+    parser.add_argument("--relu-text", action="store_true", help="Replace GELU with ReLU in all text-encoder MLP blocks.")
 
     # --- QAT ---
     parser.add_argument("--qat-enabled", action="store_true", help="Enable Quantization-Aware Training via AIMET.")
