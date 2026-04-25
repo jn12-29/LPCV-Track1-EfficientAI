@@ -2,6 +2,6 @@
   "model_name": "MobileCLIP2-B",
   "precision": "w8a8",
   "target_runtime": "qnn_dlc",
-  "image_compile_id": "j5mwjo0yp",
+  "image_compile_id": "jp1d0rk7p",
   "text_compile_id": "jp01nr62g"
 }

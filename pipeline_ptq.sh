@@ -24,10 +24,10 @@ else
 fi
 
 # export onnx
-# python pipeline/export_onnx.py \
-#   --model-name MobileCLIP2-B \
-#   --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep200_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260420_000848/checkpoint_epoch_085.pt \
-#   --output-postfix ""
+python pipeline/export_onnx.py \
+  --model-name MobileCLIP2-B \
+  --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt \
+  --output-postfix ""
 
 # python ptq/eval_ptq.py \
 #   --onnx-dir exported_MobileCLIP2-B_onnx \
@@ -49,7 +49,7 @@ if [ "${mode}" == "ptq" ]; then
     --ptq-scheme "${ptq_scheme}" \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl \
     --image-base-dir ./ \
-    --calib-size 10 \
+    --calib-size 1000 \
     --val-size 100 \
     --seed 42 \
     --no-quantize-text \
@@ -65,7 +65,7 @@ if [ "${mode}" == "ptq_2" ]; then
     --target-runtime qnn_dlc \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive_v1/vg_llm_contrastive.jsonl \
     --image-base-dir ./ \
-    --calib-size 10 \
+    --calib-size 1000 \
     --val-size 100 \
     --seed 42 \
     --text-compile-id "${fixed_text_compile_id}" \
