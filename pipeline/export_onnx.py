@@ -132,6 +132,7 @@ def _export_encoder_onnx(
         verbose=False,
         export_params=True,
         training=torch.onnx.TrainingMode.EVAL,
+        # dynamo=True
     )
     _simplify_onnx(onnx_path)
     verify_onnx(onnx_path, {input_name: dummy.cpu()}, pt_feat)
@@ -255,8 +256,12 @@ def export_encoders_to_onnx(
     image_onnx_path = os.path.join(output_dir, "image_encoder.onnx")
     text_onnx_path = os.path.join(output_dir, "text_encoder.onnx")
 
-    _export_encoder_onnx(image_encoder, dummy_image, image_onnx_path, "image", "embedding", pt_img_feat)
-    _export_encoder_onnx(text_encoder, dummy_text, text_onnx_path, "text", "text_embedding", pt_txt_feat)
+    _export_encoder_onnx(
+        image_encoder, dummy_image, image_onnx_path, "image", "embedding", pt_img_feat
+    )
+    _export_encoder_onnx(
+        text_encoder, dummy_text, text_onnx_path, "text", "text_embedding", pt_txt_feat
+    )
 
     print(f"\nExport complete → {output_dir}")
 
