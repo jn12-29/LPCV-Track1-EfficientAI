@@ -188,6 +188,18 @@ def get_qat_encodings_json(sim) -> str:
         return (Path(tmp_dir) / "model.encodings").read_text()
 
 
+def qat_config_from_checkpoint(ckpt: dict) -> "QATConfig":
+    """Reconstruct QATConfig from a saved checkpoint dict."""
+    saved_args = ckpt.get("args", {})
+    return QATConfig(
+        enabled=True,
+        weight_bw=ckpt.get("qat_weight_bw", saved_args.get("qat_weight_bw", 8)),
+        act_bw=ckpt.get("qat_act_bw", saved_args.get("qat_act_bw", 8)),
+        quant_scheme=saved_args.get("qat_quant_scheme", "tf_enhanced"),
+        calib_samples=saved_args.get("qat_calib_samples", 1024),
+    )
+
+
 def extract_base_model_state_dict(qat_state_dict: dict, base_model: nn.Module) -> dict:
     """Filter a QAT state dict to only the keys present in base_model.
 

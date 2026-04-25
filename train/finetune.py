@@ -104,6 +104,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to a checkpoint (.pt) to resume from. Supports regular and QAT checkpoints (auto-detected).",
     )
 
+    # --- ReLU MLP ---
+    parser.add_argument("--relu-image", action="store_true", help="Replace GELU with ReLU in all visual-encoder MLP blocks.")
+    parser.add_argument("--relu-text", action="store_true", help="Replace GELU with ReLU in all text-encoder MLP blocks.")
+
     # --- QAT ---
     parser.add_argument("--qat-enabled", action="store_true", help="Enable Quantization-Aware Training via AIMET.")
     parser.add_argument("--qat-weight-bw", type=int, default=8, choices=[8], help="Weight bit-width for QAT.")
