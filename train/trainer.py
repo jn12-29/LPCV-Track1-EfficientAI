@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -365,6 +366,7 @@ def run_training(args) -> None:
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
+            epoch_start = time.time()
             epoch_metrics, global_step = train_one_epoch(
                 model=model,
                 dataloader=train_dataloader,
@@ -389,6 +391,8 @@ def run_training(args) -> None:
                 writer=writer,
             )
 
+            epoch_duration_s = time.time() - epoch_start
+
             epoch_row: MetricsRow = {
                 "logged_at": current_timestamp(),
                 "run_timestamp": run_timestamp,
@@ -410,6 +414,7 @@ def run_training(args) -> None:
                 "text_sampling": args.text_sampling,
                 "world_size": world_size,
                 **epoch_metrics,
+                "epoch_duration_s": epoch_duration_s,
             }
             if is_main_process:
                 metrics_history.append(epoch_row)
@@ -420,7 +425,7 @@ def run_training(args) -> None:
                 write_tensorboard_scalars(
                     writer,
                     "train_epoch_meta",
-                    {"global_step": global_step},
+                    {"global_step": global_step, "epoch_duration_s": epoch_duration_s},
                     epoch,
                 )
                 writer.flush()
@@ -429,7 +434,8 @@ def run_training(args) -> None:
                     f"Epoch {epoch} summary: "
                     f"total={epoch_metrics['train_total_loss']:.4f} "
                     f"clip={epoch_metrics['train_loss']:.4f} "
-                    f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f}",
+                    f"hardneg={epoch_metrics['train_hard_negative_loss']:.4f} "
+                    f"time={epoch_duration_s:.1f}s",
                     run_name=run_name,
                 )
 
