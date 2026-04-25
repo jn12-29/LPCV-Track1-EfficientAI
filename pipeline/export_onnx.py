@@ -15,6 +15,7 @@ import onnxsim
 import torch
 import torch.nn as nn
 from timm.utils import reparameterize_model
+from collections import Counter
 
 from utils.clip_utils import _load_clip
 
@@ -26,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gelu-replacement",
         type=str,
-        default="relu",
+        default="none",
         choices=["none", "tanh", "relu"],
         help="Replace GELU before export: none, tanh-approx GELU, or ReLU.",
     )
@@ -102,17 +103,41 @@ def _simplify_onnx(onnx_path: str) -> None:
     model = onnx.load(onnx_path)
     before_nodes = len(model.graph.node)
     before_size = os.path.getsize(onnx_path) / 1024 / 1024
+    before_ops = Counter(node.op_type for node in model.graph.node)
     simplified, ok = onnxsim.simplify(model)
     if ok:
         onnx.save(simplified, onnx_path)
         after_nodes = len(simplified.graph.node)
         after_size = os.path.getsize(onnx_path) / 1024 / 1024
+        after_ops = Counter(node.op_type for node in simplified.graph.node)
         print(
             f"  Simplified: nodes {before_nodes} → {after_nodes} "
             f"({before_nodes - after_nodes:+d}), "
             f"size {before_size:.2f} → {after_size:.2f} MB "
             f"({after_size - before_size:+.2f} MB)"
         )
+        interesting_ops = [
+            "Conv",
+            "Gemm",
+            "MatMul",
+            "Relu",
+            "Gelu",
+            "Erf",
+            "Add",
+            "Mul",
+            "Div",
+            "BatchNormalization",
+        ]
+        diff_parts = []
+        for op in interesting_ops:
+            b = before_ops.get(op, 0)
+            a = after_ops.get(op, 0)
+            if b != a:
+                diff_parts.append(f"{op}: {b}->{a} ({a-b:+d})")
+        if diff_parts:
+            print("  Simplify op diffs: " + ", ".join(diff_parts))
+        else:
+            print("  Simplify op diffs: (none in tracked ops)")
     else:
         print(f"  Simplification failed (kept original): {onnx_path}")
 

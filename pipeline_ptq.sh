@@ -18,7 +18,7 @@ python pipeline/export_onnx.py \
   --model-name MobileCLIP2-B \
   --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt \
   --output-postfix ""\
-  --gelu-replacement relu
+  --gelu-replacement none
 
 if [ "${enable_graph_surgery}" == "1" ]; then
     python pipeline/optimize_onnx_graph.py \

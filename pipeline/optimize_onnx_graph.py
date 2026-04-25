@@ -7,6 +7,129 @@ import numpy as np
 import onnx
 import onnx_graphsurgeon as gs
 
+def _replace_rank3_matmul_with_conv1x1(graph: gs.Graph) -> int:
+    """
+    将 ViT 中的 3D MatMul (Linear) 替换为严格等价的 4D Conv1x1。
+    转换逻辑: [B, S, C] -> Transpose -> [B, C, S] -> Reshape -> [B, C, S, 1] 
+              -> Conv1x1 -> Reshape -> [B, N, S] -> Transpose -> [B, S, N]
+    完全无损！NPU 会将 Transpose+Conv 联合编译为最高效的计算流。
+    """
+    replaced = 0
+    for node in list(graph.nodes):
+        if node.op != "MatMul" or len(node.inputs) != 2:
+            continue
+
+        x = node.inputs[0]
+        w_tensor = node.inputs[1]
+
+        # 检查权重是否为静态常量
+        w_const = _as_constant(w_tensor)
+        if w_const is None:
+            continue
+            
+        x_shape = getattr(x, "shape", None)
+        # 必须是静态三维张量 [B, S, In_Dim]
+        if not _is_static_int_shape(x_shape) or len(x_shape) != 3:
+            continue
+
+        if not isinstance(w_const.values, np.ndarray) or w_const.values.ndim != 2:
+            continue
+
+        B, S, In_C = x_shape
+        W_C, Out_N = w_const.values.shape
+
+        # 维度对齐检查
+        if In_C != W_C:
+            continue
+
+        # 向下探测：该 MatMul 是否唯一连接到一个 Add（处理偏置 Bias）
+        has_bias = False
+        b_const = None
+        out_node = node
+        y = node.outputs[0]
+
+        if len(y.outputs) == 1 and y.outputs[0].op == "Add":
+            add_node = y.outputs[0]
+            # 找到 Add 的哪一个输入是 Bias
+            bias_tensor = add_node.inputs[1] if add_node.inputs[0] is y else add_node.inputs[0]
+            b_const = _as_constant(bias_tensor)
+            if (b_const is not None and isinstance(b_const.values, np.ndarray) 
+                and b_const.values.ndim == 1 and b_const.values.shape[0] == Out_N):
+                has_bias = True
+                out_node = add_node
+                y = add_node.outputs[0] # 最终要替换的输出节点
+
+        # ---------------- 构图开始 ----------------
+
+        # 1. 前置 Transpose: [B, S, C] -> [B, C, S]
+        x_trans = gs.Variable(name=f"{node.name}_trans", dtype=x.dtype, shape=[B, In_C, S])
+        trans_in_node = gs.Node(
+            op="Transpose", name=f"{node.name}_pre_trans", 
+            inputs=[x], outputs=[x_trans], attrs={"perm": [0, 2, 1]}
+        )
+
+        # 2. 前置 Reshape: [B, C, S] -> [B, C, S, 1] 伪装成 4D 图像
+        shape_4d = gs.Constant(name=f"{node.name}_shape_4d", values=np.array([B, In_C, S, 1], dtype=np.int64))
+        x_4d = gs.Variable(name=f"{node.name}_4d", dtype=x.dtype, shape=[B, In_C, S, 1])
+        reshape_in_node = gs.Node(
+            op="Reshape", name=f"{node.name}_pre_reshape", 
+            inputs=[x_trans, shape_4d], outputs=[x_4d]
+        )
+
+        # 3. 核心 Conv1x1
+        # 原权重 [In_C, Out_N] -> 目标权重 [Out_N, In_C, 1, 1]
+        w_conv_vals = np.transpose(w_const.values, (1, 0)).reshape(Out_N, In_C, 1, 1)
+        w_conv_const = gs.Constant(name=f"{node.name}_conv_w", values=w_conv_vals)
+        
+        conv_inputs = [x_4d, w_conv_const]
+        if has_bias:
+            conv_inputs.append(b_const)
+
+        conv_out = gs.Variable(name=f"{node.name}_conv_out", dtype=x.dtype, shape=[B, Out_N, S, 1])
+        conv_node = gs.Node(
+            op="Conv", name=f"{node.name}_conv1x1",
+            inputs=conv_inputs, outputs=[conv_out],
+            attrs={
+                "dilations": [1, 1], "kernel_shape": [1, 1],
+                "pads": [0, 0, 0, 0], "strides": [1, 1]
+            }
+        )
+
+        # 4. 后置 Reshape: [B, N, S, 1] -> [B, N, S]
+        shape_3d = gs.Constant(name=f"{node.name}_shape_3d", values=np.array([B, Out_N, S], dtype=np.int64))
+        y_3d = gs.Variable(name=f"{node.name}_3d", dtype=x.dtype, shape=[B, Out_N, S])
+        reshape_out_node = gs.Node(
+            op="Reshape", name=f"{node.name}_post_reshape", 
+            inputs=[conv_out, shape_3d], outputs=[y_3d]
+        )
+
+        # 5. 后置 Transpose: [B, N, S] -> [B, S, N]
+        y_trans = gs.Variable(name=f"{node.name}_post_trans", dtype=x.dtype, shape=[B, S, Out_N])
+        trans_out_node = gs.Node(
+            op="Transpose", name=f"{node.name}_post_trans", 
+            inputs=[y_3d], outputs=[y_trans], attrs={"perm": [0, 2, 1]}
+        )
+
+        # ---------------- 接线与清理 ----------------
+        graph.nodes.extend([trans_in_node, reshape_in_node, conv_node, reshape_out_node, trans_out_node])
+        
+        _rewire_tensor_uses(y, y_trans)
+        
+        if has_bias:
+            out_node.outputs.clear()
+        node.outputs.clear()
+        
+        replaced += 1
+
+    return replaced
+
+def _get_producer_node(graph: gs.Graph, tensor: gs.Tensor) -> gs.Node | None:
+    for n in graph.nodes:
+        for out in n.outputs:
+            if out is tensor:
+                return n
+    return None
+
 
 def _rewire_tensor_uses(old_tensor: gs.Tensor, new_tensor: gs.Tensor) -> int:
     """Rewire all consumers that use old_tensor to new_tensor."""
@@ -17,6 +140,134 @@ def _rewire_tensor_uses(old_tensor: gs.Tensor, new_tensor: gs.Tensor) -> int:
                 consumer.inputs[idx] = new_tensor
                 rewired += 1
     return rewired
+
+
+def _trace_skip_layout_to_producer(
+    graph: gs.Graph, tensor: gs.Tensor
+) -> tuple[gs.Node | None, gs.Tensor]:
+    """Follow data edge through layout-only ops; return (producer, current tensor)."""
+    t: gs.Tensor = tensor
+    n = _get_producer_node(graph, t)
+    while n is not None and n.op in {"Reshape", "Transpose", "Squeeze", "Unsqueeze"} and len(n.inputs) >= 1:
+        t = n.inputs[0]
+        n = _get_producer_node(graph, t)
+    return n, t
+
+
+def _fold_attention_scale(graph: gs.Graph) -> int:
+    """
+    Fold 1/sqrt(d) into the producer of Q: (Q@K) * s == (Q*s)@K with s folded into Q weights.
+    Fused QKV: scale only the first 1/3 of Conv output channels (Q), not K/V.
+    """
+    folded = 0
+
+    def _feeds_softmax(t: gs.Tensor) -> bool:
+        for c in t.outputs:
+            if c.op == "Softmax":
+                return True
+            if c.op == "Cast" and c.outputs and c.outputs[0].outputs:
+                s0 = c.outputs[0]
+                for cc in s0.outputs:
+                    if cc.op == "Softmax":
+                        return True
+        return False
+
+    for node in list(graph.nodes):
+        if node.op not in {"Mul", "Div"} or len(node.inputs) != 2 or not node.outputs:
+            continue
+        out_t = node.outputs[0]
+        if not out_t.outputs or not _feeds_softmax(out_t):
+            continue
+
+        const_in: gs.Constant | None = None
+        tensor_in: gs.Tensor | None = None
+        for inp in node.inputs:
+            if isinstance(inp, gs.Constant):
+                const_in = inp
+            else:
+                tensor_in = inp
+        if const_in is None or tensor_in is None:
+            continue
+
+        val = const_in.values
+        if not isinstance(val, np.ndarray) or val.size != 1:
+            continue
+        scale_val = float(val.item())
+        if node.op == "Div":
+            scale_val = 1.0 / scale_val
+
+        mm = _get_producer_node(graph, tensor_in)
+        if mm is None or mm.op != "MatMul" or len(mm.inputs) != 2:
+            continue
+
+        q_t = mm.inputs[0]
+        n0, _ = _trace_skip_layout_to_producer(graph, q_t)
+        if n0 is None:
+            continue
+
+        is_fused_qkv = False
+        conv_node: gs.Node | None = None
+        if n0.op == "Split":
+            is_fused_qkv = True
+            if not n0.inputs:
+                continue
+            pre = n0.inputs[0]
+            conv_node = _get_producer_node(graph, pre)
+        elif n0.op in {"Conv", "MatMul"}:
+            conv_node = n0
+        else:
+            continue
+
+        if conv_node is None or conv_node.op not in {"Conv", "MatMul"}:
+            continue
+
+        w_idx = 1
+        if len(conv_node.inputs) <= w_idx or not isinstance(
+            conv_node.inputs[w_idx], gs.Constant
+        ):
+            continue
+        w_const = conv_node.inputs[w_idx]
+        w_np = np.asarray(w_const.values)
+        w_oc = int(w_np.shape[0])
+        if is_fused_qkv and w_oc % 3 != 0:
+            continue
+        if is_fused_qkv and len(conv_node.inputs) > 2 and isinstance(
+            conv_node.inputs[2], gs.Constant
+        ):
+            bsz = int(np.asarray(conv_node.inputs[2].values).size)
+            if bsz and bsz != w_oc:
+                continue
+
+        w_type = w_np.dtype
+        w_vals = w_np.astype(np.float64, copy=True)
+
+        if is_fused_qkv and w_vals.shape[0] % 3 == 0 and w_vals.ndim >= 1:
+            dim = w_vals.shape[0] // 3
+            w_vals[:dim, ...] = w_vals[:dim, ...] * scale_val
+        else:
+            w_vals = w_vals * scale_val
+        w_const.values = np.asarray(w_vals, dtype=w_type)
+
+        if len(conv_node.inputs) > 2 and isinstance(
+            conv_node.inputs[2], gs.Constant
+        ):
+            b_const = conv_node.inputs[2]
+            b_np = np.asarray(b_const.values)
+            b_type = b_np.dtype
+            b_vals = b_np.astype(np.float64, copy=True)
+            if is_fused_qkv and b_vals.size and b_vals.size == w_oc and w_oc % 3 == 0:
+                dim = w_oc // 3
+                b_vals[:dim] = b_vals[:dim] * scale_val
+            elif not is_fused_qkv:
+                b_vals = b_vals * scale_val
+            b_const.values = np.asarray(b_vals, dtype=b_type)
+
+        # Bypass Mul/Div: consumers now see unscaled matmul, which equals old output after Q fold.
+        _rewire_tensor_uses(out_t, tensor_in)
+        node.outputs.clear()
+        folded += 1
+
+    return folded
 
 
 def _bypass_single_io_node(node: gs.Node) -> bool:
@@ -143,6 +394,7 @@ def _run_rewrite_passes(graph: gs.Graph) -> dict[str, int]:
         "bypass_removed": 0,
         "add_chain_folded": 0,
         "mul_chain_folded": 0,
+        "attention_scale_folded": 0,
     }
     for _ in range(3):
         graph.toposort()
@@ -163,6 +415,10 @@ def _run_rewrite_passes(graph: gs.Graph) -> dict[str, int]:
         stats["bypass_removed"] += b
         stats["add_chain_folded"] += c["add_chain_folded"]
         stats["mul_chain_folded"] += c["mul_chain_folded"]
+        graph.cleanup().toposort()
+    a = _fold_attention_scale(graph)
+    stats["attention_scale_folded"] = a
+    if a:
         graph.cleanup().toposort()
     return stats
 
@@ -413,10 +669,17 @@ def optimize(
     model = onnx.load(str(input_path))
     graph = gs.import_onnx(model)
     stats = _run_rewrite_passes(graph)
-    vit_stats = {"gemm_fused": 0, "attn_signatures": 0, "gemm3d_fused": 0}
+    vit_stats = {
+        "gemm_fused": 0,
+        "attn_signatures": 0,
+        "conv1x1_replaced": 0,
+        "gemm3d_fused": 0,
+    }
     if enable_vit_pass:
         vit_stats["attn_signatures"] = _count_vit_attention_signatures(graph)
         vit_stats["gemm_fused"] = _replace_matmul_add_with_gemm(graph)
+        # Rank-3 static linear [B,S,C]×[C,N] → Conv1x1 (runs before optional gemm3d; both target 3D linears).
+        vit_stats["conv1x1_replaced"] = _replace_rank3_matmul_with_conv1x1(graph)
         if enable_vit_linear_gemm3d:
             vit_stats["gemm3d_fused"] = _replace_rank3_matmul_add_with_reshape_gemm(graph)
 
@@ -432,8 +695,12 @@ def optimize(
     print(f"[graph-opt] removed bypass nodes:    {stats['bypass_removed']}")
     print(f"[graph-opt] folded add chains:       {stats['add_chain_folded']}")
     print(f"[graph-opt] folded mul chains:       {stats['mul_chain_folded']}")
+    print(
+        f"[graph-opt] attention scale folded:     {stats['attention_scale_folded']}"
+    )
     print(f"[graph-opt] vit attn signatures:      {vit_stats['attn_signatures']}")
     print(f"[graph-opt] vit gemm fused:           {vit_stats['gemm_fused']}")
+    print(f"[graph-opt] vit rank3 conv1x1:         {vit_stats['conv1x1_replaced']}")
     print(f"[graph-opt] vit gemm3d fused:         {vit_stats['gemm3d_fused']}")
 
 
