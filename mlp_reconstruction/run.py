@@ -21,6 +21,8 @@ def _make_run_name(args: argparse.Namespace) -> str:
     do_visual = not args.no_relu_image
     do_text = not args.no_relu_text
     enc = "all" if (do_visual and do_text) else ("img" if do_visual else "txt")
+    if args.no_relu_stem and do_visual:
+        enc += "_nostem"
     return f"{model}__{config}_{enc}__{timestamp}"
 
 
@@ -42,6 +44,7 @@ def _save_checkpoint(
     model_name: str,
     relu_labels: list[str],
     path: str,
+    checkpoint_path: str | None = None,
 ) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     torch.save(
@@ -51,6 +54,7 @@ def _save_checkpoint(
             "relu_blocks": relu_labels,
             "relu_image": any(lbl.startswith("visual[") for lbl in relu_labels),
             "relu_text": any(lbl.startswith("text[") for lbl in relu_labels),
+            "checkpoint_path": checkpoint_path,
         },
         path,
     )
@@ -132,7 +136,7 @@ def _plot_reconstruction_metrics(
 
 def cmd_train(args: argparse.Namespace) -> None:
     from utils.clip_utils import _load_clip
-    from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu
+    from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, apply_relu_blocks
     from mlp_reconstruction.calibrate import VGCalibrationLoader, collect_mlp_io
     from mlp_reconstruction.distill import distill_mlp, verify_reconstruction
     from train.train_utils import set_log_path, log_message, save_run_config
@@ -150,21 +154,29 @@ def cmd_train(args: argparse.Namespace) -> None:
     device = _resolve_device(args)
     log_message(f"Device: {device}")
 
-    checkpoint_for_model = (
-        args.resume_from if args.resume_from else args.checkpoint_path
-    )
-    model, _, tokenizer = _load_clip(
-        args.model_name, device, checkpoint_path=checkpoint_for_model
-    )
-    model.eval()
-
+    # Load resume checkpoint metadata first to know which blocks are already done.
+    resume_ckpt: dict | None = None
     relu_labels: list[str] = []
     if args.resume_from:
-        ckpt = torch.load(args.resume_from, map_location="cpu", weights_only=False)
-        relu_labels = list(ckpt["relu_blocks"])
+        resume_ckpt = torch.load(args.resume_from, map_location="cpu", weights_only=False)
+        relu_labels = list(resume_ckpt["relu_blocks"])
         log_message(
             f"Resumed from {args.resume_from}, {len(relu_labels)} blocks already done"
         )
+        # If --checkpoint-path was not given, fall back to the path recorded in the
+        # reconstruction checkpoint so that pre-collection uses the correct base model
+        # (e.g. a GELU fine-tuned checkpoint rather than the pretrained weights).
+        if args.checkpoint_path is None:
+            args.checkpoint_path = resume_ckpt.get("checkpoint_path")
+            if args.checkpoint_path is not None:
+                log_message(f"Using base model from resume checkpoint: {args.checkpoint_path}")
+
+    # Always load the original model (checkpoint_path) for pre-collection so that
+    # every block's teacher target O comes from the all-GELU original model.
+    model, _, tokenizer = _load_clip(
+        args.model_name, device, checkpoint_path=args.checkpoint_path
+    )
+    model.eval()
 
     loader = VGCalibrationLoader(
         args.calib_jsonl,
@@ -183,13 +195,16 @@ def cmd_train(args: argparse.Namespace) -> None:
     all_blocks = iter_mlp_blocks(model)
     do_visual = not args.no_relu_image
     do_text = not args.no_relu_text
+    skip_stem = args.no_relu_stem
     blocks = [
         b
         for b in all_blocks
         if (b.encoder == "visual" and do_visual) or (b.encoder == "text" and do_text)
+        if not (skip_stem and b.label == "visual[stem]")
     ]
+    stem_note = " (stem excluded)" if skip_stem and do_visual else ""
     log_message(
-        f"Encoders: image={do_visual}, text={do_text} → {len(blocks)} blocks to reconstruct"
+        f"Encoders: image={do_visual}{stem_note}, text={do_text} → {len(blocks)} blocks to reconstruct"
     )
 
     done_set = set(relu_labels)
@@ -202,6 +217,26 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f"--skip-to '{args.skip_to}' not found. "
                 f"Available: {[b.label for b in blocks]}"
             )
+
+    # Pre-collect (X, O) for all remaining blocks from the original all-GELU model.
+    # This ensures every teacher target is the true original GELU output, not a
+    # drifted output produced after upstream blocks have already been converted to ReLU.
+    blocks_to_run = [b for b in blocks if b.label not in done_set]
+    log_message(
+        f"Pre-collecting MLP I/O from original model "
+        f"for {len(blocks_to_run)} remaining blocks ..."
+    )
+    block_io: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+    for info in tqdm(blocks_to_run, desc="Pre-collecting"):
+        X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
+        block_io[info.label] = (X_all, O_all)
+
+    # Restore the partially-distilled model state so distillation continues correctly.
+    if resume_ckpt is not None:
+        apply_relu_blocks(model, relu_labels)
+        model.load_state_dict(resume_ckpt["model_state_dict"])
+        resume_ckpt = None  # free memory
+        log_message(f"Restored model state from {args.resume_from}")
 
     metrics_csv = output_path.parent / "metrics.csv"
     metrics_jsonl = output_path.parent / "metrics.jsonl"
@@ -219,9 +254,12 @@ def cmd_train(args: argparse.Namespace) -> None:
                     done_set.add(info.label)
                 continue
 
+        if info.label in done_set:
+            continue
+
         log_message(f"=== {info.label} ({info.kind}) ===")
 
-        X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
+        X_all, O_all = block_io[info.label]
         log_message(f"  X={tuple(X_all.shape)}, O={tuple(O_all.shape)}")
 
         block_start = time.time()
@@ -265,9 +303,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         append_metrics_row(metrics_csv, row)
         append_metrics_jsonl(metrics_jsonl, row)
 
-        _save_checkpoint(model, args.model_name, relu_labels, args.output + ".tmp")
+        _save_checkpoint(model, args.model_name, relu_labels, args.output + ".tmp", args.checkpoint_path)
 
-    _save_checkpoint(model, args.model_name, relu_labels, args.output)
+    _save_checkpoint(model, args.model_name, relu_labels, args.output, args.checkpoint_path)
     total_elapsed = time.time() - run_start
     warn_blocks = [r["block"] for r in metrics_history if r["status"] == "WARN"]
     summary = (
@@ -334,6 +372,12 @@ def parse_args() -> argparse.Namespace:
         "--no-relu-text",
         action="store_true",
         help="Skip text-encoder reconstruction (default: reconstruct both)",
+    )
+    p.add_argument(
+        "--no-relu-stem",
+        action="store_true",
+        help="Keep GELU in ConvStem (MobileCLIP2-B visual[stem]); "
+             "still reconstructs all other visual blocks",
     )
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--batch-size", type=int, default=64)
