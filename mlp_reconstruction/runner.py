@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import time
 from datetime import datetime
@@ -65,7 +66,7 @@ def cmd_train(args: argparse.Namespace) -> None:
         restore_gelu,
     )
     from mlp_reconstruction.calibrate import VGCalibrationLoader, collect_mlp_io
-    from mlp_reconstruction.distill import distill_mlp, verify_reconstruction
+    from mlp_reconstruction.distill import distill_mlp, verify_reconstruction, verify_gelu_drift
     from train.train_utils import set_log_path, log_message, save_run_config
     from train.metrics import append_metrics_row, append_metrics_jsonl
 
@@ -212,6 +213,8 @@ def cmd_train(args: argparse.Namespace) -> None:
                 "status": "SKIPPED",
                 "steps_run": 0,
                 "elapsed_s": 0.0,
+                "gelu_cos_sim": float("nan"),
+                "gelu_loss": float("nan"),
             }
             metrics_history.append(row)
             append_metrics_row(metrics_csv, row)
@@ -265,6 +268,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         elapsed_s = time.time() - block_start
         cos_sim = verify_reconstruction(info, X_all, O_all, device)
 
+        gelu_cos_sim = float("nan")
+        gelu_loss = float("nan")
+
         if gelu_threshold is not None and cos_sim < gelu_threshold:
             # Revert: restore original weights and GELU activation.
             if info.kind == "conv_stem":
@@ -278,6 +284,13 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f"  [REVERTED] cos_sim={cos_sim:.4f} < threshold={gelu_threshold:.4f},"
                 f" block kept as GELU"
             )
+            if not args.greedy:
+                gelu_cos_sim, gelu_loss = verify_gelu_drift(
+                    model, info, img_batches, txt_batches, O_all, device
+                )
+                log_message(
+                    f"  [GELU drift] cos_sim={gelu_cos_sim:.4f}  loss={gelu_loss:.6f}"
+                )
         else:
             relu_labels.append(info.label)
             done_set.add(info.label)
@@ -295,6 +308,8 @@ def cmd_train(args: argparse.Namespace) -> None:
             "status": status,
             "steps_run": steps_run,
             "elapsed_s": round(elapsed_s, 1),
+            "gelu_cos_sim": round(gelu_cos_sim, 4) if not math.isnan(gelu_cos_sim) else float("nan"),
+            "gelu_loss": round(gelu_loss, 6) if not math.isnan(gelu_loss) else float("nan"),
         }
         metrics_history.append(row)
         append_metrics_row(metrics_csv, row)

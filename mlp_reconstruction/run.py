@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--project-root", default=".")
     p.add_argument("--n-calib", type=int, default=1024)
-    p.add_argument("--calib-batch-size", type=int, default=128)
+    p.add_argument("--calib-batch-size", type=int, default=256)
     p.add_argument("--output-dir", default="checkpoints")
     p.add_argument(
         "--output",
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="L_Clamp loss weight (0=disable). Set 2.0 to match APHQ-ViT original "
-             "(only useful when targeting quantization).",
+        "(only useful when targeting quantization).",
     )
     p.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
     p.add_argument(

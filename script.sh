@@ -26,12 +26,14 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs512_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260426_074645/checkpoint_epoch_110.pt --output-postfix _260426_0 --max-text-len 40
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_img_nostem__20260426_210359/mlp_relu.pt --output-postfix _260427_0 --max-text-len 40
+
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260426_0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260427_0
 
 
 # eval local (torch)
@@ -42,7 +44,7 @@ CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B 
 CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 # eval local (onnx)
-python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_onnx
+python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260427_0_onnx
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -139,18 +141,18 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 # ── MLP Reconstruction (GELU → ReLU + distillation) ───────────────────────────
 
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 7 \
-    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform --no-relu-stem
+    --model-name MobileCLIP2-B --gpu-id 6 \
+    --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform --no-relu-text --no-relu-stem
 
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 7 \
-    --n-calib 4096 --n-iters 20000 --log-every 500 --aph-mode uniform --no-relu-stem \
-    --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
+    --model-name MobileCLIP2-B --gpu-id 5 \
+    --n-calib 4096 --n-iters 40000 --batch-size 64 --log-every 500 --aph-mode uniform \
+    --no-relu-text --gelu-threshold 0.99 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 # Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 6 \
-    --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform \
+    --n-calib 4096 --n-iters 40000 --batch-size 64 --log-every 500 --aph-mode uniform \
     --no-relu-stem  --no-relu-text --gelu-threshold 0.99 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 # Auto-revert: blocks with cos_sim < 0.97 after distillation are reverted back to GELU

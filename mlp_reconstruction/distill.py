@@ -181,3 +181,37 @@ def verify_reconstruction(
         cos = F.cosine_similarity(O_flat, P_flat, dim=1).mean().item()
         cos_sims.append(cos)
     return sum(cos_sims) / len(cos_sims)
+
+
+@torch.no_grad()
+def verify_gelu_drift(
+    model: nn.Module,
+    info: MLPBlockInfo,
+    img_batches: list[torch.Tensor] | None,
+    txt_batches: list[torch.Tensor] | None,
+    O_orig: torch.Tensor,
+    device: torch.device,
+    batch_size: int = 64,
+) -> tuple[float, float]:
+    """Measure output drift of a GELU-restored block due to upstream ReLU substitutions.
+
+    Called after restore_gelu(info) in non-greedy mode. Re-collects the block's actual
+    output using the current model (upstream blocks already ReLU) and compares it to the
+    original GELU output O_orig captured before any distillation.
+    Returns (cos_sim, mse_loss).
+    """
+    from mlp_reconstruction.calibrate import collect_mlp_io
+
+    _, O_cur, _ = collect_mlp_io(model, info, img_batches, txt_batches, device)
+
+    cos_sims: list[float] = []
+    mse_losses: list[float] = []
+    N = O_cur.shape[0]
+    for i in range(0, N, batch_size):
+        O_b = O_orig[i : i + batch_size].to(device)
+        P_b = O_cur[i : i + batch_size].to(device)
+        O_flat = O_b.reshape(O_b.shape[0], -1)
+        P_flat = P_b.reshape(P_b.shape[0], -1)
+        cos_sims.append(F.cosine_similarity(O_flat, P_flat, dim=1).mean().item())
+        mse_losses.append(F.mse_loss(P_flat, O_flat).item())
+    return sum(cos_sims) / len(cos_sims), sum(mse_losses) / len(mse_losses)
