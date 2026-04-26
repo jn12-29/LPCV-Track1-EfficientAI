@@ -167,6 +167,7 @@ Block counts: S0 = 32 (12 text + 20 visual), S2 = 56, B = 24.
 ### Pipeline (`pipeline/`)
 
 - **`pipeline/export_onnx.py`** — exports image/text encoders to ONNX opset 18, simplifies, verifies. Key arg: `--max-text-len N` (default 77) — ONNX external I/O stays `(1, 77)` per competition spec, but the text encoder internally truncates tokens to `(1, N)` and attn_mask to `(N, N)` before the transformer, so the compiled model attends over only N positions (faster for short texts). All checkpoint types auto-detected via `--checkpoint-path`.
+- **`pipeline/replace_onnx_gelu_with_relu.py`** — post-export ONNX pass used by `pipeline_ptq.sh`; replaces exact `Erf`-based GELU subgraphs in `image_encoder.onnx` with `Relu` before PTQ/compile.
 - **`pipeline/compile_and_profile.py`** — submits ONNX to QAI Hub (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results.
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference, Recall@K. Three modes: A/B/C.

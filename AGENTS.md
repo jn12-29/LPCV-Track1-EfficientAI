@@ -72,6 +72,7 @@ Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
 
 - **`pipeline/dataset.py`** — `RetrievalEvalDataset` (per-image or per-text iteration; `get_image_to_text_eval_data()` returns all texts + per-image positive indices) and `ImageTextRetrievalDataset` (positive pairs).
 - **`pipeline/export_onnx.py`** — wraps image/text encoders in `OpenClipVisionEncoder` / `OpenClipTextEncoder`, exports to ONNX opset 18, simplifies, verifies. Key arg: `--max-text-len N` (default 77) — the ONNX external I/O is always `(1, 77)` as required by the competition, but internally the text encoder truncates tokens to `(1, N)` and attn_mask to `(N, N)` before the transformer, so the compiled model only attends over N positions (faster when real texts are short). All checkpoint types auto-detected via `--checkpoint-path` (`_load_clip` handles regular / QAT / relu-reconstruction).
+- **`pipeline/replace_onnx_gelu_with_relu.py`** — post-export ONNX pass used by `pipeline_ptq.sh`; replaces exact `Erf`-based GELU subgraphs in `image_encoder.onnx` with `Relu` before PTQ/compile.
 - **`pipeline/compile_and_profile.py`** — submits ONNX models to QAI Hub as compile jobs (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results with `lowpowervision@gmail.com`.
 - **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
 - **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference submission, and Recall@K. Three modes: (A) upload + infer, (B) infer with existing dataset IDs, (C) reuse inference job outputs.

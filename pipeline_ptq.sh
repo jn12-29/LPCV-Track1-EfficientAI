@@ -29,6 +29,10 @@ python pipeline/export_onnx.py \
   --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt \
   --output-postfix ""
 
+python pipeline/replace_onnx_gelu_with_relu.py \
+  --input exported_MobileCLIP2-B_onnx/image_encoder.onnx \
+  --output exported_MobileCLIP2-B_onnx/image_encoder.onnx
+
 # python ptq/eval_ptq.py \
 #   --onnx-dir exported_MobileCLIP2-B_onnx \
 #   --image-postfix "${output_postfix}" \
