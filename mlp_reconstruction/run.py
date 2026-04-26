@@ -354,7 +354,7 @@ def cmd_train(args: argparse.Namespace) -> None:
             log_every=args.log_every,
             aph_mode=args.aph_mode,
             log_fn=log_message,
-            early_stop_patience=args.early_stop_patience,
+            early_stop_patience=args.early_stop_patience if args.early_stop else 0,
             early_stop_delta=args.early_stop_delta,
         )
         elapsed_s = time.time() - block_start
@@ -520,17 +520,22 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--log-every", type=int, default=500)
     p.add_argument(
+        "--early-stop",
+        action="store_true",
+        help="Enable early stopping (default: disabled; runs all n_iters)",
+    )
+    p.add_argument(
         "--early-stop-patience",
         type=int,
         default=8,
         metavar="N",
-        help="Stop after N log-intervals without improvement (0=disable)",
+        help="(requires --early-stop) Stop after N log-intervals without improvement",
     )
     p.add_argument(
         "--early-stop-delta",
         type=float,
         default=1e-4,
-        help="Min relative EMA-loss improvement to reset patience counter",
+        help="(requires --early-stop) Min relative EMA-loss improvement to reset patience counter",
     )
     p.add_argument("--skip-to", default=None)
     p.add_argument("--resume-from", default=None)
