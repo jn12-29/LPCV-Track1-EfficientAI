@@ -28,6 +28,7 @@ def distill_mlp(
     batch_size: int = 32,
     n_iters: int = 20000,
     alpha: float = 2.0,
+    gelu_ub: float | None = None,
     device: torch.device = torch.device('cuda'),
     log_every: int = 500,
     aph_mode: str = 'uniform',
@@ -67,6 +68,7 @@ def distill_mlp(
     else:
         params = list(info.fc1.parameters()) + list(info.fc2.parameters())
     optimizer = torch.optim.Adam(params, lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_iters, eta_min=0.)
 
     model.eval()
     final_loss = 0.0
@@ -95,8 +97,11 @@ def distill_mlp(
             L_direct = _weighted_mse(O_direct, O_b, H_view)
 
             if alpha > 0:
-                pos_vals = act[act > 0]
-                threshold = torch.quantile(pos_vals, 0.99) if pos_vals.numel() > 0 else act.new_tensor(1.0)
+                if gelu_ub is not None:
+                    threshold = act.new_tensor(gelu_ub)
+                else:
+                    pos_vals = act[act > 0]
+                    threshold = torch.quantile(pos_vals, 0.99) if pos_vals.numel() > 0 else act.new_tensor(1.0)
                 A_clamped = act.clamp(max=threshold)
                 O_clamp = info.fc2(A_clamped)
                 loss = L_direct + alpha * _weighted_mse(O_clamp, O_b, H_view)
@@ -106,6 +111,7 @@ def distill_mlp(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         final_loss = loss.item()
         ema_loss = final_loss if ema_loss is None else 0.98 * ema_loss + 0.02 * final_loss

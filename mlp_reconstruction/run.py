@@ -244,9 +244,9 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f"Available: {[b.label for b in blocks]}"
             )
 
-    block_io: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+    block_io: dict[str, tuple[torch.Tensor, torch.Tensor, float | None]] = {}
     if not args.greedy:
-        # Pre-collect (X, O) for all remaining blocks from the original all-GELU model.
+        # Pre-collect (X, O, gelu_ub) for all remaining blocks from the original all-GELU model.
         # This ensures every teacher target is the true original GELU output, not a
         # drifted output produced after upstream blocks have already been converted to ReLU.
         blocks_to_run = [b for b in blocks if b.label not in done_set]
@@ -255,8 +255,8 @@ def cmd_train(args: argparse.Namespace) -> None:
             f"for {len(blocks_to_run)} remaining blocks ..."
         )
         for info in tqdm(blocks_to_run, desc="Pre-collecting"):
-            X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
-            block_io[info.label] = (X_all, O_all)
+            X_all, O_all, gelu_ub = collect_mlp_io(model, info, img_batches, txt_batches, device)
+            block_io[info.label] = (X_all, O_all, gelu_ub)
     else:
         log_message(
             "Greedy mode: I/O will be collected just-in-time from the partially-replaced model"
@@ -316,9 +316,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         log_message(f"=== {info.label} ({info.kind}) ===")
 
         if args.greedy:
-            X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
+            X_all, O_all, gelu_ub = collect_mlp_io(model, info, img_batches, txt_batches, device)
         else:
-            X_all, O_all = block_io[info.label]
+            X_all, O_all, gelu_ub = block_io[info.label]
         log_message(f"  X={tuple(X_all.shape)}, O={tuple(O_all.shape)}")
 
         # Save original weights before distillation (needed for auto-revert).
@@ -349,6 +349,7 @@ def cmd_train(args: argparse.Namespace) -> None:
             batch_size=args.batch_size,
             n_iters=args.n_iters,
             alpha=args.alpha,
+            gelu_ub=gelu_ub,
             device=device,
             log_every=args.log_every,
             aph_mode=args.aph_mode,
@@ -506,8 +507,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--alpha",
         type=float,
-        default=0.0,
-        help="L_Clamp loss weight (0=disable; use >0 only when targeting QAT/quantization)",
+        default=2.0,
+        help="L_Clamp loss weight (0=disable). Default 2.0 matches APHQ-ViT original; "
+             "set 0 to disable for non-quantization use.",
     )
     p.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
     p.add_argument(
