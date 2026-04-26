@@ -331,13 +331,17 @@ def run_training(args) -> None:
         # --- DDP wrap (after calibration) ---
         if distributed:
             _t0 = time.perf_counter()
+            # static_graph=True is incompatible with no_sync()-based gradient
+            # accumulation (Phase 3 of cache-based accum): it assumes exactly one
+            # backward per forward per optimizer step. Use static_graph=False so
+            # both accum_freq=1 and accum_freq>1 code paths work correctly.
             model = DistributedDataParallel(
                 model,
                 device_ids=[device.index],
                 output_device=device.index,
                 broadcast_buffers=False,
                 find_unused_parameters=False,
-                static_graph=True,
+                static_graph=False,
             )
             if is_main_process:
                 log_message(f"[Timer] ddp_wrap: {time.perf_counter() - _t0:.2f}s", run_name=run_name)

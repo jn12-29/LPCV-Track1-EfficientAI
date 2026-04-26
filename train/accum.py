@@ -165,17 +165,16 @@ def phase2_feature_backward(
             cb.neg_grad = neg_leaf.grad[offset:offset + B_i, :K_i].detach().clone()
         offset += B_i
 
-    # --- All-reduce params that were updated outside DDP ---
+    # --- All-reduce params that are outside the DDP model ---
+    # logit_scale lives inside the DDP-wrapped model, so Phase 3's backward will
+    # trigger its DDP hook and DDP will all-reduce it automatically.
+    # Only params that are NOT inside the DDP model (e.g. SigLIP logit_bias in
+    # loss_fn) need manual all-reduce here.
     if distributed:
-        params_to_sync: List[torch.Tensor] = []
-        if raw_model.logit_scale.grad is not None:
-            params_to_sync.append(raw_model.logit_scale.grad)
         if loss_type == "siglip" and hasattr(loss_fn, "logit_bias"):
             if loss_fn.logit_bias.grad is not None:
-                params_to_sync.append(loss_fn.logit_bias.grad)
-        for g in params_to_sync:
-            dist.all_reduce(g, op=dist.ReduceOp.SUM)
-            g /= world_size
+                dist.all_reduce(loss_fn.logit_bias.grad, op=dist.ReduceOp.SUM)
+                loss_fn.logit_bias.grad /= world_size
 
     return total_loss.detach(), clip_loss.detach(), hard_negative_loss.detach()
 
@@ -192,6 +191,15 @@ def phase3_model_backward(
 
     Uses model.no_sync() on all but the last batch to suppress premature DDP
     all-reduce. The last batch's backward triggers the single collective sync.
+
+    Each mini-batch uses a SINGLE DDP forward (positive + negative text merged into
+    one call) followed by a SINGLE torch.autograd.backward() covering all outputs.
+    This ensures DDP's reducer sees exactly one backward per forward, which is
+    required when the model is wrapped with static_graph=True.
+
+    logit_scale_out is included in the backward with a zero external gradient so
+    its DDP hook fires and DDP automatically all-reduces the logit_scale.grad that
+    was already set during Phase 2 (without manual dist.all_reduce).
     """
     n = len(batches)
     for i, cb in enumerate(batches):
@@ -199,23 +207,41 @@ def phase3_model_backward(
         sync_ctx = contextlib.nullcontext() if (not distributed or is_last) else model.no_sync()
 
         with sync_ctx:
-            # Image + positive text
-            with autocast(device_type=device.type, enabled=amp_enabled):
-                img_f, pos_f, _ = model(cb.images, cb.positive_tokens)
-            img_f.backward(gradient=cb.img_grad)
-            pos_f.backward(gradient=cb.pos_grad)
+            B = cb.images.shape[0]
 
-            # Negative text (only if we have gradients for them)
+            # Merge positive and negative text into a single forward pass so that
+            # text-encoder params receive gradient from one backward call only,
+            # preventing double-firing of DDP hooks.
             if cb.neg_grad is not None:
-                B, K, L = cb.negative_tokens.shape
-                with autocast(device_type=device.type, enabled=amp_enabled):
-                    _, flat_neg_f, _ = model(text=cb.negative_tokens.view(B * K, L))
-                    if loss_type != "siglip":
-                        # Phase 1 normalised CLIP negatives; mirror that here so
-                        # cb.neg_grad is w.r.t. the same normalised tensor.
-                        flat_neg_f = F.normalize(flat_neg_f, dim=-1)
-                    neg_f = flat_neg_f.view(B, K, -1)
-                neg_f.backward(gradient=cb.neg_grad)
+                K_i = cb.neg_features.shape[1]
+                L = cb.positive_tokens.shape[-1]
+                neg_flat_tokens = cb.negative_tokens[:, :K_i, :].reshape(B * K_i, L)
+                all_text_tokens = torch.cat([cb.positive_tokens, neg_flat_tokens], dim=0)
+            else:
+                all_text_tokens = cb.positive_tokens
+                K_i = 0
+
+            # Single DDP forward → single prepare_for_backward call
+            with autocast(device_type=device.type, enabled=amp_enabled):
+                img_f, all_text_f, logit_scale_out = model(cb.images, all_text_tokens)
+
+            pos_f = all_text_f[:B]
+            outputs = [img_f, pos_f, logit_scale_out]
+            grad_tensors = [cb.img_grad, cb.pos_grad,
+                            logit_scale_out.new_zeros(logit_scale_out.shape)]
+
+            if cb.neg_grad is not None:
+                neg_f_flat = all_text_f[B:]
+                if loss_type != "siglip":
+                    # Phase 1 normalised CLIP negatives; mirror that here so
+                    # cb.neg_grad is w.r.t. the same normalised tensor.
+                    neg_f_flat = F.normalize(neg_f_flat, dim=-1)
+                neg_f = neg_f_flat.view(B, K_i, -1)
+                outputs.append(neg_f)
+                grad_tensors.append(cb.neg_grad)
+
+            # Single backward: DDP autograd hooks fire exactly once per parameter
+            torch.autograd.backward(outputs, grad_tensors)
 
 
 def train_one_epoch_accum(
@@ -262,11 +288,10 @@ def train_one_epoch_accum(
 
     total_consumed = 0
     optimizer_step_idx = 0
-    num_optimizer_steps = -(-num_batches // accum_freq)  # ceil division
+    num_optimizer_steps = num_batches // accum_freq  # floor: drop partial tail cycle
     batch_iter = iter(dataloader)
 
-    while total_consumed < num_batches:
-        n = min(accum_freq, num_batches - total_consumed)
+    while total_consumed + accum_freq <= num_batches:
 
         # ---- Data transfer ----
         if enable_step_timing and _cuda_sync:
@@ -274,7 +299,7 @@ def train_one_epoch_accum(
         _t_data = time.perf_counter() if enable_step_timing else 0.0
 
         batches: List[CachedBatch] = []
-        for _ in range(n):
+        for _ in range(accum_freq):
             raw = next(batch_iter)
             batches.append(CachedBatch(
                 images=raw["images"].to(device, non_blocking=True),
@@ -351,7 +376,7 @@ def train_one_epoch_accum(
                 torch.cuda.synchronize()
             _timers.update("optim", time.perf_counter() - _t_opt)
 
-        total_consumed += n
+        total_consumed += accum_freq
         optimizer_step_idx += 1
         global_step += 1
 
@@ -388,7 +413,8 @@ def train_one_epoch_accum(
             timing_str = _timers.summary_str() if enable_step_timing else ""
             log_message(
                 f"Epoch {epoch} Step {optimizer_step_idx}/{num_optimizer_steps} "
-                f"[accum={n}×{batches[0].images.shape[0]}] "
+                f"[pool={accum_freq}×{batches[0].images.shape[0]}×{world_size}="
+                f"{accum_freq * batches[0].images.shape[0] * world_size}] "
                 f"Total {total_loss.item():.4f} "
                 f"CLIP {clip_loss.item():.4f} "
                 f"HardNeg {hard_negative_loss.item():.4f} "

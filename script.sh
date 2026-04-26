@@ -28,23 +28,24 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_img_nostem__20260426_210359/mlp_relu.pt --output-postfix _260427_0 --max-text-len 40
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc27_hn4_hnw1_seed0__20260426_220300/checkpoint_epoch_130.pt --output-postfix _260427_1 --max-text-len 40
 
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260427_0
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260427_1
 
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs512_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260426_074645/checkpoint_epoch_105.pt
-CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
+CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
+CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 # eval local (onnx)
-python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260427_0_onnx
+python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260427_1_onnx
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -75,20 +76,11 @@ python train/finetune.py \
 # Disabling P2P forces NCCL to use shared memory (SHM) instead, which works correctly.
 NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 256 --accum-freq 27 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
-    --loss-type clip --num-hard-negatives 4 --compile 
-
-NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
-    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 256 --accum-freq 27 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
-    --loss-type clip --num-hard-negatives 4 --compile  \
+    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 \
+    --batch-size 256 --accum-freq 16 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 10 \
+    --log-every-n-steps 1 \
     --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_greedy_img_nostem__20260426_193441/mlp_relu.pt
-
-torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29502 train/finetune.py \
-    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 256 --accum-freq 60 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
-    --loss-type clip --num-hard-negatives 4 \
-    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc4096_magnitude_all__20260426_004517/mlp_relu.pt
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
@@ -142,12 +134,13 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B \
 
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 6 \
-    --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform --no-relu-text --no-relu-stem
+    --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform \
+    --no-relu-text --batch-size 32 --greedy --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 python mlp_reconstruction/run.py \
     --model-name MobileCLIP2-B --gpu-id 5 \
-    --n-calib 4096 --n-iters 40000 --batch-size 64 --log-every 500 --aph-mode uniform \
-    --no-relu-text --gelu-threshold 0.99 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
+    --n-calib 4096 --n-iters 40000 --batch-size 32 --log-every 500 --aph-mode uniform \
+    --no-relu-text --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 # Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
 python mlp_reconstruction/run.py \
