@@ -57,7 +57,7 @@ python pipeline/eval_remote.py \
     --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
 ```
 
-Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
+Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`, `MobileCLIP2-B`
 
 ## Architecture
 
@@ -117,7 +117,11 @@ Generates fine-grained retrieval training data from images via an OpenRouter VLM
 Expected flat training record format:
 
 ```json
-{"image_path": "build_datasets/data/VG_100K/107914.jpg", "positives": ["..."], "hard_negatives": ["..."]}
+{
+  "image_path": "build_datasets/data/VG_100K/107914.jpg",
+  "positives": ["..."],
+  "hard_negatives": ["..."]
+}
 ```
 
 Training and analysis scripts are expected to run from the repository root so `image_path` can be opened directly.

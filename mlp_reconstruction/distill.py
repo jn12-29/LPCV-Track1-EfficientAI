@@ -120,10 +120,12 @@ def distill_mlp(
         if at_check or step == n_iters - 1:
             elapsed = time.time() - start_time
             throughput = batch_size * (step + 1) / max(elapsed, 1e-6)
+            current_lr = scheduler.get_last_lr()[0]
             parts = [
                 f"  [{info.label}] {step:>6}/{n_iters}",
                 f"loss={final_loss:.6f}",
                 f"ema={ema_loss:.6f}",
+                f"lr={current_lr:.2e}",
             ]
             if prev_check_ema is not None:
                 rel_impr = (prev_check_ema - ema_loss) / (prev_check_ema + 1e-10)

@@ -394,6 +394,7 @@ def cmd_train(args: argparse.Namespace) -> None:
         metrics_history.append(row)
         append_metrics_row(metrics_csv, row)
         append_metrics_jsonl(metrics_jsonl, row)
+        _plot_reconstruction_metrics(metrics_history, output_path.parent)
 
         _save_checkpoint(
             model,
@@ -442,6 +443,7 @@ def cmd_train(args: argparse.Namespace) -> None:
         for name, value in metrics.items():
             log_message(f"  {name}: {value:.4f}")
             print(f"{name}: {value:.4f}")
+        append_metrics_jsonl(metrics_jsonl, {"block": "__eval__", **metrics})
 
 
 # ---------------------------------------------------------------------------

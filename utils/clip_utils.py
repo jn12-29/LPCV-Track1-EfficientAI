@@ -62,6 +62,8 @@ def _load_clip(
 
     if pretrained:
         pretrained_tag = pretrained
+    elif checkpoint_path:
+        pretrained_tag = None
     else:
         available_tags = [
             ckpt for name, ckpt in available_models_tuple if name == model_name
