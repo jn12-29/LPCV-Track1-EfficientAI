@@ -61,15 +61,18 @@ def collect_mlp_io(
     image_batches: list[torch.Tensor] | None,
     text_batches: list[torch.Tensor] | None,
     device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Collect (X_all, O_all) for an MLP block via forward hooks.
+) -> tuple[torch.Tensor, torch.Tensor, float | None]:
+    """Collect (X_all, O_all, gelu_ub) for an MLP block via forward hooks.
 
     For fastvit_convmlp: X_all = conv_out (direct input to fc1).
     For text_sequential / vit_mlp: X_all = raw MLP input.
+    gelu_ub: 99th-percentile of GELU activations (fc2 pre-activation positives),
+             used as L_Clamp upper bound. None for conv_stem blocks.
     Returns CPU tensors.
     """
     X_list: list[torch.Tensor] = []
     O_list: list[torch.Tensor] = []
+    A_list: list[torch.Tensor] = []
 
     if info.kind == 'fastvit_convmlp':
         h_x = info.mlp.conv.register_forward_hook(
@@ -82,6 +85,11 @@ def collect_mlp_io(
     h_o = info.mlp.register_forward_hook(
         lambda m, a, o: O_list.append(o.detach().cpu())
     )
+    h_a = None
+    if info.fc2 is not None:
+        h_a = info.fc2.register_forward_pre_hook(
+            lambda m, a: A_list.append(a[0].detach().cpu())
+        )
 
     model.eval()
     batches = text_batches if info.encoder == 'text' else image_batches
@@ -95,4 +103,17 @@ def collect_mlp_io(
     finally:
         h_x.remove()
         h_o.remove()
-    return torch.cat(X_list, dim=0), torch.cat(O_list, dim=0)
+        if h_a is not None:
+            h_a.remove()
+
+    if A_list:
+        A_all = torch.cat(A_list, dim=0)
+        pos = A_all[A_all > 0].float()
+        if pos.numel() > 1_000_000:
+            idx = torch.randperm(pos.numel())[:1_000_000]
+            pos = pos[idx]
+        gelu_ub = float(torch.quantile(pos, 0.99)) if pos.numel() > 0 else None
+    else:
+        gelu_ub = None
+
+    return torch.cat(X_list, dim=0), torch.cat(O_list, dim=0), gelu_ub
