@@ -29,19 +29,32 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated GPU ids. Single-GPU example: 2. Multi-GPU example with torchrun: 0,1,2,3",
     )
     parser.add_argument("--local-rank", type=int, default=-1)
-    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
 
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-6)
+    parser.add_argument(
+        "--init-lr", type=float, default=0.0, help="LR at warmup step 0 (default 0)"
+    )
+    parser.add_argument(
+        "--min-lr",
+        type=float,
+        default=0.0,
+        help="LR floor after cosine decay (default 0)",
+    )
     parser.add_argument("--weight-decay", type=float, default=0.2)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--warmup-steps", type=int, default=100)
     parser.add_argument("--accum-freq", type=int, default=1)
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--grad-checkpointing", action="store_true")
-    parser.add_argument("--no-amp", action="store_true", help="Disable automatic mixed precision (default: AMP enabled on CUDA)")
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Disable automatic mixed precision (default: AMP enabled on CUDA)",
+    )
     parser.add_argument("--log-every-n-steps", type=int, default=10)
     parser.add_argument(
         "--save-every-n-epochs",
@@ -105,14 +118,43 @@ def parse_args() -> argparse.Namespace:
     )
 
     # --- ReLU MLP ---
-    parser.add_argument("--relu-image", action="store_true", help="Replace GELU with ReLU in all visual-encoder MLP blocks.")
-    parser.add_argument("--relu-text", action="store_true", help="Replace GELU with ReLU in all text-encoder MLP blocks.")
+    parser.add_argument(
+        "--relu-image",
+        action="store_true",
+        help="Replace GELU with ReLU in all visual-encoder MLP blocks.",
+    )
+    parser.add_argument(
+        "--relu-text",
+        action="store_true",
+        help="Replace GELU with ReLU in all text-encoder MLP blocks.",
+    )
 
     # --- QAT ---
-    parser.add_argument("--qat-enabled", action="store_true", help="Enable Quantization-Aware Training via AIMET.")
-    parser.add_argument("--qat-weight-bw", type=int, default=8, choices=[8], help="Weight bit-width for QAT.")
-    parser.add_argument("--qat-act-bw", type=int, default=8, choices=[8, 16], help="Activation bit-width for QAT.")
-    parser.add_argument("--qat-calib-samples", type=int, default=1024, help="Number of samples for QAT calibration.")
+    parser.add_argument(
+        "--qat-enabled",
+        action="store_true",
+        help="Enable Quantization-Aware Training via AIMET.",
+    )
+    parser.add_argument(
+        "--qat-weight-bw",
+        type=int,
+        default=8,
+        choices=[8],
+        help="Weight bit-width for QAT.",
+    )
+    parser.add_argument(
+        "--qat-act-bw",
+        type=int,
+        default=8,
+        choices=[8, 16],
+        help="Activation bit-width for QAT.",
+    )
+    parser.add_argument(
+        "--qat-calib-samples",
+        type=int,
+        default=1024,
+        help="Number of samples for QAT calibration.",
+    )
     parser.add_argument(
         "--qat-quant-scheme",
         type=str,
@@ -141,7 +183,7 @@ def parse_args() -> argparse.Namespace:
         "--export-onnx",
         action="store_true",
         help="Export ONNX (image + text encoder) at each numbered checkpoint and at training end. "
-             ".pt checkpoints are always saved.",
+        ".pt checkpoints are always saved.",
     )
 
     # --- Compilation ---
@@ -158,7 +200,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Profile per-step timing (data transfer, forward, loss, backward, optimizer). "
-             "Adds CUDA sync overhead; use for profiling only.",
+        "Adds CUDA sync overhead; use for profiling only.",
     )
 
     return parser.parse_args()

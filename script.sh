@@ -41,8 +41,8 @@ python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs512_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260426_074645/checkpoint_epoch_105.pt
 CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
-# eval local (onnx) do not support yet
-python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
+# eval local (onnx)
+python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_onnx
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset \
@@ -51,9 +51,6 @@ python pipeline/eval_remote.py --upload-dataset \
 # eval remote (Mode B: existing dataset)
 python pipeline/eval_remote.py \
     --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
-
-python pipeline/eval_remote.py --model-name MobileCLIP2-S2_260418 \
-    --image-compiled-id jpx7z411g --text-compiled-id j5mwlmzwp
 
 python pipeline/eval_remote.py --model-name MobileCLIP2-S2 \
     --image-compiled-id j57je47v5 --text-compiled-id jp27rwvr5
@@ -65,26 +62,16 @@ python pipeline/eval_remote.py \
 python pipeline/eval_remote.py \
     --image-inference-id jp4xy1xv5 --text-inference-id j57je4jl5 --k 7
 
-python pipeline/eval_remote.py \
-    --image-inference-id jper77m7g --text-inference-id jgj0rrn7p --k 7
-
 # fine-tune
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-S2 --gpu-ids 5 --batch-size 256 --accum-freq 50 --epochs 20 --lr 1e-6
 
 # fine-tune (multi-GPU DDP)
-torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
-    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 2,3 --batch-size 256 --accum-freq 32  --epochs 100 --lr 1e-6 --weight-decay 0.2 --loss-type clip --num-hard-negatives 4
 
-torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 2,3,5,6 --batch-size 128 --accum-freq 32  --epochs 100 --lr 1e-6 --weight-decay 0.2 --loss-type clip --num-hard-negatives 4
-
-torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
-    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 1,2,3,5 --batch-size 256 --accum-freq 30 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
+    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 256 --accum-freq 27 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4
 
 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
@@ -160,9 +147,9 @@ python mlp_reconstruction/run.py \
 
 # Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 3 \
+    --model-name MobileCLIP2-B --gpu-id 6 \
     --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform \
-    --no-relu-stem  --no-relu-text --gelu-threshold 0.99
+    --no-relu-stem  --no-relu-text --gelu-threshold 0.99 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
 
 # Auto-revert: blocks with cos_sim < 0.97 after distillation are reverted back to GELU
 # python mlp_reconstruction/run.py \

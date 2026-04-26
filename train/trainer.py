@@ -384,6 +384,9 @@ def run_training(args) -> None:
                 1,
             ),
             warmup_steps=args.warmup_steps,
+            peak_lr=args.lr,
+            init_lr=getattr(args, "init_lr", 0.0),
+            min_lr=getattr(args, "min_lr", 0.0),
         )
         # QAT uses fp32 fake quantization; AMP fp16 casts conflict and double memory.
         amp_enabled = not args.no_amp and device.type == "cuda" and not (qat_config is not None)
