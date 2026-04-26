@@ -69,16 +69,18 @@ python train/finetune.py \
 
 # fine-tune (multi-GPU DDP)
 
-OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+# NCCL_P2P_DISABLE=1: PCIe P2P direct GPU memory access is broken on GPUs 0-3 on this machine.
+# Disabling P2P forces NCCL to use shared memory (SHM) instead, which works correctly.
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 256 --accum-freq 27 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
-    --loss-type clip --num-hard-negatives 4
+    --loss-type clip --num-hard-negatives 4 --compile 
 
-torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 512 --accum-freq 30 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
-    --loss-type clip --num-hard-negatives 4 --compile \
-    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs64_nc4096_uniform_all_nostem__20260426_022617/mlp_relu.pt
+    --model-name MobileCLIP2-B --gpu-ids 0,1,2,3 --batch-size 256 --accum-freq 27 --epochs 200 --lr 2e-6 --init-lr 0 --min-lr 1e-7 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4 --compile  \
+    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_greedy_img_nostem__20260426_193441/mlp_relu.pt
 
 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29502 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \

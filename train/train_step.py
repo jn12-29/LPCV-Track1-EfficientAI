@@ -50,6 +50,7 @@ def train_one_epoch(
     running_total_loss = 0.0
     running_clip_loss = 0.0
     running_hard_negative_loss = 0.0
+    last_step_lr: float = optimizer.param_groups[0]["lr"]
 
     for batch_idx, batch in enumerate(dataloader, start=1):
         # --- Data transfer to GPU ---
@@ -177,6 +178,7 @@ def train_one_epoch(
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)
+            last_step_lr = optimizer.param_groups[0]["lr"]
             current_scale = scaler.get_scale() if amp_enabled else 1.0
             if not amp_enabled or current_scale >= previous_scale:
                 scheduler.step()
@@ -195,7 +197,7 @@ def train_one_epoch(
         ):
             elapsed = time.time() - start_time
             throughput = (batch_idx * images.shape[0]) / max(elapsed, 1e-6)
-            current_lr = scheduler.get_last_lr()[0]
+            current_lr = last_step_lr
             tb_step = (epoch - 1) * num_batches + batch_idx
             write_tensorboard_scalars(
                 writer,
@@ -247,7 +249,7 @@ def train_one_epoch(
             "train_total_loss": reduced_stats[0].item() / total_batches,
             "train_loss": reduced_stats[1].item() / total_batches,
             "train_hard_negative_loss": reduced_stats[2].item() / total_batches,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": last_step_lr,
         },
         global_step,
     )
