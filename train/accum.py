@@ -94,8 +94,24 @@ def phase2_feature_backward(
 
     has_neg = all(cb.neg_features is not None for cb in batches)
     if has_neg:
-        neg_leaf = torch.cat([cb.neg_features for cb in batches], dim=0).detach().requires_grad_(True)
-        all_mask = torch.cat([cb.negative_mask for cb in batches], dim=0)
+        # K may differ across batches when num_hard_negatives=0 (dynamic).
+        # Pad to max_K along dim=1; padded slots have mask=0 so they don't affect the loss.
+        max_K = max(cb.neg_features.shape[1] for cb in batches)
+        padded_neg, padded_mask = [], []
+        for cb in batches:
+            nf, nm = cb.neg_features, cb.negative_mask
+            K = nf.shape[1]
+            if K < max_K:
+                pad_n = torch.zeros(nf.shape[0], max_K - K, nf.shape[2],
+                                    device=nf.device, dtype=nf.dtype)
+                pad_m = torch.zeros(nm.shape[0], max_K - K,
+                                    device=nm.device, dtype=nm.dtype)
+                nf = torch.cat([nf, pad_n], dim=1)
+                nm = torch.cat([nm, pad_m], dim=1)
+            padded_neg.append(nf)
+            padded_mask.append(nm)
+        neg_leaf = torch.cat(padded_neg, dim=0).detach().requires_grad_(True)
+        all_mask = torch.cat(padded_mask, dim=0)
     else:
         neg_leaf = None
         all_mask = None
@@ -138,13 +154,16 @@ def phase2_feature_backward(
     scaler.scale(total_loss).backward()
 
     # --- Scatter feature gradients back to individual batches ---
-    B = batches[0].img_features.shape[0]
-    for i, cb in enumerate(batches):
-        s, e = i * B, (i + 1) * B
-        cb.img_grad = img_leaf.grad[s:e].detach().clone()
-        cb.pos_grad = pos_leaf.grad[s:e].detach().clone()
-        if neg_leaf is not None and neg_leaf.grad is not None:
-            cb.neg_grad = neg_leaf.grad[s:e].detach().clone()
+    # Use cumulative offset because batch sizes and K may vary.
+    offset = 0
+    for cb in batches:
+        B_i = cb.img_features.shape[0]
+        cb.img_grad = img_leaf.grad[offset:offset + B_i].detach().clone()
+        cb.pos_grad = pos_leaf.grad[offset:offset + B_i].detach().clone()
+        if neg_leaf is not None and neg_leaf.grad is not None and cb.neg_features is not None:
+            K_i = cb.neg_features.shape[1]
+            cb.neg_grad = neg_leaf.grad[offset:offset + B_i, :K_i].detach().clone()
+        offset += B_i
 
     # --- All-reduce params that were updated outside DDP ---
     if distributed:
