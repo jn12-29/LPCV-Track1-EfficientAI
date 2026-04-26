@@ -78,13 +78,22 @@ def _plot_reconstruction_metrics(
         return
 
     import math
+
     labels = [m["block"] for m in metrics_history]
-    cos_sims = [0.0 if math.isnan(m["cos_sim"]) else m["cos_sim"] for m in metrics_history]
-    losses = [0.0 if math.isnan(m["final_loss"]) else m["final_loss"] for m in metrics_history]
+    cos_sims = [
+        0.0 if math.isnan(m["cos_sim"]) else m["cos_sim"] for m in metrics_history
+    ]
+    losses = [
+        0.0 if math.isnan(m["final_loss"]) else m["final_loss"] for m in metrics_history
+    ]
     n = len(labels)
     _kind_color = {"text_sequential": "#2563EB", "conv_stem": "#16A34A"}
     colors = [
-        "#9CA3AF" if m["status"] in ("REVERTED", "SKIPPED") else _kind_color.get(m["kind"], "#7C3AED")
+        (
+            "#9CA3AF"
+            if m["status"] in ("REVERTED", "SKIPPED")
+            else _kind_color.get(m["kind"], "#7C3AED")
+        )
         for m in metrics_history
     ]
 
@@ -144,7 +153,12 @@ def _plot_reconstruction_metrics(
 
 def cmd_train(args: argparse.Namespace) -> None:
     from utils.clip_utils import _load_clip
-    from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, apply_relu_blocks, restore_gelu
+    from mlp_reconstruction.mlp_blocks import (
+        iter_mlp_blocks,
+        replace_gelu_with_relu,
+        apply_relu_blocks,
+        restore_gelu,
+    )
     from mlp_reconstruction.calibrate import VGCalibrationLoader, collect_mlp_io
     from mlp_reconstruction.distill import distill_mlp, verify_reconstruction
     from train.train_utils import set_log_path, log_message, save_run_config
@@ -166,7 +180,9 @@ def cmd_train(args: argparse.Namespace) -> None:
     resume_ckpt: dict | None = None
     relu_labels: list[str] = []
     if args.resume_from:
-        resume_ckpt = torch.load(args.resume_from, map_location="cpu", weights_only=False)
+        resume_ckpt = torch.load(
+            args.resume_from, map_location="cpu", weights_only=False
+        )
         relu_labels = list(resume_ckpt["relu_blocks"])
         log_message(
             f"Resumed from {args.resume_from}, {len(relu_labels)} blocks already done"
@@ -177,7 +193,9 @@ def cmd_train(args: argparse.Namespace) -> None:
         if args.checkpoint_path is None:
             args.checkpoint_path = resume_ckpt.get("checkpoint_path")
             if args.checkpoint_path is not None:
-                log_message(f"Using base model from resume checkpoint: {args.checkpoint_path}")
+                log_message(
+                    f"Using base model from resume checkpoint: {args.checkpoint_path}"
+                )
 
     # Always load the original model (checkpoint_path) for pre-collection so that
     # every block's teacher target O comes from the all-GELU original model.
@@ -305,13 +323,19 @@ def cmd_train(args: argparse.Namespace) -> None:
 
         # Save original weights before distillation (needed for auto-revert).
         if gelu_threshold is not None:
-            if info.kind == 'conv_stem':
-                _orig_block_state = {k: v.clone() for k, v in info.mlp.state_dict().items()}
+            if info.kind == "conv_stem":
+                _orig_block_state = {
+                    k: v.clone() for k, v in info.mlp.state_dict().items()
+                }
                 _orig_fc1_state = _orig_fc2_state = None
             else:
                 _orig_block_state = None
-                _orig_fc1_state = {k: v.clone() for k, v in info.fc1.state_dict().items()}
-                _orig_fc2_state = {k: v.clone() for k, v in info.fc2.state_dict().items()}
+                _orig_fc1_state = {
+                    k: v.clone() for k, v in info.fc1.state_dict().items()
+                }
+                _orig_fc2_state = {
+                    k: v.clone() for k, v in info.fc2.state_dict().items()
+                }
         else:
             _orig_block_state = _orig_fc1_state = _orig_fc2_state = None
 
@@ -337,7 +361,7 @@ def cmd_train(args: argparse.Namespace) -> None:
 
         if gelu_threshold is not None and cos_sim < gelu_threshold:
             # Revert: restore original weights and GELU activation.
-            if info.kind == 'conv_stem':
+            if info.kind == "conv_stem":
                 info.mlp.load_state_dict(_orig_block_state)
             else:
                 info.fc1.load_state_dict(_orig_fc1_state)
@@ -370,9 +394,17 @@ def cmd_train(args: argparse.Namespace) -> None:
         append_metrics_row(metrics_csv, row)
         append_metrics_jsonl(metrics_jsonl, row)
 
-        _save_checkpoint(model, args.model_name, relu_labels, args.output + ".tmp", args.checkpoint_path)
+        _save_checkpoint(
+            model,
+            args.model_name,
+            relu_labels,
+            args.output + ".tmp",
+            args.checkpoint_path,
+        )
 
-    _save_checkpoint(model, args.model_name, relu_labels, args.output, args.checkpoint_path)
+    _save_checkpoint(
+        model, args.model_name, relu_labels, args.output, args.checkpoint_path
+    )
     total_elapsed = time.time() - run_start
     warn_blocks = [r["block"] for r in metrics_history if r["status"] == "WARN"]
     reverted_blocks = [r["block"] for r in metrics_history if r["status"] == "REVERTED"]
@@ -425,7 +457,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--project-root", default=".")
     p.add_argument("--n-calib", type=int, default=1024)
-    p.add_argument("--calib-batch-size", type=int, default=32)
+    p.add_argument("--calib-batch-size", type=int, default=128)
     p.add_argument("--output-dir", default="checkpoints")
     p.add_argument(
         "--output",
@@ -450,7 +482,7 @@ def parse_args() -> argparse.Namespace:
         "--no-relu-stem",
         action="store_true",
         help="Keep GELU in ConvStem (MobileCLIP2-B visual[stem]); "
-             "still reconstructs all other visual blocks",
+        "still reconstructs all other visual blocks",
     )
     p.add_argument(
         "--keep-gelu-blocks",
@@ -458,7 +490,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         metavar="LABEL",
         help="Block labels to keep as GELU (skip distillation). "
-             "E.g. --keep-gelu-blocks text[0] visual[stem]",
+        "E.g. --keep-gelu-blocks text[0] visual[stem]",
     )
     p.add_argument(
         "--gelu-threshold",
@@ -466,10 +498,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="T",
         help="If cos_sim after distillation is below T, revert block to GELU and restore "
-             "original weights. E.g. --gelu-threshold 0.98",
+        "original weights. E.g. --gelu-threshold 0.98",
     )
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--n-iters", type=int, default=20000)
     p.add_argument(
         "--alpha",
@@ -482,7 +514,7 @@ def parse_args() -> argparse.Namespace:
         "--greedy",
         action="store_true",
         help="Collect (X, O) just-in-time from the partially-replaced model instead of "
-             "pre-collecting from the original all-GELU model.",
+        "pre-collecting from the original all-GELU model.",
     )
     p.add_argument("--log-every", type=int, default=500)
     p.add_argument(
