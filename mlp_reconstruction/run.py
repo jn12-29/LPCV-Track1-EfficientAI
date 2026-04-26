@@ -507,9 +507,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--alpha",
         type=float,
-        default=2.0,
-        help="L_Clamp loss weight (0=disable). Default 2.0 matches APHQ-ViT original; "
-             "set 0 to disable for non-quantization use.",
+        default=0.0,
+        help="L_Clamp loss weight (0=disable). Set 2.0 to match APHQ-ViT original "
+             "(only useful when targeting quantization).",
     )
     p.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
     p.add_argument(
