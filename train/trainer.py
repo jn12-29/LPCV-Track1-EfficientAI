@@ -33,6 +33,7 @@ from train.optim import build_scheduler
 from train.train_step import train_one_epoch
 from train.train_utils import (
     MetricsRow,
+    StepTimer,
     build_run_name,
     current_timestamp,
     log_message,
@@ -191,6 +192,7 @@ def run_training(args) -> None:
             )
 
         # --- Model loading (QAT wrap happens inside _load_clip when qat_config set) ---
+        _t0 = time.perf_counter()
         model, _, tokenizer = _load_clip(
             args.model_name,
             device,
@@ -201,6 +203,8 @@ def run_training(args) -> None:
             relu_text=getattr(args, "relu_text", False),
         )
         relu_labels = getattr(model, "_relu_blocks", None)
+        if is_main_process:
+            log_message(f"[Timer] model_load: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
 
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
@@ -238,6 +242,7 @@ def run_training(args) -> None:
                 _log_model_structure(model, "after freeze", run_name)
 
         # --- Dataset and DataLoader (built before DDP so calibration can use it) ---
+        _t0 = time.perf_counter()
         train_dataset = ContrastiveRecordDataset(
             jsonl_path=args.jsonl_path,
             max_records=args.max_records,
@@ -250,6 +255,10 @@ def run_training(args) -> None:
         if is_main_process:
             log_message(
                 f"Loaded {len(train_dataset)} image records from {args.jsonl_path}",
+                run_name=run_name,
+            )
+            log_message(
+                f"[Timer] dataset_load: {time.perf_counter() - _t0:.2f}s  ({len(train_dataset)} records)",
                 run_name=run_name,
             )
         run_config["num_records"] = len(train_dataset)
@@ -279,6 +288,7 @@ def run_training(args) -> None:
         dataloader_generator = torch.Generator()
         dataloader_generator.manual_seed(args.seed + rank)
 
+        _t0 = time.perf_counter()
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -295,6 +305,8 @@ def run_training(args) -> None:
                 text_sampling=args.text_sampling,
             ),
         )
+        if is_main_process:
+            log_message(f"[Timer] dataloader_init: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
 
         # --- QAT calibration (must happen before DDP wrap) ---
         if qat_config is not None and getattr(model, "_qat_needs_calibration", False):
@@ -304,12 +316,19 @@ def run_training(args) -> None:
                     run_name=run_name,
                 )
             from utils.qat_utils import calibrate_quantsim
+            _t0 = time.perf_counter()
             calibrate_quantsim(model._qat_sim, train_dataloader, args.qat_calib_samples, device)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
             if is_main_process:
-                log_message("QAT calibration complete", run_name=run_name)
+                log_message(
+                    f"QAT calibration complete  [Timer] qat_calibration: {time.perf_counter() - _t0:.2f}s",
+                    run_name=run_name,
+                )
 
         # --- DDP wrap (after calibration) ---
         if distributed:
+            _t0 = time.perf_counter()
             model = DistributedDataParallel(
                 model,
                 device_ids=[device.index],
@@ -319,6 +338,7 @@ def run_training(args) -> None:
                 static_graph=True,
             )
             if is_main_process:
+                log_message(f"[Timer] ddp_wrap: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                 _log_model_structure(model, "after DDP wrap", run_name)
 
         if args.loss_type == "siglip":
@@ -387,6 +407,7 @@ def run_training(args) -> None:
                 is_main_process=is_main_process,
                 distributed=distributed,
                 amp_enabled=amp_enabled,
+                enable_step_timing=getattr(args, "enable_step_timing", False),
                 run_name=run_name,
                 writer=writer,
             )
@@ -420,7 +441,11 @@ def run_training(args) -> None:
                 metrics_history.append(epoch_row)
                 append_metrics_row(metrics_csv_path, epoch_row)
                 append_metrics_jsonl(metrics_jsonl_path, epoch_row)
+
+                _t0 = time.perf_counter()
                 plot_training_curves(metrics_history, output_dir)
+                log_message(f"[Timer] plot_curves: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
+
                 write_tensorboard_scalars(writer, "train_epoch", epoch_metrics, epoch)
                 write_tensorboard_scalars(
                     writer,
@@ -446,6 +471,7 @@ def run_training(args) -> None:
                 )
                 if previous_latest_path is not None and previous_latest_path.exists():
                     previous_latest_path.unlink()
+                _t0 = time.perf_counter()
                 save_checkpoint(
                     save_path=latest_path,
                     model=model,
@@ -459,6 +485,7 @@ def run_training(args) -> None:
                     sim=sim,
                     relu_labels=relu_labels,
                 )
+                log_message(f"[Timer] checkpoint_latest: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                 previous_latest_path = latest_path
 
                 save_n = args.save_every_n_epochs
@@ -466,6 +493,7 @@ def run_training(args) -> None:
                     epoch_path = (
                         output_dir / f"checkpoint_epoch_{epoch:0{epoch_digits}d}.pt"
                     )
+                    _t0 = time.perf_counter()
                     save_checkpoint(
                         save_path=epoch_path,
                         model=model,
@@ -479,12 +507,15 @@ def run_training(args) -> None:
                         sim=sim,
                         relu_labels=relu_labels,
                     )
+                    log_message(f"[Timer] checkpoint_epoch: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                     if export_onnx:
+                        _t0 = time.perf_counter()
                         _export_onnx_checkpoint(
                             model, args.model_name, output_dir,
                             label=f"epoch_{epoch:0{epoch_digits}d}",
                             run_name=run_name,
                         )
+                        log_message(f"[Timer] onnx_export: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
 
         final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
         if is_main_process:
