@@ -144,6 +144,14 @@ def parse_args() -> argparse.Namespace:
              ".pt checkpoints are always saved.",
     )
 
+    # --- Compilation ---
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        default=False,
+        help="torch.compile(model, mode='reduce-overhead'). Incompatible with --qat-enabled.",
+    )
+
     # --- Profiling ---
     parser.add_argument(
         "--enable-step-timing",

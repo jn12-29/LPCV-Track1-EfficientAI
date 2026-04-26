@@ -97,6 +97,8 @@ def run_training(args) -> None:
     gpu_ids = dist_ctx["gpu_ids"]
 
     set_seed(args.seed + rank)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
 
     run_timestamp = make_run_timestamp() if is_main_process else None
     run_timestamp = broadcast_run_timestamp(run_timestamp, distributed)
@@ -340,6 +342,19 @@ def run_training(args) -> None:
             if is_main_process:
                 log_message(f"[Timer] ddp_wrap: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                 _log_model_structure(model, "after DDP wrap", run_name)
+
+        # --- torch.compile (skipped for QAT: fake-quant nodes are not compile-safe) ---
+        if getattr(args, "compile", False):
+            if qat_config is not None:
+                if is_main_process:
+                    log_message("[compile] Skipped: torch.compile not supported with QAT.", run_name=run_name)
+            else:
+                if is_main_process:
+                    log_message("[compile] Compiling model (mode=default) ...", run_name=run_name)
+                _t0 = time.perf_counter()
+                model = torch.compile(model, mode="default")
+                if is_main_process:
+                    log_message(f"[Timer] torch_compile: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
 
         if args.loss_type == "siglip":
             loss_fn = SigLipLoss(rank=rank, world_size=world_size).to(device)
