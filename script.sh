@@ -157,9 +157,9 @@ python mlp_reconstruction/run.py \
 
 # Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 3 \
+    --model-name MobileCLIP2-B --gpu-id 2 \
     --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform \
-    --no-relu-stem  --no-relu-text
+    --no-relu-stem  --no-relu-text --gelu-threshold 0.99
 
 # Auto-revert: blocks with cos_sim < 0.97 after distillation are reverted back to GELU
 # python mlp_reconstruction/run.py \
