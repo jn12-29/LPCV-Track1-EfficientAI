@@ -424,6 +424,7 @@ def run_training(args) -> None:
                 hard_negative_loss_type=args.hard_negative_loss_type,
                 is_main_process=is_main_process,
                 distributed=distributed,
+                world_size=world_size,
                 amp_enabled=amp_enabled,
                 enable_step_timing=getattr(args, "enable_step_timing", False),
                 run_name=run_name,

@@ -34,11 +34,27 @@ def train_one_epoch(
     hard_negative_loss_type: str,
     is_main_process: bool,
     distributed: bool,
+    world_size: int = 1,
     run_name: Optional[str] = None,
     amp_enabled: bool = True,
     enable_step_timing: bool = False,
     writer: Optional[SummaryWriter] = None,
 ) -> Tuple[Dict[str, float], int]:
+    if accum_freq > 1:
+        from train.accum import train_one_epoch_accum
+        return train_one_epoch_accum(
+            model=model, dataloader=dataloader, optimizer=optimizer,
+            scheduler=scheduler, scaler=scaler, loss_fn=loss_fn,
+            loss_type=loss_type, device=device, epoch=epoch,
+            global_step=global_step, log_every_n_steps=log_every_n_steps,
+            grad_clip_norm=grad_clip_norm, accum_freq=accum_freq,
+            hard_negative_weight=hard_negative_weight,
+            hard_negative_margin=hard_negative_margin,
+            hard_negative_loss_type=hard_negative_loss_type,
+            is_main_process=is_main_process, distributed=distributed,
+            world_size=world_size, run_name=run_name, amp_enabled=amp_enabled,
+            enable_step_timing=enable_step_timing, writer=writer,
+        )
     model.train()
     optimizer.zero_grad(set_to_none=True)
     amp_enabled = amp_enabled and device.type == "cuda"
