@@ -86,6 +86,12 @@ torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.1 --master_port=295
 
 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 512 --accum-freq 30 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4 \
+    --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs64_nc4096_uniform_all_nostem__20260426_022617/mlp_relu.pt
+
+torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29502 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 4,5 --batch-size 256 --accum-freq 60 --epochs 200 --lr 1e-6 --weight-decay 0.2 \
     --loss-type clip --num-hard-negatives 4 \
     --resume ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc4096_magnitude_all__20260426_004517/mlp_relu.pt

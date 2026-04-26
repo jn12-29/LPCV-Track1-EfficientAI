@@ -144,6 +144,15 @@ def parse_args() -> argparse.Namespace:
              ".pt checkpoints are always saved.",
     )
 
+    # --- Profiling ---
+    parser.add_argument(
+        "--enable-step-timing",
+        action="store_true",
+        default=False,
+        help="Profile per-step timing (data transfer, forward, loss, backward, optimizer). "
+             "Adds CUDA sync overhead; use for profiling only.",
+    )
+
     return parser.parse_args()
 
 

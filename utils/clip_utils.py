@@ -122,9 +122,15 @@ def _load_clip(
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
             _log_state_dict_load(f"Loaded checkpoint from {checkpoint_path}", missing, unexpected)
 
-    # Apply ReLU activations and persist relu_blocks for downstream checkpoint saving.
-    # Single pass: idempotent replace (already-ReLU blocks are harmless) + label collection.
-    if relu_image or relu_text:
+    # Track relu_blocks on model for downstream use.
+    # For relu checkpoints, apply_relu_blocks already set the correct structure — collect labels
+    # from actual activation state rather than re-applying, which would wrongly override
+    # intentionally-excluded blocks (e.g. --no-relu-stem).
+    # For plain checkpoints with relu_image/relu_text flags, apply and collect.
+    if is_relu_ckpt:
+        from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, is_relu_active
+        model._relu_blocks = [info.label for info in iter_mlp_blocks(model) if is_relu_active(info)]
+    elif relu_image or relu_text:
         from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, is_relu_active
         labels = []
         for info in iter_mlp_blocks(model):
@@ -133,8 +139,7 @@ def _load_clip(
             if is_relu_active(info):
                 labels.append(info.label)
         model._relu_blocks = labels
-        if not is_relu_ckpt:
-            print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
+        print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
 
     model.eval().to(device)
 

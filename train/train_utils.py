@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
+import time as _time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -12,6 +14,67 @@ from torch.utils.tensorboard import SummaryWriter
 
 MetricValue = float | int | str
 MetricsRow = Dict[str, MetricValue]
+
+
+class StepTimer(contextlib.AbstractContextManager):
+    """Measures wall-clock time of a code block.
+
+    With cuda_sync=True, calls torch.cuda.synchronize() on entry and exit
+    so GPU kernels are fully drained before/after timing.
+    """
+
+    def __init__(self, name: str, cuda_sync: bool = False) -> None:
+        self.name = name
+        self.cuda_sync = cuda_sync
+        self.elapsed: float = 0.0
+        self._t0: float = 0.0
+
+    def __enter__(self) -> "StepTimer":
+        if self.cuda_sync:
+            torch.cuda.synchronize()
+        self._t0 = _time.perf_counter()
+        return self
+
+    def __exit__(self, *_) -> None:
+        if self.cuda_sync:
+            torch.cuda.synchronize()
+        self.elapsed = _time.perf_counter() - self._t0
+
+
+class StepTimeAccum:
+    """Accumulates per-step timing for multiple named stages.
+
+    Call update(name, elapsed) each step, then means() to read averages
+    without resetting, or report() to read and reset.
+    summary_str() formats means as a compact string for appending to log lines.
+    """
+
+    def __init__(self) -> None:
+        self._sums: Dict[str, float] = {}
+        self._counts: Dict[str, int] = {}
+
+    def update(self, name: str, elapsed: float) -> None:
+        self._sums[name] = self._sums.get(name, 0.0) + elapsed
+        self._counts[name] = self._counts.get(name, 0) + 1
+
+    def means(self) -> Dict[str, float]:
+        return {k: self._sums[k] / self._counts[k] for k in self._sums}
+
+    def report(self) -> Dict[str, float]:
+        result = self.means()
+        self.reset()
+        return result
+
+    def reset(self) -> None:
+        self._sums.clear()
+        self._counts.clear()
+
+    def summary_str(self) -> str:
+        m = self.means()
+        if not m:
+            return ""
+        parts = [f"{k}={v * 1000:.1f}ms" for k, v in m.items()]
+        return "  [" + " ".join(parts) + "]"
 
 TRAIN_LOG_PATH: Optional[Path] = None
 

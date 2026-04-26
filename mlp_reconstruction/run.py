@@ -17,6 +17,8 @@ from tqdm import tqdm
 def _make_run_name(args: argparse.Namespace) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     config = f"lr{args.lr}_nit{args.n_iters}_bs{args.batch_size}_nc{args.n_calib}_{args.aph_mode}"
+    if getattr(args, "greedy", False):
+        config += "_greedy"
     model = args.model_name.replace("/", "-")
     do_visual = not args.no_relu_image
     do_text = not args.no_relu_text
@@ -218,18 +220,23 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f"Available: {[b.label for b in blocks]}"
             )
 
-    # Pre-collect (X, O) for all remaining blocks from the original all-GELU model.
-    # This ensures every teacher target is the true original GELU output, not a
-    # drifted output produced after upstream blocks have already been converted to ReLU.
-    blocks_to_run = [b for b in blocks if b.label not in done_set]
-    log_message(
-        f"Pre-collecting MLP I/O from original model "
-        f"for {len(blocks_to_run)} remaining blocks ..."
-    )
     block_io: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
-    for info in tqdm(blocks_to_run, desc="Pre-collecting"):
-        X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
-        block_io[info.label] = (X_all, O_all)
+    if not args.greedy:
+        # Pre-collect (X, O) for all remaining blocks from the original all-GELU model.
+        # This ensures every teacher target is the true original GELU output, not a
+        # drifted output produced after upstream blocks have already been converted to ReLU.
+        blocks_to_run = [b for b in blocks if b.label not in done_set]
+        log_message(
+            f"Pre-collecting MLP I/O from original model "
+            f"for {len(blocks_to_run)} remaining blocks ..."
+        )
+        for info in tqdm(blocks_to_run, desc="Pre-collecting"):
+            X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
+            block_io[info.label] = (X_all, O_all)
+    else:
+        log_message(
+            "Greedy mode: I/O will be collected just-in-time from the partially-replaced model"
+        )
 
     # Restore the partially-distilled model state so distillation continues correctly.
     if resume_ckpt is not None:
@@ -259,7 +266,10 @@ def cmd_train(args: argparse.Namespace) -> None:
 
         log_message(f"=== {info.label} ({info.kind}) ===")
 
-        X_all, O_all = block_io[info.label]
+        if args.greedy:
+            X_all, O_all = collect_mlp_io(model, info, img_batches, txt_batches, device)
+        else:
+            X_all, O_all = block_io[info.label]
         log_message(f"  X={tuple(X_all.shape)}, O={tuple(O_all.shape)}")
 
         block_start = time.time()
@@ -389,6 +399,12 @@ def parse_args() -> argparse.Namespace:
         help="L_Clamp loss weight (0=disable; use >0 only when targeting QAT/quantization)",
     )
     p.add_argument("--aph-mode", default="uniform", choices=["uniform", "magnitude"])
+    p.add_argument(
+        "--greedy",
+        action="store_true",
+        help="Collect (X, O) just-in-time from the partially-replaced model instead of "
+             "pre-collecting from the original all-GELU model.",
+    )
     p.add_argument("--log-every", type=int, default=500)
     p.add_argument(
         "--early-stop-patience",
