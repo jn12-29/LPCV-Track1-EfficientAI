@@ -77,12 +77,16 @@ def _plot_reconstruction_metrics(
     except ImportError:
         return
 
+    import math
     labels = [m["block"] for m in metrics_history]
-    cos_sims = [m["cos_sim"] for m in metrics_history]
-    losses = [m["final_loss"] for m in metrics_history]
+    cos_sims = [0.0 if math.isnan(m["cos_sim"]) else m["cos_sim"] for m in metrics_history]
+    losses = [0.0 if math.isnan(m["final_loss"]) else m["final_loss"] for m in metrics_history]
     n = len(labels)
     _kind_color = {"text_sequential": "#2563EB", "conv_stem": "#16A34A"}
-    colors = [_kind_color.get(m["kind"], "#7C3AED") for m in metrics_history]
+    colors = [
+        "#9CA3AF" if m["status"] in ("REVERTED", "SKIPPED") else _kind_color.get(m["kind"], "#7C3AED")
+        for m in metrics_history
+    ]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(10, n * 0.45), 8))
     fig.patch.set_facecolor("#F8FAFC")
@@ -109,6 +113,7 @@ def _plot_reconstruction_metrics(
         Patch(color="#2563EB", label="text"),
         Patch(color="#16A34A", label="conv_stem"),
         Patch(color="#7C3AED", label="visual"),
+        Patch(color="#9CA3AF", label="GELU (reverted/skipped)"),
         plt.Line2D([0], [0], color="#DC2626", linestyle="--", label="0.99 threshold"),
     ]
     ax1.legend(handles=legend_elements, fontsize=9)
@@ -125,6 +130,7 @@ def _plot_reconstruction_metrics(
             Patch(color="#2563EB", label="text"),
             Patch(color="#16A34A", label="conv_stem"),
             Patch(color="#7C3AED", label="visual"),
+            Patch(color="#9CA3AF", label="GELU (reverted/skipped)"),
         ],
         fontsize=9,
     )
@@ -138,7 +144,7 @@ def _plot_reconstruction_metrics(
 
 def cmd_train(args: argparse.Namespace) -> None:
     from utils.clip_utils import _load_clip
-    from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, apply_relu_blocks
+    from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, apply_relu_blocks, restore_gelu
     from mlp_reconstruction.calibrate import VGCalibrationLoader, collect_mlp_io
     from mlp_reconstruction.distill import distill_mlp, verify_reconstruction
     from train.train_utils import set_log_path, log_message, save_run_config
@@ -248,6 +254,14 @@ def cmd_train(args: argparse.Namespace) -> None:
     metrics_csv = output_path.parent / "metrics.csv"
     metrics_jsonl = output_path.parent / "metrics.jsonl"
     metrics_history: list[dict] = []
+
+    keep_gelu_set = set(args.keep_gelu_blocks)
+    if keep_gelu_set:
+        log_message(f"Manual GELU blocks (skip distillation): {sorted(keep_gelu_set)}")
+    gelu_threshold = args.gelu_threshold
+    if gelu_threshold is not None:
+        log_message(f"Auto-revert threshold: cos_sim < {gelu_threshold} → keep GELU")
+
     run_start = time.time()
 
     for info in tqdm(blocks, desc="Reconstructing MLP blocks"):
@@ -264,6 +278,23 @@ def cmd_train(args: argparse.Namespace) -> None:
         if info.label in done_set:
             continue
 
+        # Manual GELU keep: skip distillation entirely, block remains GELU.
+        if info.label in keep_gelu_set:
+            log_message(f"  [SKIPPED] {info.label} kept as GELU (--keep-gelu-blocks)")
+            row = {
+                "block": info.label,
+                "kind": info.kind,
+                "final_loss": float("nan"),
+                "cos_sim": float("nan"),
+                "status": "SKIPPED",
+                "steps_run": 0,
+                "elapsed_s": 0.0,
+            }
+            metrics_history.append(row)
+            append_metrics_row(metrics_csv, row)
+            append_metrics_jsonl(metrics_jsonl, row)
+            continue
+
         log_message(f"=== {info.label} ({info.kind}) ===")
 
         if args.greedy:
@@ -271,6 +302,18 @@ def cmd_train(args: argparse.Namespace) -> None:
         else:
             X_all, O_all = block_io[info.label]
         log_message(f"  X={tuple(X_all.shape)}, O={tuple(O_all.shape)}")
+
+        # Save original weights before distillation (needed for auto-revert).
+        if gelu_threshold is not None:
+            if info.kind == 'conv_stem':
+                _orig_block_state = {k: v.clone() for k, v in info.mlp.state_dict().items()}
+                _orig_fc1_state = _orig_fc2_state = None
+            else:
+                _orig_block_state = None
+                _orig_fc1_state = {k: v.clone() for k, v in info.fc1.state_dict().items()}
+                _orig_fc2_state = {k: v.clone() for k, v in info.fc2.state_dict().items()}
+        else:
+            _orig_block_state = _orig_fc1_state = _orig_fc2_state = None
 
         block_start = time.time()
         final_loss, steps_run = distill_mlp(
@@ -290,15 +333,29 @@ def cmd_train(args: argparse.Namespace) -> None:
             early_stop_delta=args.early_stop_delta,
         )
         elapsed_s = time.time() - block_start
-        relu_labels.append(info.label)
-        done_set.add(info.label)
-
         cos_sim = verify_reconstruction(info, X_all, O_all, device)
-        status = "OK" if cos_sim >= 0.99 else "WARN"
-        log_message(
-            f"  [{status}] final_loss={final_loss:.6f}  cos_sim={cos_sim:.4f}"
-            f"  steps={steps_run}/{args.n_iters}  elapsed={elapsed_s:.1f}s"
-        )
+
+        if gelu_threshold is not None and cos_sim < gelu_threshold:
+            # Revert: restore original weights and GELU activation.
+            if info.kind == 'conv_stem':
+                info.mlp.load_state_dict(_orig_block_state)
+            else:
+                info.fc1.load_state_dict(_orig_fc1_state)
+                info.fc2.load_state_dict(_orig_fc2_state)
+            restore_gelu(info)
+            status = "REVERTED"
+            log_message(
+                f"  [REVERTED] cos_sim={cos_sim:.4f} < threshold={gelu_threshold:.4f},"
+                f" block kept as GELU"
+            )
+        else:
+            relu_labels.append(info.label)
+            done_set.add(info.label)
+            status = "OK" if cos_sim >= 0.99 else "WARN"
+            log_message(
+                f"  [{status}] final_loss={final_loss:.6f}  cos_sim={cos_sim:.4f}"
+                f"  steps={steps_run}/{args.n_iters}  elapsed={elapsed_s:.1f}s"
+            )
 
         row = {
             "block": info.label,
@@ -318,12 +375,18 @@ def cmd_train(args: argparse.Namespace) -> None:
     _save_checkpoint(model, args.model_name, relu_labels, args.output, args.checkpoint_path)
     total_elapsed = time.time() - run_start
     warn_blocks = [r["block"] for r in metrics_history if r["status"] == "WARN"]
+    reverted_blocks = [r["block"] for r in metrics_history if r["status"] == "REVERTED"]
+    skipped_blocks = [r["block"] for r in metrics_history if r["status"] == "SKIPPED"]
     summary = (
         f"Done. {len(relu_labels)}/{len(blocks)} blocks reconstructed"
         f"  total={total_elapsed:.0f}s"
     )
     if warn_blocks:
         summary += f"  WARN: {warn_blocks}"
+    if reverted_blocks:
+        summary += f"  REVERTED: {reverted_blocks}"
+    if skipped_blocks:
+        summary += f"  SKIPPED(GELU): {skipped_blocks}"
     log_message(summary)
     log_message(f"Saved: {args.output}")
 
@@ -388,6 +451,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep GELU in ConvStem (MobileCLIP2-B visual[stem]); "
              "still reconstructs all other visual blocks",
+    )
+    p.add_argument(
+        "--keep-gelu-blocks",
+        nargs="+",
+        default=[],
+        metavar="LABEL",
+        help="Block labels to keep as GELU (skip distillation). "
+             "E.g. --keep-gelu-blocks text[0] visual[stem]",
+    )
+    p.add_argument(
+        "--gelu-threshold",
+        type=float,
+        default=None,
+        metavar="T",
+        help="If cos_sim after distillation is below T, revert block to GELU and restore "
+             "original weights. E.g. --gelu-threshold 0.98",
     )
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--batch-size", type=int, default=64)
