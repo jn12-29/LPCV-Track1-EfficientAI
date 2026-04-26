@@ -87,6 +87,16 @@ def replace_gelu_with_relu(info: MLPBlockInfo) -> None:
         setattr(info.mlp, info.act_attr, nn.ReLU())
 
 
+def restore_gelu(info: MLPBlockInfo) -> None:
+    """Reverse replace_gelu_with_relu: restore ReLU → GELU in this block."""
+    if info.kind == 'conv_stem':
+        for layer in info.mlp:
+            if hasattr(layer, 'bn') and hasattr(layer.bn, 'act') and isinstance(layer.bn.act, nn.ReLU):
+                layer.bn.act = nn.GELU()
+    else:
+        setattr(info.mlp, info.act_attr, nn.GELU())
+
+
 def is_relu_active(info: MLPBlockInfo) -> bool:
     """Return True if this block's activation has been replaced with ReLU."""
     if info.kind == 'conv_stem':
