@@ -47,9 +47,13 @@ def plot_reconstruction_metrics(
         for i in range(n)
     ]
 
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(max(10, n * 0.45), 11))
+    n_rows = 3 if has_gelu_drift else 2
+    fig_height = 11 if has_gelu_drift else 7
+    fig, axes = plt.subplots(n_rows, 1, figsize=(max(10, n * 0.45), fig_height))
+    ax1, ax2 = axes[0], axes[1]
+    ax3 = axes[2] if has_gelu_drift else None
     fig.patch.set_facecolor("#F8FAFC")
-    for ax in (ax1, ax2, ax3):
+    for ax in axes:
         ax.set_facecolor("#F1F5F9")
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(True, axis="y", color="white", linewidth=1.2, alpha=0.9)
@@ -94,14 +98,14 @@ def plot_reconstruction_metrics(
         fontsize=9,
     )
 
-    ax3.bar(range(n), gelu_cos_sims, color=drift_colors, alpha=0.85)
-    ax3.set_ylabel("Cosine similarity", fontsize=11)
-    ax3.set_title(
-        "GELU Drift — Cosine Similarity vs Original (REVERTED blocks, non-greedy)",
-        fontsize=13,
-        fontweight="bold",
-    )
-    if has_gelu_drift:
+    if ax3 is not None:
+        ax3.bar(range(n), gelu_cos_sims, color=drift_colors, alpha=0.85)
+        ax3.set_ylabel("Cosine similarity", fontsize=11)
+        ax3.set_title(
+            "GELU Drift — Cosine Similarity vs Original (REVERTED blocks, non-greedy)",
+            fontsize=13,
+            fontweight="bold",
+        )
         valid_vals = [v for v in gelu_cos_sims if v > 0.0]
         y3_min = max(0.0, min(valid_vals) - 0.02) if valid_vals else 0.0
         ax3.set_ylim(y3_min, 1.005)
@@ -116,14 +120,8 @@ def plot_reconstruction_metrics(
             ],
             fontsize=9,
         )
-    else:
-        ax3.text(
-            0.5, 0.5, "No REVERTED blocks",
-            ha="center", va="center", transform=ax3.transAxes,
-            fontsize=12, color="#94A3B8",
-        )
-    ax3.set_xticks(range(n))
-    ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+        ax3.set_xticks(range(n))
+        ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
 
     plt.tight_layout(pad=2.5)
     out_path = output_dir / "reconstruction_curves.png"
