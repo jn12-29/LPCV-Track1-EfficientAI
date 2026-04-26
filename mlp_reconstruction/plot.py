@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 
@@ -18,8 +19,6 @@ def plot_reconstruction_metrics(
     except ImportError:
         return
 
-    import math
-
     labels = [m["block"] for m in metrics_history]
     cos_sims = [
         0.0 if math.isnan(m["cos_sim"]) else m["cos_sim"] for m in metrics_history
@@ -27,6 +26,12 @@ def plot_reconstruction_metrics(
     losses = [
         0.0 if math.isnan(m["final_loss"]) else m["final_loss"] for m in metrics_history
     ]
+    raw_gelu_cos = [
+        m.get("gelu_cos_sim", float("nan")) for m in metrics_history
+    ]
+    gelu_cos_sims = [0.0 if math.isnan(v) else v for v in raw_gelu_cos]
+    has_gelu_drift = any(not math.isnan(v) for v in raw_gelu_cos)
+
     n = len(labels)
     _kind_color = {"text_sequential": "#2563EB", "conv_stem": "#16A34A"}
     colors = [
@@ -37,10 +42,14 @@ def plot_reconstruction_metrics(
         )
         for m in metrics_history
     ]
+    drift_colors = [
+        "#EA580C" if not math.isnan(raw_gelu_cos[i]) else "#E2E8F0"
+        for i in range(n)
+    ]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(10, n * 0.45), 8))
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(max(10, n * 0.45), 11))
     fig.patch.set_facecolor("#F8FAFC")
-    for ax in (ax1, ax2):
+    for ax in (ax1, ax2, ax3):
         ax.set_facecolor("#F1F5F9")
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(True, axis="y", color="white", linewidth=1.2, alpha=0.9)
@@ -84,6 +93,37 @@ def plot_reconstruction_metrics(
         ],
         fontsize=9,
     )
+
+    ax3.bar(range(n), gelu_cos_sims, color=drift_colors, alpha=0.85)
+    ax3.set_ylabel("Cosine similarity", fontsize=11)
+    ax3.set_title(
+        "GELU Drift — Cosine Similarity vs Original (REVERTED blocks, non-greedy)",
+        fontsize=13,
+        fontweight="bold",
+    )
+    if has_gelu_drift:
+        valid_vals = [v for v in gelu_cos_sims if v > 0.0]
+        y3_min = max(0.0, min(valid_vals) - 0.02) if valid_vals else 0.0
+        ax3.set_ylim(y3_min, 1.005)
+        ax3.axhline(
+            0.99, color="#DC2626", linewidth=1.2, linestyle="--", label="0.99 ref"
+        )
+        ax3.legend(
+            handles=[
+                Patch(color="#EA580C", label="GELU drift (reverted)"),
+                Patch(color="#E2E8F0", label="N/A"),
+                plt.Line2D([0], [0], color="#DC2626", linestyle="--", label="0.99 ref"),
+            ],
+            fontsize=9,
+        )
+    else:
+        ax3.text(
+            0.5, 0.5, "No REVERTED blocks",
+            ha="center", va="center", transform=ax3.transAxes,
+            fontsize=12, color="#94A3B8",
+        )
+    ax3.set_xticks(range(n))
+    ax3.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
 
     plt.tight_layout(pad=2.5)
     out_path = output_dir / "reconstruction_curves.png"
