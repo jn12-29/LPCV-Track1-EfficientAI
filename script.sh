@@ -24,19 +24,22 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc60_hn4_hnw1_seed0__20260425_203708/checkpoint_epoch_065.pt --output-postfix _260425_1 --max-text-len 40
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs512_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260426_074645/checkpoint_epoch_110.pt --output-postfix _260426_0 --max-text-len 40
+
+
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260425_1
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260426_0
 
 
 # eval local (torch)
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-CUDA_VISIBLE_DEVICES=2 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc60_hn4_hnw1_seed0__20260425_203708/checkpoint_epoch_065.pt
-CUDA_VISIBLE_DEVICES=7 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
+CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs512_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260426_074645/checkpoint_epoch_105.pt
+CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 # eval local (onnx) do not support yet
 python pipeline/eval_local.py --model-name MobileCLIP2-S2_260418
@@ -157,7 +160,7 @@ python mlp_reconstruction/run.py \
 
 # Keep ConvStem GELU (visual[stem]); reconstruct all other visual + text blocks
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 2 \
+    --model-name MobileCLIP2-B --gpu-id 3 \
     --n-calib 4096 --n-iters 40000 --log-every 500 --aph-mode uniform \
     --no-relu-stem  --no-relu-text --gelu-threshold 0.99
 
