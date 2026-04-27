@@ -216,6 +216,8 @@ def cmd_train(args: argparse.Namespace) -> None:
                 "elapsed_s": 0.0,
                 "gelu_cos_sim": float("nan"),
                 "gelu_loss": float("nan"),
+                "gelu_recon_cos_sim": float("nan"),
+                "gelu_recon_steps": 0,
             }
             metrics_history.append(row)
             append_metrics_row(metrics_csv, row)
@@ -250,6 +252,9 @@ def cmd_train(args: argparse.Namespace) -> None:
                 }
         else:
             _orig_block_state = _orig_fc1_state = _orig_fc2_state = None
+
+        gelu_recon_cos_sim = float("nan")
+        gelu_recon_steps = 0
 
         block_start = time.time()
         final_loss, steps_run = distill_mlp(
@@ -289,12 +294,44 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f" block kept as GELU"
             )
             if not args.greedy:
-                gelu_cos_sim, gelu_loss = verify_gelu_drift(
+                gelu_cos_sim, gelu_loss, X_drift = verify_gelu_drift(
                     model, info, img_batches, txt_batches, O_all, device
                 )
                 log_message(
                     f"  [GELU drift] cos_sim={gelu_cos_sim:.4f}  loss={gelu_loss:.6f}"
                 )
+                if gelu_threshold is not None and gelu_cos_sim < gelu_threshold:
+                    log_message(
+                        f"  [GELU distill] cos_sim={gelu_cos_sim:.4f} < {gelu_threshold:.4f},"
+                        f" distilling GELU block with X_cur → O_orig ..."
+                    )
+                    gelu_block_start = time.time()
+                    _, gelu_recon_steps = distill_mlp(
+                        model,
+                        info,
+                        X_drift,
+                        O_all,
+                        keep_activation=True,
+                        lr=args.lr,
+                        batch_size=args.batch_size,
+                        n_iters=args.n_iters,
+                        alpha=0.0,
+                        gelu_ub=None,
+                        device=device,
+                        log_every=args.log_every,
+                        aph_mode=args.aph_mode,
+                        log_fn=log_message,
+                        early_stop_patience=args.early_stop_patience if args.early_stop else 0,
+                        early_stop_delta=args.early_stop_delta,
+                    )
+                    gelu_recon_cos_sim = verify_reconstruction(info, X_drift, O_all, device)
+                    gelu_elapsed = time.time() - gelu_block_start
+                    gk = "OK" if gelu_recon_cos_sim >= 0.99 else "WARN"
+                    log_message(
+                        f"  [GELU distill {gk}] cos_sim={gelu_recon_cos_sim:.4f}"
+                        f"  steps={gelu_recon_steps}/{args.n_iters}"
+                        f"  elapsed={gelu_elapsed:.1f}s"
+                    )
         else:
             relu_labels.append(info.label)
             done_set.add(info.label)
@@ -314,6 +351,8 @@ def cmd_train(args: argparse.Namespace) -> None:
             "elapsed_s": round(elapsed_s, 1),
             "gelu_cos_sim": round(gelu_cos_sim, 4) if not math.isnan(gelu_cos_sim) else float("nan"),
             "gelu_loss": round(gelu_loss, 6) if not math.isnan(gelu_loss) else float("nan"),
+            "gelu_recon_cos_sim": round(gelu_recon_cos_sim, 4) if not math.isnan(gelu_recon_cos_sim) else float("nan"),
+            "gelu_recon_steps": gelu_recon_steps,
         }
         metrics_history.append(row)
         append_metrics_row(metrics_csv, row)
