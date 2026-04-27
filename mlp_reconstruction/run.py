@@ -50,8 +50,16 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[],
         metavar="LABEL",
-        help="Block labels to keep as GELU (skip distillation). "
+        help="Block labels to keep as GELU (skip ReLU distillation). "
         "E.g. --keep-gelu-blocks text[0] visual[stem]",
+    )
+    p.add_argument(
+        "--keep-gelu-distill",
+        action="store_true",
+        help="For --keep-gelu-blocks: unconditionally run GELU drift distillation "
+        "(repair upstream-induced drift without changing the activation). "
+        "Without this flag, drift distillation only triggers when "
+        "gelu_cos_sim < --gelu-threshold (if set).",
     )
     p.add_argument(
         "--gelu-threshold",
