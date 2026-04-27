@@ -4,7 +4,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from PIL import Image
@@ -16,10 +16,85 @@ from utils.preprocess import preprocess_image
 from train.train_utils import log_message
 
 
+def load_jsonl_records(
+    jsonl_path: str | Path,
+    max_records: Optional[int] = None,
+    max_positives_per_image: Optional[int] = None,
+    max_hard_negatives_per_image: Optional[int] = None,
+    shuffle_texts_on_load: bool = False,
+    shuffle_seed: Optional[int] = None,
+    log_progress: bool = True,
+) -> List[Dict[str, object]]:
+    """Load records from a JSONL file and return them as a plain list."""
+    records: List[Dict[str, object]] = []
+    rng = random.Random(shuffle_seed) if shuffle_seed is not None else None
+    path = Path(jsonl_path).resolve()
+    with path.open("r", encoding="utf-8") as f:
+        for line_idx, line in enumerate(f, start=1):
+            record = json.loads(line)
+            positives = list(record["positives"])
+            hard_negatives = list(record["hard_negatives"])
+            if shuffle_texts_on_load:
+                if rng is None:
+                    random.shuffle(positives)
+                    random.shuffle(hard_negatives)
+                else:
+                    rng.shuffle(positives)
+                    rng.shuffle(hard_negatives)
+            if max_positives_per_image is not None:
+                positives = positives[:max_positives_per_image]
+            if max_hard_negatives_per_image is not None:
+                hard_negatives = hard_negatives[:max_hard_negatives_per_image]
+            records.append(
+                {
+                    "image_path": record["image_path"],
+                    "positives": positives,
+                    "hard_negatives": hard_negatives,
+                }
+            )
+            if max_records is not None and len(records) >= max_records:
+                break
+            if log_progress and line_idx % 50000 == 0:
+                log_message(f"Loaded {line_idx} rows from {path}")
+    if not records:
+        raise ValueError(f"No usable training records found in {path}")
+    return records
+
+
+def split_val_records(
+    records: List[Dict],
+    val_size: int,
+    random_seed: Optional[int] = None,
+) -> Tuple[List[Dict], List[Dict]]:
+    """Split records into (train_records, val_records).
+
+    Default: deterministic tail split (last val_size records become val).
+    If random_seed is given: random split with a fixed seed.
+    val_size=0 returns (records, []) unchanged.
+    """
+    if val_size <= 0:
+        return records, []
+    if val_size >= len(records):
+        raise ValueError(
+            f"val_size={val_size} must be smaller than total records={len(records)}"
+        )
+    if random_seed is not None:
+        rng = random.Random(random_seed)
+        indices = list(range(len(records)))
+        rng.shuffle(indices)
+        val_records = [records[i] for i in indices[:val_size]]
+        train_records = [records[i] for i in indices[val_size:]]
+    else:
+        train_records = records[:-val_size]
+        val_records = records[-val_size:]
+    return train_records, val_records
+
+
 class ContrastiveRecordDataset(Dataset):
     def __init__(
         self,
-        jsonl_path: str | Path,
+        jsonl_path: str | Path | None = None,
+        records: Optional[List[Dict[str, object]]] = None,
         max_records: Optional[int] = None,
         max_positives_per_image: Optional[int] = None,
         max_hard_negatives_per_image: Optional[int] = None,
@@ -27,57 +102,20 @@ class ContrastiveRecordDataset(Dataset):
         shuffle_seed: Optional[int] = None,
         log_progress: bool = True,
     ) -> None:
-        self.jsonl_path = Path(jsonl_path).resolve()
-        self.max_records = max_records
-        self.max_positives_per_image = max_positives_per_image
-        self.max_hard_negatives_per_image = max_hard_negatives_per_image
-        self.shuffle_texts_on_load = shuffle_texts_on_load
-        self.shuffle_seed = shuffle_seed
-        self.log_progress = log_progress
-        self.records = self._load_records()
-
-    def _load_records(self) -> List[Dict[str, object]]:
-        records = []
-        rng = (
-            random.Random(self.shuffle_seed) if self.shuffle_seed is not None else None
-        )
-        with self.jsonl_path.open("r", encoding="utf-8") as f:
-            for line_idx, line in enumerate(f, start=1):
-                record = json.loads(line)
-
-                positives = list(record["positives"])
-                hard_negatives = list(record["hard_negatives"])
-
-                if self.shuffle_texts_on_load:
-                    if rng is None:
-                        random.shuffle(positives)
-                        random.shuffle(hard_negatives)
-                    else:
-                        rng.shuffle(positives)
-                        rng.shuffle(hard_negatives)
-
-                if self.max_positives_per_image is not None:
-                    positives = positives[: self.max_positives_per_image]
-                if self.max_hard_negatives_per_image is not None:
-                    hard_negatives = hard_negatives[: self.max_hard_negatives_per_image]
-
-                records.append(
-                    {
-                        "image_path": record["image_path"],
-                        "positives": positives,
-                        "hard_negatives": hard_negatives,
-                    }
-                )
-
-                if self.max_records is not None and len(records) >= self.max_records:
-                    break
-
-                if self.log_progress and line_idx % 50000 == 0:
-                    log_message(f"Loaded {line_idx} rows from {self.jsonl_path}")
-
-        if not records:
-            raise ValueError(f"No usable training records found in {self.jsonl_path}")
-        return records
+        if records is not None:
+            self.records = list(records)
+        elif jsonl_path is not None:
+            self.records = load_jsonl_records(
+                jsonl_path=jsonl_path,
+                max_records=max_records,
+                max_positives_per_image=max_positives_per_image,
+                max_hard_negatives_per_image=max_hard_negatives_per_image,
+                shuffle_texts_on_load=shuffle_texts_on_load,
+                shuffle_seed=shuffle_seed,
+                log_progress=log_progress,
+            )
+        else:
+            raise ValueError("Either jsonl_path or records must be provided")
 
     def __len__(self) -> int:
         return len(self.records)
