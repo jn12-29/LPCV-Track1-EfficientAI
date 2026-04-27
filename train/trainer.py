@@ -19,7 +19,13 @@ from torch.utils.tensorboard import SummaryWriter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.clip_utils import _load_clip
-from train.data import ContrastiveRecordDataset, create_collate_fn
+from train.data import (
+    ContrastiveRecordDataset,
+    create_collate_fn,
+    load_jsonl_records,
+    split_val_records,
+)
+from train.val_step import eval_val_loss, eval_val_recall
 from train.distributed import (
     broadcast_run_timestamp,
     cleanup_distributed,
@@ -243,9 +249,12 @@ def run_training(args) -> None:
             if is_main_process:
                 _log_model_structure(model, "after freeze", run_name)
 
-        # --- Dataset and DataLoader (built before DDP so calibration can use it) ---
+        # --- Load all records then split val ---
         _t0 = time.perf_counter()
-        train_dataset = ContrastiveRecordDataset(
+        val_split_size = getattr(args, "val_split_size", 0)
+        val_split_seed = getattr(args, "val_split_seed", None)
+
+        all_records = load_jsonl_records(
             jsonl_path=args.jsonl_path,
             max_records=args.max_records,
             max_positives_per_image=args.max_positives_per_image,
@@ -254,16 +263,25 @@ def run_training(args) -> None:
             shuffle_seed=args.seed,
             log_progress=is_main_process,
         )
+
+        train_records, val_records = split_val_records(
+            all_records, val_split_size, val_split_seed
+        )
+        train_dataset = ContrastiveRecordDataset(records=train_records)
+        val_dataset = ContrastiveRecordDataset(records=val_records) if val_records else None
+
         if is_main_process:
             log_message(
-                f"Loaded {len(train_dataset)} image records from {args.jsonl_path}",
+                f"Loaded {len(all_records)} records from {args.jsonl_path} "
+                f"→ train={len(train_records)} val={len(val_records)}",
                 run_name=run_name,
             )
             log_message(
-                f"[Timer] dataset_load: {time.perf_counter() - _t0:.2f}s  ({len(train_dataset)} records)",
+                f"[Timer] dataset_load: {time.perf_counter() - _t0:.2f}s",
                 run_name=run_name,
             )
-        run_config["num_records"] = len(train_dataset)
+        run_config["num_records"] = len(train_records)
+        run_config["num_val_records"] = len(val_records)
         run_config["effective_global_batch_size"] = (
             args.batch_size * max(args.accum_freq, 1) * world_size
         )
@@ -309,6 +327,23 @@ def run_training(args) -> None:
         )
         if is_main_process:
             log_message(f"[Timer] dataloader_init: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
+
+        # --- Val DataLoader (no DDP sampler: all processes run the full val set) ---
+        val_dataloader = None
+        if val_dataset is not None:
+            val_dataloader = DataLoader(
+                val_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                pin_memory=device.type == "cuda",
+                drop_last=False,
+                collate_fn=create_collate_fn(
+                    tokenizer=tokenizer,
+                    num_hard_negatives=args.num_hard_negatives,
+                    text_sampling=args.text_sampling,
+                ),
+            )
 
         # --- QAT calibration (must happen before DDP wrap) ---
         if qat_config is not None and getattr(model, "_qat_needs_calibration", False):
@@ -404,6 +439,39 @@ def run_training(args) -> None:
         # Resolved once for convenience
         export_onnx = getattr(args, "export_onnx", False)
 
+        # --- Val / sample-eval configuration ---
+        val_every = getattr(args, "val_every_n_epochs", 0)
+        no_val_loss = getattr(args, "no_val_loss", False)
+        no_val_recall = getattr(args, "no_val_recall", False)
+        val_compute_loss = val_dataloader is not None and not no_val_loss
+        val_compute_recall = val_records and not no_val_recall
+        val_k = getattr(args, "val_k", 10)
+        val_batch_size = getattr(args, "val_batch_size", 32)
+
+        sample_every = getattr(args, "sample_eval_every_n_epochs", 0)
+        sample_eval_root = getattr(args, "sample_eval_root", None)
+        sample_eval_image_csv = getattr(args, "sample_eval_image_csv", None)
+        sample_eval_text_csv = getattr(args, "sample_eval_text_csv", None)
+        sample_k = getattr(args, "sample_eval_k", 10)
+        sample_batch_size = getattr(args, "sample_eval_batch_size", 32)
+        sample_eval_active = (
+            sample_every > 0
+            and sample_eval_root is not None
+            and sample_eval_image_csv is not None
+            and sample_eval_text_csv is not None
+        )
+
+        # Metric keys present in every epoch_row (populated with "" when not computed)
+        _val_loss_keys = ["val_total_loss", "val_loss", "val_hard_negative_loss"]
+        _val_recall_key = f"val_recall@{val_k}"
+        _sample_recall_key = f"sample_recall@{sample_k}"
+
+        # Best-checkpoint tracking: prefer val_recall > sample_recall > val_loss
+        best_ckpt_path = output_dir / "checkpoint_best.pt"
+        best_val_recall: Optional[float] = None
+        best_sample_recall: Optional[float] = None
+        best_val_loss: Optional[float] = None
+
         for epoch in range(1, args.epochs + 1):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
@@ -445,7 +513,8 @@ def run_training(args) -> None:
                 "jsonl_path": str(Path(args.jsonl_path).resolve()),
                 "epoch": epoch,
                 "global_step": global_step,
-                "num_records": len(train_dataset),
+                "num_records": len(train_records),
+                "num_val_records": len(val_records),
                 "batch_size": args.batch_size,
                 "epochs": args.epochs,
                 "lr_init": args.lr,
@@ -459,11 +528,15 @@ def run_training(args) -> None:
                 "world_size": world_size,
                 **epoch_metrics,
                 "epoch_duration_s": epoch_duration_s,
+                # val metrics: pre-populated with "" so CSV columns are consistent
+                **{k: "" for k in _val_loss_keys},
+                _val_recall_key: "",
+                _sample_recall_key: "",
             }
             if is_main_process:
+                # Append to history early so plot includes this epoch's train data.
+                # CSV/JSONL writes happen after val eval so val metrics are included.
                 metrics_history.append(epoch_row)
-                append_metrics_row(metrics_csv_path, epoch_row)
-                append_metrics_jsonl(metrics_jsonl_path, epoch_row)
 
                 _t0 = time.perf_counter()
                 plot_training_curves(metrics_history, output_dir)
@@ -487,7 +560,122 @@ def run_training(args) -> None:
                     run_name=run_name,
                 )
 
+            # --- Per-epoch validation (all processes run; main process logs) ---
+            run_val_this_epoch = val_every > 0 and epoch % val_every == 0
+
+            if run_val_this_epoch and val_compute_loss:
+                _t0 = time.perf_counter()
+                _vl = eval_val_loss(
+                    model=model,
+                    dataloader=val_dataloader,
+                    loss_fn=loss_fn,
+                    loss_type=args.loss_type,
+                    device=device,
+                    hard_negative_weight=args.hard_negative_weight,
+                    hard_negative_margin=args.hard_negative_margin,
+                    hard_negative_loss_type=args.hard_negative_loss_type,
+                    amp_enabled=amp_enabled,
+                )
+                for k_name in _val_loss_keys:
+                    epoch_row[k_name] = _vl[k_name]
+                if is_main_process:
+                    write_tensorboard_scalars(writer, "val_epoch", _vl, epoch)
+                    log_message(
+                        f"Val loss  total={_vl['val_total_loss']:.4f} "
+                        f"clip={_vl['val_loss']:.4f} "
+                        f"hardneg={_vl['val_hard_negative_loss']:.4f} "
+                        f"[Timer] {time.perf_counter() - _t0:.2f}s",
+                        run_name=run_name,
+                    )
+
+            if run_val_this_epoch and val_compute_recall:
+                _t0 = time.perf_counter()
+                _vr = eval_val_recall(
+                    model=model,
+                    tokenizer=tokenizer,
+                    records=val_records,
+                    device=device,
+                    batch_size=val_batch_size,
+                    k=val_k,
+                )
+                epoch_row[_val_recall_key] = _vr[_val_recall_key]
+                if is_main_process:
+                    write_tensorboard_scalars(writer, "val_epoch", _vr, epoch)
+                    log_message(
+                        f"Val {_val_recall_key}={_vr[_val_recall_key]:.4f} "
+                        f"[Timer] {time.perf_counter() - _t0:.2f}s",
+                        run_name=run_name,
+                    )
+
+            # --- Per-epoch sample-set eval (main process only) ---
+            run_sample_this_epoch = sample_eval_active and epoch % sample_every == 0
+            if run_sample_this_epoch and is_main_process:
+                from pipeline.eval_local import eval_recall_with_model
+                _t0 = time.perf_counter()
+                _sr = eval_recall_with_model(
+                    model=model,
+                    tokenizer=tokenizer,
+                    root_dir=sample_eval_root,
+                    image_to_text_csv=sample_eval_image_csv,
+                    textnums_to_texts_csv=sample_eval_text_csv,
+                    device=device,
+                    batch_size=sample_batch_size,
+                    k=sample_k,
+                )
+                epoch_row[_sample_recall_key] = _sr[_sample_recall_key]
+                write_tensorboard_scalars(writer, "val_epoch", _sr, epoch)
+                log_message(
+                    f"Sample {_sample_recall_key}={_sr[_sample_recall_key]:.4f} "
+                    f"[Timer] {time.perf_counter() - _t0:.2f}s",
+                    run_name=run_name,
+                )
+
+            # --- Best checkpoint (main process only) ---
+            if is_main_process:
                 sim = getattr(unwrap_model(model), "_qat_sim", None)
+                _improved = False
+                _reason = ""
+                # Priority: val_recall > sample_recall > val_loss
+                if val_compute_recall and epoch_row[_val_recall_key] != "":
+                    _cur = float(epoch_row[_val_recall_key])
+                    if best_val_recall is None or _cur > best_val_recall:
+                        best_val_recall = _cur
+                        _improved = True
+                        _reason = f"{_val_recall_key}={_cur:.4f}"
+                elif sample_eval_active and epoch_row[_sample_recall_key] != "":
+                    _cur = float(epoch_row[_sample_recall_key])
+                    if best_sample_recall is None or _cur > best_sample_recall:
+                        best_sample_recall = _cur
+                        _improved = True
+                        _reason = f"{_sample_recall_key}={_cur:.4f}"
+                elif val_compute_loss and epoch_row["val_total_loss"] != "":
+                    _cur = float(epoch_row["val_total_loss"])
+                    if best_val_loss is None or _cur < best_val_loss:
+                        best_val_loss = _cur
+                        _improved = True
+                        _reason = f"val_total_loss={_cur:.4f}"
+                if _improved:
+                    save_checkpoint(
+                        save_path=best_ckpt_path,
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        scaler=scaler,
+                        epoch=epoch,
+                        global_step=global_step,
+                        args=args,
+                        metrics_history=metrics_history,
+                        sim=sim,
+                        relu_labels=relu_labels,
+                    )
+                    log_message(
+                        f"New best checkpoint saved ({_reason}) → {best_ckpt_path.name}",
+                        run_name=run_name,
+                    )
+
+                # Write CSV/JSONL after val eval so val metrics are included
+                append_metrics_row(metrics_csv_path, epoch_row)
+                append_metrics_jsonl(metrics_jsonl_path, epoch_row)
 
                 latest_path = output_dir / (
                     f"checkpoint_latest_epoch_{epoch:0{epoch_digits}d}.pt"

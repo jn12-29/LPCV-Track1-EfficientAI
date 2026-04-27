@@ -109,6 +109,78 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
+    # --- Validation split ---
+    parser.add_argument(
+        "--val-split-size",
+        type=int,
+        default=1024,
+        help="Hold out the N records as a validation set (0 = disabled).",
+    )
+    parser.add_argument(
+        "--val-split-seed",
+        type=int,
+        default=1,
+        help="If set, use a random split with this seed.",
+    )
+
+    # --- Val metrics ---
+    parser.add_argument(
+        "--val-every-n-epochs",
+        type=int,
+        default=1,
+        help="Run validation every N epochs (0 = disabled).",
+    )
+    parser.add_argument(
+        "--no-val-loss",
+        action="store_true",
+        help="Skip val loss computation (compute val recall only).",
+    )
+    parser.add_argument(
+        "--no-val-recall",
+        action="store_true",
+        help="Skip val Recall@K computation (compute val loss only).",
+    )
+    parser.add_argument("--val-k", type=int, default=10, help="K for val Recall@K.")
+    parser.add_argument(
+        "--val-batch-size",
+        type=int,
+        default=32,
+        help="Batch size for val recall encoding.",
+    )
+
+    # --- Sample-set eval ---
+    parser.add_argument(
+        "--sample-eval-root",
+        type=str,
+        default="./sample_data",
+        help="Root dir for sample-set evaluation (contains images/, img_list.csv, txt_list.csv).",
+    )
+    parser.add_argument(
+        "--sample-eval-image-csv",
+        type=str,
+        default="./sample_data/img_list.csv",
+    )
+    parser.add_argument(
+        "--sample-eval-text-csv",
+        type=str,
+        default="./sample_data/txt_list.csv",
+    )
+    parser.add_argument(
+        "--sample-eval-every-n-epochs",
+        type=int,
+        default=1,
+        help="Run sample-set Recall@K eval every N epochs (0 = disabled).",
+    )
+    parser.add_argument(
+        "--sample-eval-k", type=int, default=10, help="K for sample-set Recall@K."
+    )
+    parser.add_argument(
+        "--sample-eval-batch-size",
+        type=int,
+        default=64,
+        help="Batch size for sample-set recall encoding.",
+    )
+
     # --- Resume ---
     parser.add_argument(
         "--resume",

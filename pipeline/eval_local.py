@@ -135,6 +135,46 @@ def run_clip_retrieval_eval(
     return {f"image_to_text_recall@{k}": image_to_text_recall}
 
 
+@torch.no_grad()
+def eval_recall_with_model(
+    model,
+    tokenizer,
+    root_dir: str | Path,
+    image_to_text_csv: str | Path,
+    textnums_to_texts_csv: str | Path,
+    device: torch.device,
+    batch_size: int = 32,
+    k: int = 10,
+) -> Dict[str, float]:
+    """Compute sample-set Recall@k using a pre-loaded model (no checkpoint reload)."""
+    from train.train_utils import unwrap_model
+
+    raw_model = unwrap_model(model)
+    raw_model.eval()
+
+    root_dir = Path(root_dir)
+    image_dataset = RetrievalEvalDataset(
+        root_dir=root_dir,
+        image_to_text_csv=image_to_text_csv,
+        textnums_to_texts_csv=textnums_to_texts_csv,
+        mode="image",
+    )
+    eval_data = image_dataset.get_image_to_text_eval_data()
+    image_embeds = _encode_images_torch(raw_model, image_dataset, device, batch_size)
+    text_embeds = _encode_texts_torch(
+        raw_model, tokenizer, eval_data.texts, device, batch_size
+    )
+
+    raw_model.train()
+    recall = recall_at_k(
+        image_embeds.numpy(),
+        text_embeds.numpy(),
+        eval_data.positive_text_indices,
+        k=k,
+    )
+    return {f"sample_recall@{k}": recall}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="CLIP image-text retrieval evaluation (torch)"
