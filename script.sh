@@ -41,7 +41,7 @@ python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260427_1
 python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
 python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
 
-CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc30_hn4_hnw1_seed0__20260424_012159/checkpoint_epoch_120.pt
+CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_131106/checkpoint_epoch_040.pt
 CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
 
 # eval local (onnx)
