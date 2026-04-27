@@ -82,6 +82,73 @@ def _get_block_inputs(
     return X_all, O_all, gelu_ub
 
 
+def _handle_gelu_drift(
+    model: nn.Module,
+    info,
+    O_all: torch.Tensor,
+    img_batches: list,
+    txt_batches: list,
+    args: argparse.Namespace,
+    device: torch.device,
+    log_fn,
+    always_distill: bool = False,
+) -> dict:
+    """Verify and optionally repair output drift for a GELU-retained block.
+
+    always_distill=True: distill unconditionally (used for --keep-gelu-distill).
+    always_distill=False: distill only when gelu_cos_sim < gelu_threshold (if set).
+    Returns partial metrics dict with gelu_* keys.
+    """
+    from mlp_reconstruction.distill import distill_mlp
+    from mlp_reconstruction.verify import verify_reconstruction, verify_gelu_drift
+
+    gelu_cos_sim, gelu_loss, X_drift = verify_gelu_drift(
+        model, info, img_batches, txt_batches, O_all, device
+    )
+    log_fn(f"  [GELU drift] cos_sim={gelu_cos_sim:.4f}  loss={gelu_loss:.6f}")
+
+    gelu_recon_cos_sim = float("nan")
+    gelu_recon_steps = 0
+
+    should_distill = always_distill or (
+        args.gelu_threshold is not None and gelu_cos_sim < args.gelu_threshold
+    )
+    if should_distill:
+        reason = (
+            f" < {args.gelu_threshold:.4f}" if args.gelu_threshold is not None
+            else " (unconditional)"
+        )
+        log_fn(
+            f"  [GELU distill] cos_sim={gelu_cos_sim:.4f}{reason},"
+            f" distilling GELU block with X_cur → O_orig ..."
+        )
+        gelu_start = time.time()
+        _, gelu_recon_steps = distill_mlp(
+            model, info, X_drift, O_all,
+            keep_activation=True, lr=args.lr, batch_size=args.batch_size,
+            n_iters=args.n_iters, alpha=0.0, gelu_ub=None, device=device,
+            log_every=args.log_every, aph_mode=args.aph_mode, log_fn=log_fn,
+            early_stop_patience=args.early_stop_patience if args.early_stop else 0,
+            early_stop_delta=args.early_stop_delta,
+        )
+        gelu_recon_cos_sim = verify_reconstruction(info, X_drift, O_all, device)
+        gk = "OK" if gelu_recon_cos_sim >= 0.99 else "WARN"
+        log_fn(
+            f"  [GELU distill {gk}] cos_sim={gelu_recon_cos_sim:.4f}"
+            f"  steps={gelu_recon_steps}/{args.n_iters}"
+            f"  elapsed={time.time() - gelu_start:.1f}s"
+        )
+
+    return {
+        "gelu_cos_sim": round(gelu_cos_sim, 4),
+        "gelu_loss": round(gelu_loss, 6),
+        "gelu_recon_cos_sim": (
+            round(gelu_recon_cos_sim, 4) if not math.isnan(gelu_recon_cos_sim) else float("nan")
+        ),
+        "gelu_recon_steps": gelu_recon_steps,
+    }
+
+
 def _process_block(
     model: nn.Module,
     info,
@@ -100,7 +167,7 @@ def _process_block(
     accepted=True: block converted to ReLU and should be added to relu_labels.
     """
     from mlp_reconstruction.distill import distill_mlp
-    from mlp_reconstruction.verify import verify_reconstruction, verify_gelu_drift
+    from mlp_reconstruction.verify import verify_reconstruction
 
     saved = info.save_weights() if args.gelu_threshold is not None else None
 
@@ -116,8 +183,10 @@ def _process_block(
     elapsed_s = time.time() - block_start
     cos_sim = verify_reconstruction(info, X_all, O_all, device)
 
-    gelu_cos_sim = gelu_loss = gelu_recon_cos_sim = float("nan")
-    gelu_recon_steps = 0
+    drift: dict = {
+        "gelu_cos_sim": float("nan"), "gelu_loss": float("nan"),
+        "gelu_recon_cos_sim": float("nan"), "gelu_recon_steps": 0,
+    }
 
     if args.gelu_threshold is not None and cos_sim < args.gelu_threshold:
         info.restore_weights(saved)
@@ -126,33 +195,10 @@ def _process_block(
             f"  [REVERTED] cos_sim={cos_sim:.4f} < threshold={args.gelu_threshold:.4f},"
             f" block kept as GELU"
         )
-
         if not args.greedy:
-            gelu_cos_sim, gelu_loss, X_drift = verify_gelu_drift(
-                model, info, img_batches, txt_batches, O_all, device
+            drift = _handle_gelu_drift(
+                model, info, O_all, img_batches, txt_batches, args, device, log_fn
             )
-            log_fn(f"  [GELU drift] cos_sim={gelu_cos_sim:.4f}  loss={gelu_loss:.6f}")
-            if gelu_cos_sim < args.gelu_threshold:
-                log_fn(
-                    f"  [GELU distill] cos_sim={gelu_cos_sim:.4f} < {args.gelu_threshold:.4f},"
-                    f" distilling GELU block with X_cur → O_orig ..."
-                )
-                gelu_start = time.time()
-                _, gelu_recon_steps = distill_mlp(
-                    model, info, X_drift, O_all,
-                    keep_activation=True, lr=args.lr, batch_size=args.batch_size,
-                    n_iters=args.n_iters, alpha=0.0, gelu_ub=None, device=device,
-                    log_every=args.log_every, aph_mode=args.aph_mode, log_fn=log_fn,
-                    early_stop_patience=args.early_stop_patience if args.early_stop else 0,
-                    early_stop_delta=args.early_stop_delta,
-                )
-                gelu_recon_cos_sim = verify_reconstruction(info, X_drift, O_all, device)
-                gk = "OK" if gelu_recon_cos_sim >= 0.99 else "WARN"
-                log_fn(
-                    f"  [GELU distill {gk}] cos_sim={gelu_recon_cos_sim:.4f}"
-                    f"  steps={gelu_recon_steps}/{args.n_iters}"
-                    f"  elapsed={time.time() - gelu_start:.1f}s"
-                )
         status = "REVERTED"
     else:
         status = "OK" if cos_sim >= 0.99 else "WARN"
@@ -169,12 +215,7 @@ def _process_block(
         "status": status,
         "steps_run": steps_run,
         "elapsed_s": round(elapsed_s, 1),
-        "gelu_cos_sim": round(gelu_cos_sim, 4) if not math.isnan(gelu_cos_sim) else float("nan"),
-        "gelu_loss": round(gelu_loss, 6) if not math.isnan(gelu_loss) else float("nan"),
-        "gelu_recon_cos_sim": (
-            round(gelu_recon_cos_sim, 4) if not math.isnan(gelu_recon_cos_sim) else float("nan")
-        ),
-        "gelu_recon_steps": gelu_recon_steps,
+        **drift,
     }
     return row, status != "REVERTED"
 
@@ -300,17 +341,30 @@ def cmd_train(args: argparse.Namespace) -> None:
             continue
 
         if info.label in keep_gelu_set:
-            log_message(f"  [SKIPPED] {info.label} kept as GELU (--keep-gelu-blocks)")
+            log_message(f"=== {info.label} ({info.kind}) [KEEP-GELU] ===")
+            drift: dict = {
+                "gelu_cos_sim": float("nan"), "gelu_loss": float("nan"),
+                "gelu_recon_cos_sim": float("nan"), "gelu_recon_steps": 0,
+            }
+            if not args.greedy and info.label in block_io:
+                O_keep, _ = block_io[info.label]
+                drift = _handle_gelu_drift(
+                    model, info, O_keep, img_batches, txt_batches, args, device, log_message,
+                    always_distill=args.keep_gelu_distill,
+                )
+            elif args.greedy:
+                log_message(f"  [KEEP-GELU] greedy mode — drift check skipped (no O_orig)")
             row: dict = {
                 "block": info.label, "kind": info.kind,
                 "final_loss": float("nan"), "cos_sim": float("nan"),
-                "status": "SKIPPED", "steps_run": 0, "elapsed_s": 0.0,
-                "gelu_cos_sim": float("nan"), "gelu_loss": float("nan"),
-                "gelu_recon_cos_sim": float("nan"), "gelu_recon_steps": 0,
+                "status": "KEEP-GELU", "steps_run": 0, "elapsed_s": 0.0,
+                **drift,
             }
             metrics_history.append(row)
             append_metrics_row(metrics_csv, row)
             append_metrics_jsonl(metrics_jsonl, row)
+            plot_reconstruction_metrics(metrics_history, output_path.parent)
+            _save_checkpoint(model, args.model_name, relu_labels, args.output + ".tmp", args.checkpoint_path)
             continue
 
         log_message(f"=== {info.label} ({info.kind}) ===")
