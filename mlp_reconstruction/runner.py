@@ -150,19 +150,20 @@ def cmd_train(args: argparse.Namespace) -> None:
                 f"Available: {[b.label for b in blocks]}"
             )
 
-    block_io: dict[str, tuple[torch.Tensor, torch.Tensor, float | None]] = {}
+    block_io: dict[str, tuple[torch.Tensor, float | None]] = {}
     if not args.greedy:
-        # Pre-collect (X, O, gelu_ub) for all remaining blocks from the original all-GELU model.
-        # This ensures every teacher target is the true original GELU output, not a
-        # drifted output produced after upstream blocks have already been converted to ReLU.
+        # Pre-collect O_orig and gelu_ub from the original all-GELU model.
+        # X is NOT stored here — it is collected just-in-time from the current
+        # (partially-replaced) model so training inputs match actual inference inputs
+        # after upstream ReLU substitutions.
         blocks_to_run = [b for b in blocks if b.label not in done_set]
         log_message(
-            f"Pre-collecting MLP I/O from original model "
+            f"Pre-collecting MLP outputs (O_orig) from original model "
             f"for {len(blocks_to_run)} remaining blocks ..."
         )
-        for info in tqdm(blocks_to_run, desc="Pre-collecting"):
-            X_all, O_all, gelu_ub = collect_mlp_io(model, info, img_batches, txt_batches, device)
-            block_io[info.label] = (X_all, O_all, gelu_ub)
+        for info in tqdm(blocks_to_run, desc="Pre-collecting O_orig"):
+            _, O_all, gelu_ub = collect_mlp_io(model, info, img_batches, txt_batches, device)
+            block_io[info.label] = (O_all, gelu_ub)
     else:
         log_message(
             "Greedy mode: I/O will be collected just-in-time from the partially-replaced model"
@@ -226,7 +227,10 @@ def cmd_train(args: argparse.Namespace) -> None:
         if args.greedy:
             X_all, O_all, gelu_ub = collect_mlp_io(model, info, img_batches, txt_batches, device)
         else:
-            X_all, O_all, gelu_ub = block_io[info.label]
+            O_all, gelu_ub = block_io[info.label]
+            # Collect X from the current (partially-replaced) model so training inputs
+            # match the actual inference distribution after upstream ReLU substitutions.
+            X_all, _, _ = collect_mlp_io(model, info, img_batches, txt_batches, device)
         log_message(f"  X={tuple(X_all.shape)}, O={tuple(O_all.shape)}")
 
         # Save original weights before distillation (needed for auto-revert).
