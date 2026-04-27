@@ -35,8 +35,13 @@ def distill_mlp(
     log_fn=print,
     early_stop_patience: int = 5,
     early_stop_delta: float = 5e-4,
-) -> float:
-    """Distill a single MLP block in-place (GELU→ReLU + fit weights). Returns final loss.
+    keep_activation: bool = False,
+) -> tuple[float, int]:
+    """Distill a single MLP block in-place. Returns (final_loss, steps_run).
+
+    keep_activation=True: skip GELU→ReLU replacement, optimize fc1/fc2 keeping the
+    current activation (used for GELU drift distillation after a revert). L_Clamp is
+    disabled in this mode (alpha is ignored).
 
     Early stopping: checks every log_every steps. If EMA loss does not improve by
     more than early_stop_delta (relative) for early_stop_patience consecutive checks,
@@ -56,7 +61,9 @@ def distill_mlp(
         for p in info.fc2.parameters():
             p.requires_grad_(True)
 
-    replace_gelu_with_relu(info)
+    if not keep_activation:
+        replace_gelu_with_relu(info)
+    act_fn = None if info.kind == 'conv_stem' else getattr(info.mlp, info.act_attr)
 
     H_bar = compute_aph_weights(O_all, mode=aph_mode).to(device)
     X_gpu = X_all.to(device)
@@ -85,9 +92,11 @@ def distill_mlp(
 
         H_view = _get_hbar_view(H_bar, O_b)
 
-        if info.kind == 'conv_stem':
-            # Full ConvStem forward (ReLU already installed in layers 0 and 1)
-            O_direct = info.mlp(X_b)
+        if info.kind == 'conv_stem' or keep_activation:
+            if info.kind == 'conv_stem':
+                O_direct = info.mlp(X_b)
+            else:
+                O_direct = info.fc2(act_fn(info.fc1(X_b)))
             loss = _weighted_mse(O_direct, O_b, H_view)
         else:
             h = info.fc1(X_b)
@@ -165,7 +174,11 @@ def verify_reconstruction(
     device: torch.device,
     batch_size: int = 64,
 ) -> float:
-    """Compute mean cosine similarity between O_GELU and ReLU-MLP output on calibration data."""
+    """Compute mean cosine similarity between O_GELU and MLP output on calibration data.
+
+    Uses the module's actual activation function (whatever is currently installed),
+    so this is correct for both ReLU-reconstructed and GELU-distilled blocks.
+    """
     cos_sims: list[float] = []
     N = X_all.shape[0]
     for i in range(0, N, batch_size):
@@ -174,8 +187,9 @@ def verify_reconstruction(
         if info.kind == 'conv_stem':
             O_pred = info.mlp(X_b)
         else:
+            act_fn = getattr(info.mlp, info.act_attr)
             h = info.fc1(X_b)
-            O_pred = info.fc2(F.relu(h))
+            O_pred = info.fc2(act_fn(h))
         O_flat = O_b.reshape(O_b.shape[0], -1)
         P_flat = O_pred.reshape(O_pred.shape[0], -1)
         cos = F.cosine_similarity(O_flat, P_flat, dim=1).mean().item()
@@ -192,17 +206,20 @@ def verify_gelu_drift(
     O_orig: torch.Tensor,
     device: torch.device,
     batch_size: int = 64,
-) -> tuple[float, float]:
+) -> tuple[float, float, torch.Tensor]:
     """Measure output drift of a GELU-restored block due to upstream ReLU substitutions.
 
     Called after restore_gelu(info) in non-greedy mode. Re-collects the block's actual
     output using the current model (upstream blocks already ReLU) and compares it to the
     original GELU output O_orig captured before any distillation.
-    Returns (cos_sim, mse_loss).
+    Returns (cos_sim, mse_loss, X_cur).
+
+    X_cur is the block's actual input under the current (partially-replaced) model,
+    returned so the caller can reuse it for GELU distillation without a second inference pass.
     """
     from mlp_reconstruction.calibrate import collect_mlp_io
 
-    _, O_cur, _ = collect_mlp_io(model, info, img_batches, txt_batches, device)
+    X_cur, O_cur, _ = collect_mlp_io(model, info, img_batches, txt_batches, device)
 
     cos_sims: list[float] = []
     mse_losses: list[float] = []
@@ -214,4 +231,4 @@ def verify_gelu_drift(
         P_flat = P_b.reshape(P_b.shape[0], -1)
         cos_sims.append(F.cosine_similarity(O_flat, P_flat, dim=1).mean().item())
         mse_losses.append(F.mse_loss(P_flat, O_flat).item())
-    return sum(cos_sims) / len(cos_sims), sum(mse_losses) / len(mse_losses)
+    return sum(cos_sims) / len(cos_sims), sum(mse_losses) / len(mse_losses), X_cur
