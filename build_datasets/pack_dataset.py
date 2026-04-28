@@ -130,33 +130,11 @@ def _print_pack_result(
     print(f"  └── manifest.json")
 
 
-def _collect_unpack_extras(src: Path) -> list[tuple[Path, Path]]:
-    """Return (abs_path, rel_path) for non-shard, non-manifest files in a shard folder."""
-    if not src.is_dir():
-        return []
-    return sorted(
-        [
-            (p, p.relative_to(src))
-            for p in src.rglob("*")
-            if p.is_file()
-            and not p.name.endswith(".tar")
-            and not p.name.endswith(".tar.gz")
-            and p.name != "manifest.json"
-        ],
-        key=lambda x: x[1],
-    )
-
-
-def _print_unpack_plan(
-    shards: list[Path], extras: list[tuple[Path, Path]], dst: Path
-) -> None:
-    """Show shards and extra files that will be extracted/copied before unpacking."""
+def _print_unpack_plan(shards: list[Path], dst: Path) -> None:
     src_dir = shards[0].parent if shards[0].is_file() else shards[0]
     print(f"\n{src_dir}/")
     for shard in shards:
         print(f"  ├── {shard.name}")
-    for _, rel in extras:
-        print(f"  ├── {str(rel):<30}  (copy)")
     print(f"\n  → extract to: {dst}/")
 
 
@@ -186,6 +164,16 @@ def _write_shard(task: tuple) -> tuple[str, int, float]:
         for fp in file_paths:
             tf.add(fp, arcname=Path(fp).name)
     return shard_path, len(file_paths), time.monotonic() - t0
+
+
+def _extract_shard(task: tuple) -> tuple[str, int, float]:
+    """Extract one tar shard. Returns (shard_path, n_files, elapsed_sec)."""
+    shard_path, dst = task
+    t0 = time.monotonic()
+    with tarfile.open(shard_path, "r:*") as tf:
+        members = tf.getmembers()
+        tf.extractall(dst, members=members, filter="data")
+    return shard_path, len(members), time.monotonic() - t0
 
 
 # ---------------------------------------------------------------------------
@@ -307,37 +295,30 @@ def cmd_unpack(args):
     shards = _collect_shards(src)
     if not shards:
         sys.exit(f"[unpack] No .tar / .tar.gz shards found in {src}")
-    extras = _collect_unpack_extras(src)
 
-    # Show plan and ask for confirmation
     print(f"\nPlanned extraction:")
-    _print_unpack_plan(shards, extras, dst)
-    if extras:
-        print(f"  ({len(extras)} extra file(s) will be copied as-is)")
+    _print_unpack_plan(shards, dst)
     print()
     _confirm("Proceed with unpacking?")
 
     dst.mkdir(parents=True, exist_ok=True)
 
+    tasks = [(str(s), str(dst)) for s in shards]
+    workers = min(args.workers, len(shards))
     total_files = 0
     t_start = time.monotonic()
 
-    for shard in tqdm(shards, desc="Unpacking", unit="shard"):
-        with tarfile.open(shard, "r:*") as tf:
-            members = tf.getmembers()
-            tf.extractall(dst, members=members, filter="data")
-            total_files += len(members)
-
-    for abs_path, rel_path in extras:
-        dest = dst / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(abs_path, dest)
+    with tqdm(total=len(shards), desc="Unpacking", unit="shard") as pbar:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_extract_shard, t): t for t in tasks}
+            for fut in as_completed(futures):
+                shard_path, n_files, shard_elapsed = fut.result()
+                total_files += n_files
+                pbar.set_postfix({"last": Path(shard_path).name, "imgs": n_files, "s": f"{shard_elapsed:.1f}"})
+                pbar.update(1)
 
     elapsed = time.monotonic() - t_start
-    extra_note = f", {len(extras)} extra file(s) copied" if extras else ""
-    print(
-        f"\n[unpack] Extracted {total_files} images{extra_note} in {elapsed:.1f}s  →  {dst}"
-    )
+    print(f"\n[unpack] Extracted {total_files} images in {elapsed:.1f}s  →  {dst}")
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +448,13 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="DIR",
         help="Destination folder for extracted images",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        metavar="N",
+        help="Parallel worker processes (default: 8)",
     )
 
     # ---- upload ----
