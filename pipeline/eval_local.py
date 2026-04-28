@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from pipeline.dataset import RetrievalEvalDataset
+from pipeline.export_onnx import _resize_vit_pos_embed
 from train.data import load_jsonl_records, split_val_records
 from train.val_step import eval_val_recall
 from utils.clip_utils import _load_clip
@@ -88,12 +89,21 @@ def _encode_texts_torch(
 
 @torch.no_grad()
 def _encode_images_torch(
-    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int
+    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int,
+    image_size: int = 224, image_mode: str = "resize",
 ) -> torch.Tensor:
     features: List[torch.Tensor] = []
     for _, batch_indices in _batched(list(range(len(image_dataset))), batch_size):
         batch_images = [image_dataset[idx]["image"] for idx in batch_indices]
         pixel_values = torch.stack(batch_images, dim=0).to(device)
+        if image_size != 224:
+            if image_mode == "crop":
+                h, w = pixel_values.shape[-2], pixel_values.shape[-1]
+                top  = (h - image_size) // 2
+                left = (w - image_size) // 2
+                pixel_values = pixel_values[:, :, top:top + image_size, left:left + image_size]
+            else:
+                pixel_values = F.interpolate(pixel_values, size=(image_size, image_size), mode="bilinear", align_corners=False)
         image_features = model.encode_image(pixel_values)
         features.append(F.normalize(image_features, dim=-1).cpu())
     return torch.cat(features, dim=0)
@@ -115,6 +125,8 @@ def run_clip_retrieval_eval(
     checkpoint_path: str | None = None,
     onnx_dir: str | Path | None = None,
     print_model: bool = False,
+    image_size: int = 224,
+    image_mode: str = "resize",
 ) -> Dict[str, float]:
     root_dir = Path(root_dir)
     device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -160,8 +172,10 @@ def run_clip_retrieval_eval(
         )
         if print_model:
             print(model)
+        if image_size != 224:
+            _resize_vit_pos_embed(model, image_size)
         image_embeds = _encode_images_torch(
-            model, image_dataset, device_obj, batch_size
+            model, image_dataset, device_obj, batch_size, image_size=image_size, image_mode=image_mode
         )
         text_embeds = _encode_texts_torch(
             model, tokenizer, eval_data.texts, device_obj, batch_size
@@ -280,6 +294,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print model architecture after loading (torch mode only).",
     )
+    parser.add_argument(
+        "--image-size", type=int, default=224,
+        help="Downsample images to this resolution inside the model (torch path). Match export_onnx.py --image-size.",
+    )
+    parser.add_argument(
+        "--image-mode", type=str, default="resize", choices=["resize", "crop"],
+        help="How to reduce image resolution: 'resize' (bilinear) or 'crop' (center crop).",
+    )
 
     # --- Val-split mode ---
     parser.add_argument(
@@ -335,6 +357,8 @@ def main() -> None:
             checkpoint_path=args.checkpoint_path,
             onnx_dir=args.onnx_dir,
             print_model=args.print_model,
+            image_size=args.image_size,
+            image_mode=args.image_mode,
         )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
