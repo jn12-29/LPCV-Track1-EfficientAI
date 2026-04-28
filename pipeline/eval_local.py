@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from pipeline.dataset import RetrievalEvalDataset
+from pipeline.export_onnx import _resize_vit_pos_embed
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched, recall_at_k
 
@@ -67,12 +68,17 @@ def _encode_texts_torch(
 
 @torch.no_grad()
 def _encode_images_torch(
-    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int
+    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int,
+    image_size: int = 224,
 ) -> torch.Tensor:
     features: List[torch.Tensor] = []
     for _, batch_indices in _batched(list(range(len(image_dataset))), batch_size):
         batch_images = [image_dataset[idx]["image"] for idx in batch_indices]
         pixel_values = torch.stack(batch_images, dim=0).to(device)
+        if image_size != 224:
+            pixel_values = F.interpolate(
+                pixel_values, size=(image_size, image_size), mode="bilinear", align_corners=False
+            )
         image_features = model.encode_image(pixel_values)
         features.append(F.normalize(image_features, dim=-1).cpu())
     return torch.cat(features, dim=0)
@@ -92,6 +98,7 @@ def run_clip_retrieval_eval(
     device: str | None = None,
     checkpoint_path: str | None = None,
     onnx_dir: str | Path | None = None,
+    image_size: int = 224,
 ) -> Dict[str, float]:
     root_dir = Path(root_dir)
     device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -120,7 +127,9 @@ def run_clip_retrieval_eval(
         text_embeds = _encode_texts_onnx(txt_sess, tokenizer, eval_data.texts, batch_size=1)
     else:
         model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
-        image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size)
+        if image_size != 224:
+            _resize_vit_pos_embed(model, image_size)
+        image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size, image_size=image_size)
         text_embeds = _encode_texts_torch(model, tokenizer, eval_data.texts, device_obj, batch_size)
 
     image_to_text_recall = recall_at_k(
@@ -152,6 +161,11 @@ def parse_args() -> argparse.Namespace:
         help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-S0_onnx). "
              "If set, uses ONNX inference instead of PyTorch.",
     )
+    parser.add_argument(
+        "--image-size", type=int, default=224,
+        help="Downsample images to this resolution before the backbone (torch path only). "
+             "Use the same value as --image-size in export_onnx.py for aligned comparison.",
+    )
     return parser.parse_args()
 
 
@@ -167,6 +181,7 @@ def main() -> None:
         device=args.device,
         checkpoint_path=args.checkpoint_path,
         onnx_dir=args.onnx_dir,
+        image_size=args.image_size,
     )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")

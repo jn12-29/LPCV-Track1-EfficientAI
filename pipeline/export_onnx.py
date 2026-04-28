@@ -14,6 +14,7 @@ import onnxruntime as ort
 import onnxsim
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.utils import reparameterize_model
 
 from utils.clip_utils import _load_clip
@@ -36,15 +37,99 @@ def parse_args() -> argparse.Namespace:
         help="Truncate text tokens to this length inside the ONNX graph (external input stays 77). "
              "Reduces attention cost by ~(77/N)^2. E.g. --max-text-len 32 gives ~5.8x attention speedup.",
     )
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=224,
+        help="Downsample image inside the ONNX graph to this resolution before the backbone "
+             "(external input stays 224x224). E.g. --image-size 160 reduces backbone FLOPs by ~(224/160)^2.",
+    )
     return parser.parse_args()
 
 
+def _resize_vit_pos_embed(model: nn.Module, image_size: int, orig_size: int = 224) -> None:
+    """Bicubic-interpolate ViT positional embeddings for a new image resolution.
+
+    Handles open_clip TimmModel (model.visual.trunk.pos_embed) and any module
+    that directly exposes a pos_embed attribute.  No-op when image_size == orig_size
+    or no compatible pos_embed is found.
+
+    Grid size and cls-token presence are inferred from pos_embed shape (robust to
+    different patch sizes) rather than from patch_embed attributes.
+    """
+    import math
+
+    if image_size == orig_size:
+        return
+
+    # Locate the ViT trunk: open_clip TimmModel wraps it at visual.trunk
+    trunk = None
+    visual = getattr(model, "visual", None)
+    if visual is not None:
+        trunk = getattr(visual, "trunk", None)
+    if trunk is None:
+        trunk = model  # fallback: model itself might be the trunk
+
+    pos_embed_param = getattr(trunk, "pos_embed", None)
+    if pos_embed_param is None:
+        return  # not a ViT with learnable absolute pos_embed
+
+    pos_embed = pos_embed_param.data  # (1, N, dim)
+    num_tokens = pos_embed.shape[1]
+
+    # Infer old grid size and cls-token presence directly from pos_embed shape.
+    # Either N == G^2 (no cls) or N == G^2 + 1 (with cls).
+    sqrt_n = math.isqrt(num_tokens)
+    if sqrt_n * sqrt_n == num_tokens:
+        has_cls = False
+        old_grid = sqrt_n
+    elif math.isqrt(num_tokens - 1) ** 2 == num_tokens - 1:
+        has_cls = True
+        old_grid = math.isqrt(num_tokens - 1)
+    else:
+        print(f"  _resize_vit_pos_embed: cannot infer grid from pos_embed {pos_embed.shape}, skipping.")
+        return
+
+    # Infer patch size from old_grid and orig_size; compute new_grid
+    patch_size = orig_size // old_grid
+    new_grid = image_size // patch_size
+    if old_grid == new_grid:
+        return
+
+    with torch.no_grad():
+        dim = pos_embed.shape[-1]
+        if has_cls:
+            cls_token, patch_pos = pos_embed[:, :1], pos_embed[:, 1:]
+        else:
+            patch_pos = pos_embed
+
+        # Spatial bicubic interpolation
+        patch_pos = patch_pos.reshape(1, old_grid, old_grid, dim).permute(0, 3, 1, 2)
+        patch_pos = F.interpolate(
+            patch_pos.float(), size=(new_grid, new_grid), mode="bicubic", align_corners=False
+        ).to(pos_embed.dtype)
+        patch_pos = patch_pos.permute(0, 2, 3, 1).reshape(1, new_grid * new_grid, dim)
+
+        new_pos_embed = torch.cat([cls_token, patch_pos], dim=1) if has_cls else patch_pos
+        trunk.pos_embed = nn.Parameter(new_pos_embed)
+
+    print(
+        f"  Resized ViT pos_embed: {num_tokens} → {new_pos_embed.shape[1]} tokens "
+        f"({old_grid}×{old_grid} → {new_grid}×{new_grid} grid, patch_size={patch_size})"
+    )
+
+
 class OpenClipVisionEncoder(nn.Module):
-    def __init__(self, model):
+    def __init__(self, model, image_size: int = 224):
         super().__init__()
         self.model = model
+        self.image_size = image_size
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
+        if self.image_size != 224:
+            image = F.interpolate(
+                image, size=(self.image_size, self.image_size), mode="bilinear", align_corners=False
+            )
         return self.model.encode_image(image)
 
 
@@ -221,17 +306,28 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
     print(f"\nExport complete → {output_dir}")
 
 
-def export_encoders_to_onnx(clip_model: nn.Module, output_dir: str, max_text_len: int = 77) -> None:
+def export_encoders_to_onnx(
+    clip_model: nn.Module,
+    output_dir: str,
+    max_text_len: int = 77,
+    image_size: int = 224,
+) -> None:
     """Export image and text encoders to ONNX.
 
     clip_model must already be reparameterized and in eval mode.
     max_text_len: tokens are truncated to this length inside the ONNX graph;
                   the external input shape remains (1, 77).
+    image_size: image is downsampled to this resolution inside the ONNX graph;
+                the external input shape remains (1, 3, 224, 224).
     """
     os.makedirs(output_dir, exist_ok=True)
     device = next(clip_model.parameters()).device
 
-    image_encoder = OpenClipVisionEncoder(clip_model).eval()
+    if image_size != 224:
+        print(f"\nResizing ViT positional embeddings for image_size={image_size}...")
+        _resize_vit_pos_embed(clip_model, image_size)
+
+    image_encoder = OpenClipVisionEncoder(clip_model, image_size=image_size).eval()
     text_encoder = OpenClipTextEncoder(clip_model, max_text_len=max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
@@ -326,7 +422,12 @@ def main() -> None:
         )
         clip_model = reparameterize_model(clip_model)
         clip_model.eval()
-        export_encoders_to_onnx(clip_model, output_dir_name, max_text_len=args.max_text_len)
+        export_encoders_to_onnx(
+            clip_model,
+            output_dir_name,
+            max_text_len=args.max_text_len,
+            image_size=args.image_size,
+        )
 
     if checkpoint_path:
         print(f"Exported from checkpoint: {Path(checkpoint_path).resolve()}")
