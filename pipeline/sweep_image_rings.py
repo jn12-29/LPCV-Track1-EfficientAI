@@ -8,6 +8,7 @@ import csv
 from typing import Dict, List
 
 from pipeline.eval_local import run_clip_retrieval_eval
+from utils.image_utils import resolve_image_rings
 
 
 def _parse_int_list(raw: str) -> List[int]:
@@ -159,7 +160,11 @@ def main() -> None:
             crop_rings=crop_rings,
         )
         score = float(metrics[metrics_key])
-        final_size = 224 - 32 * resize_rings - 32 * crop_rings
+        _, _, final_size = resolve_image_rings(
+            image_size=224, image_mode="resize",
+            resize_rings=resize_rings, crop_rings=crop_rings,
+            patch_size=16,
+        )
         mode = (
             "chain"
             if resize_rings > 0 and crop_rings > 0

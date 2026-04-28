@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, Tuple
 import torch
-import torch.nn as nn
 import open_clip
+from utils.image_utils import (
+    _infer_vit_patch_size,
+    resolve_image_rings,
+    apply_image_resize_crop,
+    _resize_vit_pos_embed,
+)
 
 if TYPE_CHECKING:
     from utils.qat_utils import QATConfig
@@ -25,6 +30,8 @@ def _load_clip(
     qat_config: Optional["QATConfig"] = None,
     relu_image: bool = False,
     relu_text: bool = False,
+    resize_rings: int = 0,
+    crop_rings: int = 0,
 ) -> Tuple:
     """Load a CLIP model, optionally from a fine-tuned or QAT checkpoint.
 
@@ -48,6 +55,8 @@ def _load_clip(
         qat_config: QATConfig instance; when provided the model is QAT-wrapped.
         relu_image: replace GELU with ReLU in all visual-encoder MLP blocks.
         relu_text: replace GELU with ReLU in all text-encoder MLP blocks.
+        resize_rings: number of ViT patch rings to remove via bilinear resize (0 = off).
+        crop_rings: number of ViT patch rings to remove via center crop after resize (0 = off).
 
     Returns:
         (model, preprocess, tokenizer)
@@ -171,6 +180,23 @@ def _load_clip(
                 labels.append(info.label)
         model._relu_blocks = labels
         print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
+
+    if resize_rings > 0 or crop_rings > 0:
+        patch_size = _infer_vit_patch_size(model)
+        resize_rings, crop_rings, final_size = resolve_image_rings(
+            image_size=224, image_mode="resize",
+            resize_rings=resize_rings, crop_rings=crop_rings,
+            patch_size=patch_size,
+        )
+        _resize_vit_pos_embed(model, final_size)
+        _orig_encode_image = model.encode_image
+        def _encode_image(image: torch.Tensor, _orig=_orig_encode_image,
+                          _r=resize_rings, _c=crop_rings, _p=patch_size) -> torch.Tensor:
+            image = apply_image_resize_crop(image, resize_rings=_r, crop_rings=_c, patch_size=_p)
+            return _orig(image)
+        model.encode_image = _encode_image
+        model._image_rings = (resize_rings, crop_rings, final_size)
+        print(f"  Image rings: resize={resize_rings}, crop={crop_rings}, final_size={final_size}")
 
     model.eval().to(device)
 
