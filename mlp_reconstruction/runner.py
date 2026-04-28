@@ -330,7 +330,12 @@ def cmd_train(args: argparse.Namespace) -> None:
                 log_message(f"Using base model from resume checkpoint: {args.checkpoint_path}")
 
     # Load the original all-GELU model for pre-collection.
-    model, _, tokenizer = _load_clip(args.model_name, device, checkpoint_path=args.checkpoint_path)
+    model, _, tokenizer = _load_clip(
+        args.model_name, device,
+        checkpoint_path=args.checkpoint_path,
+        resize_rings=getattr(args, "resize_rings", 0),
+        crop_rings=getattr(args, "crop_rings", 0),
+    )
     model.eval()
 
     loader = VGCalibrationLoader(

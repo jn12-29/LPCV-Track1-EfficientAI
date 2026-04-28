@@ -209,6 +209,8 @@ def run_training(args) -> None:
             qat_config=qat_config,
             relu_image=getattr(args, "relu_image", False),
             relu_text=getattr(args, "relu_text", False),
+            resize_rings=getattr(args, "resize_rings", 0),
+            crop_rings=getattr(args, "crop_rings", 0),
         )
         relu_labels = getattr(model, "_relu_blocks", None)
         if is_main_process:

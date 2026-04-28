@@ -6,8 +6,8 @@ import torch
 from utils.clip_utils import _load_clip
 
 MODEL_NAMES = [
-    "MobileCLIP2-S0",
-    "MobileCLIP2-S2",
+    "MobileCLIP2-B",
+    "MobileCLIP2-B",
     "MobileCLIP2-B",
 ]
 

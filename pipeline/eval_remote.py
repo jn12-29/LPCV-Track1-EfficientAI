@@ -146,7 +146,7 @@ def parse_args() -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument(
         "--upload-dataset",
         action="store_true",

@@ -47,7 +47,7 @@ def _load_clip(
         before weight loading; relu_image / relu_text flags set accordingly.
 
     Args:
-        model_name: open_clip model name, e.g. 'MobileCLIP2-S0'.
+        model_name: open_clip model name, e.g. 'MobileCLIP2-B'.
         device: target device.
         checkpoint_path: path to a .pt file (regular, QAT, or MLP-reconstruction,
             auto-detected).
@@ -87,10 +87,13 @@ def _load_clip(
         model_name, pretrained=pretrained_tag, **model_kwargs
     )
 
-    # --- Checkpoint loading ---
+    # --- Checkpoint: read, detect type, apply structural changes ---
     qat_state_dict = None
     qat_encodings = None
     is_relu_ckpt = False
+    is_qat_ckpt = False
+    state_dict = None
+    checkpoint = None
 
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -111,7 +114,6 @@ def _load_clip(
             relu_labels = checkpoint["relu_blocks"]
             ckpt_relu_image = any(lbl.startswith("visual[") for lbl in relu_labels)
             ckpt_relu_text = any(lbl.startswith("text[") for lbl in relu_labels)
-            # Warn on mismatches between checkpoint and caller flags.
             if relu_image and not ckpt_relu_image:
                 print(
                     "WARNING: --relu-image set but checkpoint has no visual ReLU blocks; "
@@ -133,7 +135,6 @@ def _load_clip(
                     "applying from checkpoint."
                 )
             apply_relu_blocks(model, relu_labels)
-            # OR with CLI flags so both sources are honoured.
             relu_image = relu_image or ckpt_relu_image
             relu_text = relu_text or ckpt_relu_text
             print(
@@ -141,8 +142,51 @@ def _load_clip(
                 f"(image={relu_image}, text={relu_text})"
             )
 
+        # Detect resize/crop rings from checkpoint and resolve against CLI args.
+        if isinstance(checkpoint, dict):
+            ckpt_resize = int(checkpoint.get("resize_rings", 0))
+            ckpt_crop = int(checkpoint.get("crop_rings", 0))
+            if resize_rings and ckpt_resize and resize_rings != ckpt_resize:
+                print(
+                    f"WARNING: checkpoint has resize_rings={ckpt_resize} but "
+                    f"--resize-rings={resize_rings} was passed; using CLI value."
+                )
+            elif ckpt_resize and not resize_rings:
+                resize_rings = ckpt_resize
+                print(f"  Restoring resize_rings={resize_rings} from checkpoint.")
+            if crop_rings and ckpt_crop and crop_rings != ckpt_crop:
+                print(
+                    f"WARNING: checkpoint has crop_rings={ckpt_crop} but "
+                    f"--crop-rings={crop_rings} was passed; using CLI value."
+                )
+            elif ckpt_crop and not crop_rings:
+                crop_rings = ckpt_crop
+                print(f"  Restoring crop_rings={crop_rings} from checkpoint.")
+
+    # Apply pos_embed structural change BEFORE load_state_dict so the checkpoint
+    # weights (already stored at the resized shape) load correctly.
+    # Mirrors how apply_relu_blocks is called before load_state_dict above.
+    _rings_patch_size: Optional[int] = None
+    _rings_final_size: Optional[int] = None
+    if resize_rings > 0 or crop_rings > 0:
+        _rings_patch_size = _infer_vit_patch_size(model)
+        resize_rings, crop_rings, _rings_final_size = resolve_image_rings(
+            image_size=224,
+            image_mode="resize",
+            resize_rings=resize_rings,
+            crop_rings=crop_rings,
+            patch_size=_rings_patch_size,
+        )
+        _resize_vit_pos_embed(model, _rings_final_size)
+        print(
+            f"  pos_embed resized for image rings: resize={resize_rings}, "
+            f"crop={crop_rings}, final_size={_rings_final_size}"
+        )
+
+    # --- Load state dict (after all structural changes) ---
+    if checkpoint_path:
+        assert state_dict is not None and checkpoint is not None
         if is_qat_ckpt:
-            # Defer loading until after QAT wrap (structure is reparameterized).
             qat_state_dict = state_dict
             qat_encodings = checkpoint.get("qat_encodings")
             print(f"Detected QAT checkpoint: {checkpoint_path}")
@@ -181,23 +225,6 @@ def _load_clip(
         model._relu_blocks = labels
         print(f"Applied ReLU activations: image={relu_image}, text={relu_text}")
 
-    if resize_rings > 0 or crop_rings > 0:
-        patch_size = _infer_vit_patch_size(model)
-        resize_rings, crop_rings, final_size = resolve_image_rings(
-            image_size=224, image_mode="resize",
-            resize_rings=resize_rings, crop_rings=crop_rings,
-            patch_size=patch_size,
-        )
-        _resize_vit_pos_embed(model, final_size)
-        _orig_encode_image = model.encode_image
-        def _encode_image(image: torch.Tensor, _orig=_orig_encode_image,
-                          _r=resize_rings, _c=crop_rings, _p=patch_size) -> torch.Tensor:
-            image = apply_image_resize_crop(image, resize_rings=_r, crop_rings=_c, patch_size=_p)
-            return _orig(image)
-        model.encode_image = _encode_image
-        model._image_rings = (resize_rings, crop_rings, final_size)
-        print(f"  Image rings: resize={resize_rings}, crop={crop_rings}, final_size={final_size}")
-
     model.eval().to(device)
 
     # --- QAT wrapping ---
@@ -211,9 +238,9 @@ def _load_clip(
                 "Restored QAT model weights from checkpoint", missing, unexpected
             )
     elif checkpoint_path and qat_state_dict is not None:
-        # QAT checkpoint without explicit qat_config: auto-reconstruct QATConfig from checkpoint.
         from utils.qat_utils import wrap_model_for_qat, qat_config_from_checkpoint
 
+        assert checkpoint is not None
         auto_qat_config = qat_config_from_checkpoint(checkpoint)
         model = wrap_model_for_qat(model, auto_qat_config, device, qat_encodings)
         missing, unexpected = model.load_state_dict(qat_state_dict, strict=False)
@@ -221,6 +248,28 @@ def _load_clip(
             "Loaded QAT checkpoint with quantization enabled (auto-detected)",
             missing,
             unexpected,
+        )
+
+    # Attach encode_image preprocessing hook after QAT wrap (model identity is final here).
+    if _rings_patch_size is not None:
+        _orig_encode_image = model.encode_image
+
+        def _encode_image(
+            image: torch.Tensor,
+            _orig=_orig_encode_image,
+            _r=resize_rings,
+            _c=crop_rings,
+            _p=_rings_patch_size,
+        ) -> torch.Tensor:
+            image = apply_image_resize_crop(
+                image, resize_rings=_r, crop_rings=_c, patch_size=_p
+            )
+            return _orig(image)
+
+        model.encode_image = _encode_image
+        model._image_rings = (resize_rings, crop_rings, _rings_final_size)
+        print(
+            f"  Image rings applied: resize={resize_rings}, crop={crop_rings}, final_size={_rings_final_size}"
         )
 
     # tokenizer = open_clip.get_tokenizer("ViT-B-32")

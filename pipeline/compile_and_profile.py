@@ -34,7 +34,7 @@ def compile_model(model, name, device, input_specs, options) -> str:
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--postfix", type=str, default="")
     return parser.parse_args()
 

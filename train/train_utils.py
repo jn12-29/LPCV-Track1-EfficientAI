@@ -194,6 +194,10 @@ def save_checkpoint(
     }
     if relu_labels:
         payload["relu_blocks"] = relu_labels
+    if getattr(args, "resize_rings", 0):
+        payload["resize_rings"] = args.resize_rings
+    if getattr(args, "crop_rings", 0):
+        payload["crop_rings"] = args.crop_rings
     if sim is not None:
         from utils.qat_utils import get_qat_encodings_json
         payload["qat_enabled"] = True

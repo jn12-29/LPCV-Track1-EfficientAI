@@ -8,11 +8,11 @@ netron checkpoints/MobileCLIP2-B__bs128_ep100_lr1e-06_wd0.2_acc64_hn4_hnw1_seed0
 
 
 # export onnx
-python pipeline/export_onnx.py --model-name MobileCLIP2-S0
-python pipeline/export_onnx.py --model-name MobileCLIP2-S2
+python pipeline/export_onnx.py --model-name MobileCLIP2-B
+python pipeline/export_onnx.py --model-name MobileCLIP2-B
 python pipeline/export_onnx.py --model-name MobileCLIP2-B
 
-python pipeline/export_onnx.py --model-name MobileCLIP2-S2 --checkpoint-path ./checkpoints/MobileCLIP2-S2__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt --output-postfix _260423  
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep100_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260421_205417/checkpoint_latest_epoch_100.pt --output-postfix _260423  
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs128_ep200_lr1e-06_wd0.2_acc32_hn4_hnw1_seed0__20260420_000848/checkpoint_epoch_075.pt --output-postfix _260420
 
@@ -38,19 +38,21 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_200.pt --output-postfix _260428_1_40 --max-text-len 40
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc16_hn4_hnw1_seed0__20260428_082447/checkpoint_epoch_090.pt --output-postfix _260429_0 --max-text-len 40
+
 # compile and profile
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260428_1_40
 
 
 # eval local (torch)
-python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10
-python pipeline/eval_local.py --model-name MobileCLIP2-S2 --k 10
+python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10
+python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10
 
 CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_060.pt
-CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit20000_bs32_nc1024_magnitude_all__20260425_225309/mlp_relu.pt
+CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_img_nostem__20260427_194021/mlp_relu.pt
 
 # eval local (onnx)
 python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260428_1_30_onnx
@@ -63,7 +65,7 @@ python pipeline/eval_remote.py --upload-dataset --model-name MobileCLIP2-B-26042
 python pipeline/eval_remote.py --model-name MobileCLIP2-B-260428_1_40 \
     --image-compiled-id j563j6305 --text-compiled-id j5q7k874g
 
-python pipeline/eval_remote.py --model-name MobileCLIP2-S2 \
+python pipeline/eval_remote.py --model-name MobileCLIP2-B \
     --image-compiled-id j57je47v5 --text-compiled-id jp27rwvr5
 
 # eval remote (Mode C: reuse inference)
@@ -77,9 +79,9 @@ python pipeline/eval_remote.py \
 # analyze hard negatives
 python train/analyze_hard_negatives.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-S2
+    --model-name MobileCLIP2-B
 
 # analyze affect of crop and resize
-python pipeline/sweep_image_rings.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_100.pt
+python pipeline/sweep_image_rings.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc16_hn4_hnw1_seed0__20260428_082447/checkpoint_epoch_090.pt
 
 

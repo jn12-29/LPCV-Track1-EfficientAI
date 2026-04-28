@@ -11,7 +11,7 @@ from mlp_reconstruction.runner import cmd_train
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="MLP Reconstruction for MobileCLIP2")
-    p.add_argument("--model-name", default="MobileCLIP2-S0")
+    p.add_argument("--model-name", default="MobileCLIP2-B")
     p.add_argument("--checkpoint-path", default=None)
     p.add_argument(
         "--calib-jsonl", default="build_datasets/data/vg_llm_contrastive.jsonl"
@@ -79,8 +79,12 @@ def parse_args() -> argparse.Namespace:
         "E.g. --relu-bonus 0.01 makes ReLU preferred when within 0.01 of GELU quality.",
     )
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--warmup-steps", type=int, default=1000,
-                   help="Linear warmup steps before cosine decay (0 = disabled).")
+    p.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=1000,
+        help="Linear warmup steps before cosine decay (0 = disabled).",
+    )
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--n-iters", type=int, default=20000)
     p.add_argument(
@@ -115,6 +119,20 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1e-4,
         help="(requires --early-stop) Min relative EMA-loss improvement to reset patience counter",
+    )
+    p.add_argument(
+        "--resize-rings",
+        type=int,
+        default=0,
+        help="Number of ViT patch rings to remove via bilinear resize (0 = off, "
+        "auto-restored from checkpoint when present).",
+    )
+    p.add_argument(
+        "--crop-rings",
+        type=int,
+        default=0,
+        help="Number of ViT patch rings to remove via center crop after resize (0 = off, "
+        "auto-restored from checkpoint when present).",
     )
     p.add_argument("--skip-to", default=None)
     p.add_argument("--resume-from", default=None)

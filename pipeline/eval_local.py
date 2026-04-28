@@ -108,7 +108,7 @@ def run_clip_retrieval_eval(
     root_dir: str | Path,
     image_to_text_csv: str | Path,
     textnums_to_texts_csv: str | Path,
-    model_name: str = "MobileCLIP2-S0",
+    model_name: str = "MobileCLIP2-B",
     batch_size: int = 32,
     k: int = 10,
     device: str | None = None,
@@ -221,7 +221,7 @@ def eval_val_recall_from_jsonl(
     jsonl_path: str | Path,
     val_split_size: int,
     val_split_seed: Optional[int] = None,
-    model_name: str = "MobileCLIP2-S0",
+    model_name: str = "MobileCLIP2-B",
     checkpoint_path: str | None = None,
     device: str | None = None,
     batch_size: int = 32,
@@ -260,7 +260,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv"
     )
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument(
@@ -273,7 +273,7 @@ def parse_args() -> argparse.Namespace:
         "--onnx-dir",
         type=str,
         default=None,
-        help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-S0_onnx). "
+        help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-B_onnx). "
         "If set, uses ONNX inference instead of PyTorch.",
     )
     parser.add_argument(

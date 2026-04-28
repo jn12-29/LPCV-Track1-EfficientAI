@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
         default="./build_datasets/data/dataset_raw_contrastive.jsonl",
     )
     parser.add_argument("--output-dir", type=str, default="./checkpoints")
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--pretrained", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
@@ -187,6 +187,22 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Path to a checkpoint (.pt) to resume from. Supports regular and QAT checkpoints (auto-detected).",
+    )
+
+    # --- Image rings ---
+    parser.add_argument(
+        "--resize-rings",
+        type=int,
+        default=0,
+        help="Number of ViT patch rings to remove via bilinear resize (0 = off). "
+        "Saved to checkpoint and auto-restored on resume.",
+    )
+    parser.add_argument(
+        "--crop-rings",
+        type=int,
+        default=0,
+        help="Number of ViT patch rings to remove via center crop after resize (0 = off). "
+        "Saved to checkpoint and auto-restored on resume.",
     )
 
     # --- ReLU MLP ---

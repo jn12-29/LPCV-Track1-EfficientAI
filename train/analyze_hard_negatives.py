@@ -95,7 +95,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="./build_datasets/data/dataset_raw_contrastive.jsonl",
     )
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--image-batch-size", type=int, default=64)

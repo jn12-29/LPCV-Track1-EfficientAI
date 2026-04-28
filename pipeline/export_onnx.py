@@ -21,7 +21,7 @@ from utils.clip_utils import _load_clip
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
+    parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument(
         "--output-postfix",
@@ -245,7 +245,9 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
 
 
 def export_encoders_to_onnx(
-    clip_model: nn.Module, output_dir: str, max_text_len: int = 77,
+    clip_model: nn.Module,
+    output_dir: str,
+    max_text_len: int = 77,
 ) -> None:
     """Export image and text encoders to ONNX.
 
