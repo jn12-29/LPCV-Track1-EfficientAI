@@ -256,15 +256,17 @@ def _load_clip(
 
         def _encode_image(
             image: torch.Tensor,
+            *args,
             _orig=_orig_encode_image,
             _r=resize_rings,
             _c=crop_rings,
             _p=_rings_patch_size,
+            **kwargs,
         ) -> torch.Tensor:
             image = apply_image_resize_crop(
                 image, resize_rings=_r, crop_rings=_c, patch_size=_p
             )
-            return _orig(image)
+            return _orig(image, *args, **kwargs)
 
         model.encode_image = _encode_image
         model._image_rings = (resize_rings, crop_rings, _rings_final_size)
