@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import argparse
 import os
+from typing import Tuple
 
 import numpy as np
 import onnx
@@ -47,9 +48,114 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="resize",
         choices=["resize", "crop"],
-        help="How to reduce image resolution: 'resize' (bilinear) or 'crop' (center crop).",
+        help="Deprecated compatibility flag. Prefer --resize / --crop rings.",
+    )
+    parser.add_argument(
+        "--resize",
+        type=int,
+        default=0,
+        help="Shrink by N ViT patch rings using bilinear resize. 0 keeps 224.",
+    )
+    parser.add_argument(
+        "--crop",
+        type=int,
+        default=0,
+        help="Shrink by N ViT patch rings using center crop. Applied after resize when both are set.",
     )
     return parser.parse_args()
+
+
+def _infer_vit_patch_size(model: nn.Module, orig_size: int = 224) -> int:
+    trunk = getattr(getattr(model, "visual", None), "trunk", model)
+    patch_embed = getattr(trunk, "patch_embed", None)
+    if patch_embed is not None:
+        img_size = getattr(patch_embed, "img_size", None)
+        grid_size = getattr(patch_embed, "grid_size", None)
+        if (
+            isinstance(img_size, tuple) and len(img_size) == 2 and img_size[0] == img_size[1]
+            and isinstance(grid_size, tuple) and len(grid_size) == 2 and grid_size[0] == grid_size[1]
+            and grid_size[0] > 0 and img_size[0] % grid_size[0] == 0
+        ):
+            return img_size[0] // grid_size[0]
+
+    pos_embed_param = getattr(trunk, "pos_embed", None)
+    if pos_embed_param is None:
+        raise ValueError("Cannot infer ViT patch size: model has no pos_embed.")
+
+    num_tokens = pos_embed_param.shape[1]
+    sqrt_n = int(num_tokens**0.5)
+    if sqrt_n * sqrt_n == num_tokens:
+        old_grid = sqrt_n
+    else:
+        sqrt_n = int((num_tokens - 1) ** 0.5)
+        if sqrt_n * sqrt_n != num_tokens - 1:
+            raise ValueError(f"Cannot infer ViT grid from pos_embed shape {tuple(pos_embed_param.shape)}.")
+        old_grid = sqrt_n
+
+    patch_size = orig_size // old_grid
+    if patch_size <= 0 or orig_size % old_grid != 0:
+        raise ValueError(f"Invalid inferred patch size: orig_size={orig_size}, old_grid={old_grid}.")
+    return patch_size
+
+
+def resolve_image_rings(
+    *,
+    image_size: int,
+    image_mode: str,
+    resize_rings: int,
+    crop_rings: int,
+    patch_size: int,
+    base_size: int = 224,
+) -> Tuple[int, int, int]:
+    if resize_rings < 0 or crop_rings < 0:
+        raise ValueError("--resize and --crop must be >= 0.")
+
+    if resize_rings == 0 and crop_rings == 0 and image_size != base_size:
+        delta = base_size - image_size
+        if delta <= 0 or delta % (2 * patch_size) != 0:
+            raise ValueError(
+                f"--image-size {image_size} is incompatible with patch_size={patch_size}; "
+                f"expected base_size - 2*k*patch_size."
+            )
+        legacy_rings = delta // (2 * patch_size)
+        if image_mode == "crop":
+            crop_rings = legacy_rings
+        else:
+            resize_rings = legacy_rings
+
+    resized_size = base_size - 2 * patch_size * resize_rings
+    final_size = resized_size - 2 * patch_size * crop_rings
+    min_size = patch_size
+    if resized_size < min_size or final_size < min_size:
+        raise ValueError(
+            f"Requested resize/crop is too aggressive for base_size={base_size}, patch_size={patch_size}: "
+            f"resize->{resized_size}, final->{final_size}."
+        )
+    return resize_rings, crop_rings, final_size
+
+
+def apply_image_resize_crop(
+    image: torch.Tensor,
+    *,
+    resize_rings: int,
+    crop_rings: int,
+    patch_size: int,
+) -> torch.Tensor:
+    if resize_rings > 0:
+        resized_size = image.shape[-1] - 2 * patch_size * resize_rings
+        image = F.interpolate(
+            image,
+            size=(resized_size, resized_size),
+            mode="bilinear",
+            align_corners=False,
+        )
+    if crop_rings > 0:
+        crop_size = image.shape[-1] - 2 * patch_size * crop_rings
+        h, w = image.shape[-2], image.shape[-1]
+        top = (h - crop_size) // 2
+        left = (w - crop_size) // 2
+        image = image[:, :, top:top + crop_size, left:left + crop_size]
+    return image
 
 
 def _resize_vit_pos_embed(model: nn.Module, image_size: int, orig_size: int = 224) -> None:
@@ -91,21 +197,33 @@ def _resize_vit_pos_embed(model: nn.Module, image_size: int, orig_size: int = 22
 
 
 class OpenClipVisionEncoder(nn.Module):
-    def __init__(self, model, image_size: int = 224, image_mode: str = "resize"):
+    def __init__(
+        self,
+        model,
+        image_size: int = 224,
+        image_mode: str = "resize",
+        resize_rings: int = 0,
+        crop_rings: int = 0,
+    ):
         super().__init__()
         self.model = model
-        self.image_size = image_size
-        self.image_mode = image_mode
+        self.patch_size = _infer_vit_patch_size(model)
+        self.resize_rings, self.crop_rings, self.image_size = resolve_image_rings(
+            image_size=image_size,
+            image_mode=image_mode,
+            resize_rings=resize_rings,
+            crop_rings=crop_rings,
+            patch_size=self.patch_size,
+        )
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
-        if self.image_size != 224:
-            if self.image_mode == "crop":
-                h, w = image.shape[-2], image.shape[-1]
-                top  = (h - self.image_size) // 2
-                left = (w - self.image_size) // 2
-                image = image[:, :, top:top + self.image_size, left:left + self.image_size]
-            else:
-                image = F.interpolate(image, size=(self.image_size, self.image_size), mode="bilinear", align_corners=False)
+        if self.resize_rings > 0 or self.crop_rings > 0:
+            image = apply_image_resize_crop(
+                image,
+                resize_rings=self.resize_rings,
+                crop_rings=self.crop_rings,
+                patch_size=self.patch_size,
+            )
         return self.model.encode_image(image)
 
 
@@ -297,6 +415,7 @@ def export_quantized_encoders_to_onnx(sim, output_dir: str) -> None:
 def export_encoders_to_onnx(
     clip_model: nn.Module, output_dir: str, max_text_len: int = 77,
     image_size: int = 224, image_mode: str = "resize",
+    resize_rings: int = 0, crop_rings: int = 0,
 ) -> None:
     """Export image and text encoders to ONNX.
 
@@ -305,11 +424,28 @@ def export_encoders_to_onnx(
     os.makedirs(output_dir, exist_ok=True)
     device = next(clip_model.parameters()).device
 
-    if image_size != 224:
-        print(f"\nResizing ViT positional embeddings for image_size={image_size}...")
-        _resize_vit_pos_embed(clip_model, image_size)
+    patch_size = _infer_vit_patch_size(clip_model)
+    resize_rings, crop_rings, final_image_size = resolve_image_rings(
+        image_size=image_size,
+        image_mode=image_mode,
+        resize_rings=resize_rings,
+        crop_rings=crop_rings,
+        patch_size=patch_size,
+    )
+    if final_image_size != 224:
+        print(
+            f"\nResizing ViT positional embeddings for image_size={final_image_size} "
+            f"(resize_rings={resize_rings}, crop_rings={crop_rings}, patch={patch_size})..."
+        )
+        _resize_vit_pos_embed(clip_model, final_image_size)
 
-    image_encoder = OpenClipVisionEncoder(clip_model, image_size=image_size, image_mode=image_mode).eval()
+    image_encoder = OpenClipVisionEncoder(
+        clip_model,
+        image_size=image_size,
+        image_mode=image_mode,
+        resize_rings=resize_rings,
+        crop_rings=crop_rings,
+    ).eval()
     text_encoder = OpenClipTextEncoder(clip_model, max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
@@ -355,7 +491,15 @@ def main() -> None:
     else:
         clip_model = reparameterize_model(clip_model)
         clip_model.eval()
-        export_encoders_to_onnx(clip_model, output_dir_name, args.max_text_len, args.image_size, args.image_mode)
+        export_encoders_to_onnx(
+            clip_model,
+            output_dir_name,
+            args.max_text_len,
+            args.image_size,
+            args.image_mode,
+            args.resize,
+            args.crop,
+        )
 
     if args.checkpoint_path:
         print(f"Exported from checkpoint: {Path(args.checkpoint_path).resolve()}")
