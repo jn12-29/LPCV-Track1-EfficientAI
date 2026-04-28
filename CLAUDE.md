@@ -15,49 +15,10 @@ LPCVC 2026 Track 1 — Image-to-Text Retrieval competition. Goal: maximize Recal
 
 ```bash
 pip install -r requirements.txt
-qai-hub configure  # requires API token from QAI Hub
+qai-hub configure --api-token <api_token> # requires API token from QAI Hub
 ```
 
 AIMET (for QAT) requires a separate wheel matched to your CUDA version — see comments in `requirements.txt`.
-
-Recommended environment variables:
-
-```bash
-export OMP_NUM_THREADS=1
-export HF_HOME=/mnt/sada1/data
-export HF_ENDPOINT="https://hf-mirror.com"
-export PYTHONNOUSERSITE=1
-export LD_PRELOAD=$CONDA_PREFIX/lib/libstdc++.so.6
-```
-
-Optional GPU visibility override:
-
-```bash
-export CUDA_VISIBLE_DEVICES=<gpu_id_or_gpu_list>
-```
-
-## End-to-End Pipeline
-
-```bash
-# 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
-python pipeline/export_onnx.py --model-name MobileCLIP2-S0
-
-# 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
-
-# 3. Evaluate
-python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
-
-# Remote evaluation (three modes):
-python pipeline/eval_remote.py --upload-dataset \
-    --image-compiled-id <id> --text-compiled-id <id>            # Mode A: upload + infer
-python pipeline/eval_remote.py \
-    --image-compiled-id <id> --text-compiled-id <id>            # Mode B: infer, existing dataset
-python pipeline/eval_remote.py \
-    --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
-```
-
-Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`, `MobileCLIP2-B`
 
 ## Architecture
 
