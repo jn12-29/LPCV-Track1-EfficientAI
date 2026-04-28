@@ -99,7 +99,7 @@ def main():
             onnx_txt_model,
             model_name + f"_text_encoder{postfix}",
             target_device,
-            {"text": ((1, 77), "int64")},
+            {"text": ((1, 77), "int32")},
             "--target_runtime qnn_dlc --truncate_64bit_io",
         )
         img_id = img_compile_future.result()

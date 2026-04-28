@@ -109,7 +109,7 @@ Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normal
 - Target device: `"XR2 Gen 2 (Proxy)"`
 - Runtime: `qnn_dlc`
 - Image input spec: `(1, 3, 224, 224)` float32
-- Text input spec: `(1, 77)` int64
+- Text input spec: `(1, 77)` int32
 
 ## Key Gotchas
 
