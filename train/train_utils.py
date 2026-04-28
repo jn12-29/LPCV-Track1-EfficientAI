@@ -4,7 +4,9 @@ import contextlib
 import json
 import math
 import re
+import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -77,6 +79,25 @@ class StepTimeAccum:
         return "  [" + " ".join(parts) + "]"
 
 TRAIN_LOG_PATH: Optional[Path] = None
+
+_async_executor: Optional[ThreadPoolExecutor] = None
+_async_lock: threading.Lock = threading.Lock()
+
+
+def _get_async_executor() -> ThreadPoolExecutor:
+    global _async_executor
+    with _async_lock:
+        if _async_executor is None:
+            _async_executor = ThreadPoolExecutor(max_workers=1)
+        return _async_executor
+
+
+def flush_async_saves() -> None:
+    global _async_executor
+    with _async_lock:
+        if _async_executor is not None:
+            _async_executor.shutdown(wait=True)
+            _async_executor = None
 
 
 def set_log_path(path: Optional[Path]) -> None:
@@ -168,8 +189,7 @@ def write_tensorboard_scalars(
             writer.add_scalar(f"{tag_prefix}/{key}", value, step)
 
 
-def save_checkpoint(
-    save_path: Path,
+def _build_checkpoint_payload(
     model,
     optimizer,
     scheduler,
@@ -180,9 +200,8 @@ def save_checkpoint(
     metrics_history: List[MetricsRow],
     sim=None,
     relu_labels: List[str] | None = None,
-) -> None:
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
         "epoch": epoch,
         "global_step": global_step,
         "model_state_dict": unwrap_model(model).state_dict(),
@@ -204,4 +223,35 @@ def save_checkpoint(
         payload["qat_weight_bw"] = getattr(args, "qat_weight_bw", 8)
         payload["qat_act_bw"] = getattr(args, "qat_act_bw", 8)
         payload["qat_encodings"] = get_qat_encodings_json(sim)
-    torch.save(payload, save_path)
+    return payload
+
+
+def save_checkpoint(
+    save_path: Path,
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+    epoch: int,
+    global_step: int,
+    args,
+    metrics_history: List[MetricsRow],
+    sim=None,
+    relu_labels: List[str] | None = None,
+    async_save: bool = False,
+) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _build_checkpoint_payload(
+        model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
+        epoch=epoch, global_step=global_step, args=args,
+        metrics_history=metrics_history, sim=sim, relu_labels=relu_labels,
+    )
+    if async_save:
+        fut = _get_async_executor().submit(torch.save, payload, save_path)
+        fut.add_done_callback(
+            lambda f: f.exception() and log_message(
+                f"Async checkpoint save failed for {save_path.name}: {f.exception()}",
+            )
+        )
+    else:
+        torch.save(payload, save_path)

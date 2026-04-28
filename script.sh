@@ -62,7 +62,7 @@ CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B 
 CUDA_VISIBLE_DEVICES=3 python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 --checkpoint-path ./checkpoints/MobileCLIP2-B__lr0.001_nit40000_bs32_nc4096_uniform_img_nostem__20260427_194021/mlp_relu.pt
 
 # eval local (onnx)
-python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260428_1_30_onnx
+python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260429_0_onnx
 
 # eval remote (Mode A: upload + infer)
 python pipeline/eval_remote.py --upload-dataset --model-name MobileCLIP2-B-260428_1_40 \

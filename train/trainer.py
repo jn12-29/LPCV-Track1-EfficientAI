@@ -42,6 +42,7 @@ from train.train_utils import (
     StepTimer,
     build_run_name,
     current_timestamp,
+    flush_async_saves,
     log_message,
     make_run_timestamp,
     save_checkpoint,
@@ -669,6 +670,7 @@ def run_training(args) -> None:
                         metrics_history=metrics_history,
                         sim=sim,
                         relu_labels=relu_labels,
+                        async_save=True,
                     )
                     log_message(
                         f"New best checkpoint saved ({_reason}) → {best_ckpt_path.name}",
@@ -697,6 +699,7 @@ def run_training(args) -> None:
                     metrics_history=metrics_history,
                     sim=sim,
                     relu_labels=relu_labels,
+                    async_save=True,
                 )
                 log_message(f"[Timer] checkpoint_latest: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                 previous_latest_path = latest_path
@@ -719,6 +722,7 @@ def run_training(args) -> None:
                         metrics_history=metrics_history,
                         sim=sim,
                         relu_labels=relu_labels,
+                        async_save=True,
                     )
                     log_message(f"[Timer] checkpoint_epoch: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
                     if export_onnx:
@@ -729,6 +733,10 @@ def run_training(args) -> None:
                             run_name=run_name,
                         )
                         log_message(f"[Timer] onnx_export: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
+
+        # Wait for any pending async checkpoint saves before writing the final one.
+        if is_main_process:
+            flush_async_saves()
 
         final_weights_path = output_dir / f"{args.model_name}_finetuned.pt"
         if is_main_process:
@@ -775,6 +783,7 @@ def run_training(args) -> None:
                     run_name=run_name,
                 )
     finally:
+        flush_async_saves()
         if writer is not None:
             writer.close()
         set_log_path(previous_log_path_value)
