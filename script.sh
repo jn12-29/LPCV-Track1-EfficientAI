@@ -60,8 +60,8 @@ python pipeline/eval_remote.py --upload-dataset --model-name MobileCLIP2-B-26042
     --image-compiled-id jgdr9welp --text-compiled-id jp1dl0ylp
 
 # eval remote (Mode B: existing dataset)
-python pipeline/eval_remote.py \
-    --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
+python pipeline/eval_remote.py --model-name MobileCLIP2-B-260428_1_40 \
+    --image-compiled-id j563j6305 --text-compiled-id j5q7k874g
 
 python pipeline/eval_remote.py --model-name MobileCLIP2-S2 \
     --image-compiled-id j57je47v5 --text-compiled-id jp27rwvr5
