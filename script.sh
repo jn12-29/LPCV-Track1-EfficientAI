@@ -1,4 +1,11 @@
 # Run these commands from the repository root.
+
+# download model
+
+# openai/clip-vit-base-patch32
+
+hf download openai/clip-vit-base-patch32
+
 # Training JSONL is expected to use the flat contrastive format produced by build_datasets/.
 
 # netron
