@@ -79,7 +79,7 @@ python train/analyze_hard_negatives.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-S2
 
-
-
+# analyze affect of crop and resize
+python pipeline/sweep_image_rings.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_100.pt
 
 

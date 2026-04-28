@@ -1,8 +1,10 @@
 from __future__ import annotations
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import argparse
 import csv
-from pathlib import Path
 from typing import Dict, List
 
 from pipeline.eval_local import run_clip_retrieval_eval
@@ -20,7 +22,9 @@ def _parse_int_list(raw: str) -> List[int]:
     return values
 
 
-def _build_cases(mode: str, resize_values: List[int], crop_values: List[int]) -> List[Dict[str, int]]:
+def _build_cases(
+    mode: str, resize_values: List[int], crop_values: List[int]
+) -> List[Dict[str, int]]:
     cases: List[Dict[str, int]] = []
     if mode in {"resize", "all"}:
         for resize_rings in resize_values:
@@ -51,8 +55,12 @@ def parse_args() -> argparse.Namespace:
         description="Sweep ViT-B resize/crop ring settings and print a result table."
     )
     parser.add_argument("--root-dir", type=str, default="./sample_data")
-    parser.add_argument("--image-to-text-csv", type=str, default="./sample_data/img_list.csv")
-    parser.add_argument("--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv")
+    parser.add_argument(
+        "--image-to-text-csv", type=str, default="./sample_data/img_list.csv"
+    )
+    parser.add_argument(
+        "--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv"
+    )
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-B")
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument("--onnx-dir", type=str, default=None)
@@ -87,16 +95,56 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _print_table(
+    rows: List[Dict[str, float | int | str]],
+    headers: List[str],
+    recall_key: str,
+    best_idx: int,
+) -> None:
+    col_widths = {h: len(h) for h in headers}
+    formatted: List[Dict[str, str]] = []
+    for row in rows:
+        fmt: Dict[str, str] = {}
+        for h in headers:
+            v = row[h]
+            s = f"{v:.4f}" if h == recall_key else str(v)
+            fmt[h] = s
+            col_widths[h] = max(col_widths[h], len(s))
+        formatted.append(fmt)
+
+    sep = "+-" + "-+-".join("-" * col_widths[h] for h in headers) + "-+"
+    header_line = "| " + " | ".join(h.ljust(col_widths[h]) for h in headers) + " |"
+
+    print(sep)
+    print(header_line)
+    print(sep)
+    for i, (row, fmt) in enumerate(zip(rows, formatted)):
+        is_best = i == best_idx
+        cells = []
+        for h in headers:
+            s = fmt[h]
+            cells.append(s.rjust(col_widths[h]) if h in (recall_key, "resize_rings", "crop_rings", "final_size") else s.ljust(col_widths[h]))
+        marker = " *" if is_best else "  "
+        print("| " + " | ".join(cells) + " |" + marker)
+    print(sep)
+
+
 def main() -> None:
     args = parse_args()
     resize_values = _parse_int_list(args.resize_values)
     crop_values = _parse_int_list(args.crop_values)
     cases = _build_cases(args.mode, resize_values, crop_values)
+    metrics_key = f"image_to_text_recall@{args.k}"
+    recall_key = f"recall@{args.k}"
+
+    print(f"\nSweeping {len(cases)} configurations  [model={args.model_name}  k={args.k}]")
+    print("=" * 60)
 
     rows: List[Dict[str, float | int | str]] = []
     for idx, case in enumerate(cases, start=1):
         resize_rings = case["resize"]
         crop_rings = case["crop"]
+        print(f"  [{idx:>{len(str(len(cases)))}}/{len(cases)}] resize={resize_rings}  crop={crop_rings} ...", end="", flush=True)
         metrics = run_clip_retrieval_eval(
             root_dir=args.root_dir,
             image_to_text_csv=args.image_to_text_csv,
@@ -110,42 +158,53 @@ def main() -> None:
             resize_rings=resize_rings,
             crop_rings=crop_rings,
         )
-        score = float(metrics[f"image_to_text_recall@{args.k}"])
+        score = float(metrics[metrics_key])
         final_size = 224 - 32 * resize_rings - 32 * crop_rings
-        mode = "chain" if resize_rings > 0 and crop_rings > 0 else ("resize" if resize_rings > 0 else ("crop" if crop_rings > 0 else "base"))
+        mode = (
+            "chain"
+            if resize_rings > 0 and crop_rings > 0
+            else ("resize" if resize_rings > 0 else ("crop" if crop_rings > 0 else "base"))
+        )
         row = {
             "mode": mode,
             "resize_rings": resize_rings,
             "crop_rings": crop_rings,
             "final_size": final_size,
-            f"recall@{args.k}": score,
+            recall_key: score,
         }
         rows.append(row)
-        print(
-            f"[{idx}/{len(cases)}] mode={mode:>6} resize={resize_rings} crop={crop_rings} "
-            f"final={final_size} recall@{args.k}={score:.4f}"
-        )
+        print(f"  {metrics_key}={score:.4f}  final_size={final_size}")
 
-    rows.sort(key=lambda row: (-row[f"recall@{args.k}"], row["final_size"]))
+    rows.sort(key=lambda r: (-r[recall_key], r["final_size"]))  # type: ignore[arg-type]
 
-    headers = ["mode", "resize_rings", "crop_rings", "final_size", f"recall@{args.k}"]
-    print("\nSorted results:")
-    print(" | ".join(headers))
-    print(" | ".join(["---"] * len(headers)))
-    for row in rows:
-        print(
-            f"{row['mode']} | {row['resize_rings']} | {row['crop_rings']} | "
-            f"{row['final_size']} | {row[f'recall@{args.k}']:.4f}"
-        )
+    headers = ["mode", "resize_rings", "crop_rings", "final_size", recall_key]
+    print(f"\nResults (sorted by {recall_key} desc, final_size asc)  * = best")
+    _print_table(rows, headers, recall_key, best_idx=0)
+
+    best = rows[0]
+    print(
+        f"\nBest: mode={best['mode']}  resize={best['resize_rings']}  "
+        f"crop={best['crop_rings']}  final_size={best['final_size']}  "
+        f"{recall_key}={best[recall_key]:.4f}"
+    )
 
     if args.csv_out:
         csv_path = Path(args.csv_out)
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        with csv_path.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=headers)
-            writer.writeheader()
-            writer.writerows(rows)
-        print(f"\nSaved CSV to {csv_path.resolve()}")
+    elif args.checkpoint_path:
+        ckpt = Path(args.checkpoint_path)
+        stem = ckpt.stem  # e.g. "checkpoint_epoch_100"
+        csv_path = ckpt.parent / f"sweep_rings_{stem}.csv"
+    elif args.onnx_dir:
+        csv_path = Path(args.onnx_dir) / "sweep_rings.csv"
+    else:
+        csv_path = Path(f"sweep_rings_{args.model_name}.csv")
+
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Saved CSV -> {csv_path.resolve()}")
 
 
 if __name__ == "__main__":
