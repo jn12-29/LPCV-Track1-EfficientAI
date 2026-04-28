@@ -155,7 +155,13 @@ def eval_val_recall(
     text_embeds_list: List[torch.Tensor] = []
     for i in range(0, len(all_texts), batch_size):
         batch_texts = all_texts[i : i + batch_size]
-        tokens = tokenizer(batch_texts).to(device)
+        tokens = tokenizer(
+            list(batch_texts),
+            padding="max_length",
+            truncation=True,
+            max_length=77,
+            return_tensors="pt",
+        )["input_ids"].to(device)
         feats = raw_model.encode_text(tokens)
         text_embeds_list.append(F.normalize(feats, dim=-1).cpu())
     text_embeds = torch.cat(text_embeds_list, dim=0)

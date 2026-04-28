@@ -85,35 +85,52 @@ def _load_clip(
 
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        is_qat_ckpt = isinstance(checkpoint, dict) and checkpoint.get("qat_enabled", False)
+        is_qat_ckpt = isinstance(checkpoint, dict) and checkpoint.get(
+            "qat_enabled", False
+        )
         is_relu_ckpt = isinstance(checkpoint, dict) and "relu_blocks" in checkpoint
-        state_dict = checkpoint.get("model_state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        state_dict = (
+            checkpoint.get("model_state_dict", checkpoint)
+            if isinstance(checkpoint, dict)
+            else checkpoint
+        )
 
         # MLP-reconstruction checkpoint: apply ReLU structure before loading weights.
         if is_relu_ckpt:
             from mlp_reconstruction.mlp_blocks import apply_relu_blocks
+
             relu_labels = checkpoint["relu_blocks"]
             ckpt_relu_image = any(lbl.startswith("visual[") for lbl in relu_labels)
             ckpt_relu_text = any(lbl.startswith("text[") for lbl in relu_labels)
             # Warn on mismatches between checkpoint and caller flags.
             if relu_image and not ckpt_relu_image:
-                print("WARNING: --relu-image set but checkpoint has no visual ReLU blocks; "
-                      "fresh ReLU will be applied without distillation recovery.")
+                print(
+                    "WARNING: --relu-image set but checkpoint has no visual ReLU blocks; "
+                    "fresh ReLU will be applied without distillation recovery."
+                )
             if relu_text and not ckpt_relu_text:
-                print("WARNING: --relu-text set but checkpoint has no text ReLU blocks; "
-                      "fresh ReLU will be applied without distillation recovery.")
+                print(
+                    "WARNING: --relu-text set but checkpoint has no text ReLU blocks; "
+                    "fresh ReLU will be applied without distillation recovery."
+                )
             if ckpt_relu_image and not relu_image:
-                print("WARNING: checkpoint contains visual ReLU blocks but --relu-image was not set; "
-                      "applying from checkpoint.")
+                print(
+                    "WARNING: checkpoint contains visual ReLU blocks but --relu-image was not set; "
+                    "applying from checkpoint."
+                )
             if ckpt_relu_text and not relu_text:
-                print("WARNING: checkpoint contains text ReLU blocks but --relu-text was not set; "
-                      "applying from checkpoint.")
+                print(
+                    "WARNING: checkpoint contains text ReLU blocks but --relu-text was not set; "
+                    "applying from checkpoint."
+                )
             apply_relu_blocks(model, relu_labels)
             # OR with CLI flags so both sources are honoured.
             relu_image = relu_image or ckpt_relu_image
             relu_text = relu_text or ckpt_relu_text
-            print(f"Detected MLP-reconstruction checkpoint: {len(relu_labels)} ReLU blocks "
-                  f"(image={relu_image}, text={relu_text})")
+            print(
+                f"Detected MLP-reconstruction checkpoint: {len(relu_labels)} ReLU blocks "
+                f"(image={relu_image}, text={relu_text})"
+            )
 
         if is_qat_ckpt:
             # Defer loading until after QAT wrap (structure is reparameterized).
@@ -122,7 +139,9 @@ def _load_clip(
             print(f"Detected QAT checkpoint: {checkpoint_path}")
         else:
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            _log_state_dict_load(f"Loaded checkpoint from {checkpoint_path}", missing, unexpected)
+            _log_state_dict_load(
+                f"Loaded checkpoint from {checkpoint_path}", missing, unexpected
+            )
 
     # Track relu_blocks on model for downstream use.
     # For relu checkpoints, apply_relu_blocks already set the correct structure — collect labels
@@ -131,12 +150,22 @@ def _load_clip(
     # For plain checkpoints with relu_image/relu_text flags, apply and collect.
     if is_relu_ckpt:
         from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, is_relu_active
-        model._relu_blocks = [info.label for info in iter_mlp_blocks(model) if is_relu_active(info)]
+
+        model._relu_blocks = [
+            info.label for info in iter_mlp_blocks(model) if is_relu_active(info)
+        ]
     elif relu_image or relu_text:
-        from mlp_reconstruction.mlp_blocks import iter_mlp_blocks, replace_gelu_with_relu, is_relu_active
+        from mlp_reconstruction.mlp_blocks import (
+            iter_mlp_blocks,
+            replace_gelu_with_relu,
+            is_relu_active,
+        )
+
         labels = []
         for info in iter_mlp_blocks(model):
-            if (info.encoder == "visual" and relu_image) or (info.encoder == "text" and relu_text):
+            if (info.encoder == "visual" and relu_image) or (
+                info.encoder == "text" and relu_text
+            ):
                 replace_gelu_with_relu(info)
             if is_relu_active(info):
                 labels.append(info.label)
@@ -148,18 +177,35 @@ def _load_clip(
     # --- QAT wrapping ---
     if qat_config is not None and qat_config.enabled:
         from utils.qat_utils import wrap_model_for_qat
+
         model = wrap_model_for_qat(model, qat_config, device, qat_encodings)
         if qat_state_dict is not None:
             missing, unexpected = model.load_state_dict(qat_state_dict, strict=False)
-            _log_state_dict_load("Restored QAT model weights from checkpoint", missing, unexpected)
+            _log_state_dict_load(
+                "Restored QAT model weights from checkpoint", missing, unexpected
+            )
     elif checkpoint_path and qat_state_dict is not None:
         # QAT checkpoint without explicit qat_config: auto-reconstruct QATConfig from checkpoint.
         from utils.qat_utils import wrap_model_for_qat, qat_config_from_checkpoint
+
         auto_qat_config = qat_config_from_checkpoint(checkpoint)
         model = wrap_model_for_qat(model, auto_qat_config, device, qat_encodings)
         missing, unexpected = model.load_state_dict(qat_state_dict, strict=False)
-        _log_state_dict_load("Loaded QAT checkpoint with quantization enabled (auto-detected)", missing, unexpected)
+        _log_state_dict_load(
+            "Loaded QAT checkpoint with quantization enabled (auto-detected)",
+            missing,
+            unexpected,
+        )
 
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    # tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    from transformers import CLIPTokenizer
+
+    pretrained_tokenizer = "openai/clip-vit-base-patch32"
+
+    tokenizer = CLIPTokenizer.from_pretrained(
+        pretrained_tokenizer, local_files_only=True
+    )
+
+    tokenizer.add_special_tokens({"cls_token": tokenizer.eos_token})
 
     return model, preprocess, tokenizer

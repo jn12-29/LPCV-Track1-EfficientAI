@@ -17,11 +17,13 @@ from train.data import load_jsonl_records, split_val_records
 from train.val_step import eval_val_recall
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched, recall_at_k
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
 # ONNX encoding
 # ---------------------------------------------------------------------------
+
 
 def _encode_images_onnx(
     sess: "ort.InferenceSession",
@@ -45,7 +47,17 @@ def _encode_texts_onnx(
 ) -> torch.Tensor:
     features: List[torch.Tensor] = []
     for _, batch_texts in _batched(list(texts), batch_size):
-        tokens = tokenizer(list(batch_texts)).numpy()
+        tokens = (
+            tokenizer(
+                list(batch_texts),
+                padding="max_length",
+                truncation=True,
+                max_length=77,
+                return_tensors="pt",
+            )["input_ids"]
+            .numpy()
+            .astype(np.int32)
+        )
         out = sess.run(None, {"text": tokens})[0]
         features.append(F.normalize(torch.from_numpy(out), dim=-1))
     return torch.cat(features, dim=0)
@@ -55,13 +67,20 @@ def _encode_texts_onnx(
 # Torch encoding
 # ---------------------------------------------------------------------------
 
+
 @torch.no_grad()
 def _encode_texts_torch(
     model, tokenizer, texts: Sequence[str], device: torch.device, batch_size: int
 ) -> torch.Tensor:
     features: List[torch.Tensor] = []
     for _, batch_texts in _batched(list(texts), batch_size):
-        text_tokens = tokenizer(list(batch_texts)).to(device)
+        text_tokens = tokenizer(
+            list(batch_texts),
+            padding="max_length",
+            truncation=True,
+            max_length=77,
+            return_tensors="pt",
+        )["input_ids"].to(device)
         text_features = model.encode_text(text_tokens)
         features.append(F.normalize(text_features, dim=-1).cpu())
     return torch.cat(features, dim=0)
@@ -83,6 +102,7 @@ def _encode_images_torch(
 # ---------------------------------------------------------------------------
 # Unified entry point
 # ---------------------------------------------------------------------------
+
 
 def run_clip_retrieval_eval(
     root_dir: str | Path,
@@ -115,18 +135,37 @@ def run_clip_retrieval_eval(
             if device_str.startswith("cuda")
             else ["CPUExecutionProvider"]
         )
-        img_sess = ort.InferenceSession(str(onnx_dir / "image_encoder.onnx"), providers=providers)
-        txt_sess = ort.InferenceSession(str(onnx_dir / "text_encoder.onnx"), providers=providers)
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        img_sess = ort.InferenceSession(
+            str(onnx_dir / "image_encoder.onnx"), providers=providers
+        )
+        txt_sess = ort.InferenceSession(
+            str(onnx_dir / "text_encoder.onnx"), providers=providers
+        )
+        # tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        from transformers import CLIPTokenizer
+
+        pretrained_tokenizer = "openai/clip-vit-base-patch32"
+        tokenizer = CLIPTokenizer.from_pretrained(
+            pretrained_tokenizer, local_files_only=True
+        )
+        tokenizer.add_special_tokens({"cls_token": tokenizer.eos_token})
         # QAI Hub input spec requires batch=1
         image_embeds = _encode_images_onnx(img_sess, image_dataset, batch_size=1)
-        text_embeds = _encode_texts_onnx(txt_sess, tokenizer, eval_data.texts, batch_size=1)
+        text_embeds = _encode_texts_onnx(
+            txt_sess, tokenizer, eval_data.texts, batch_size=1
+        )
     else:
-        model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
+        model, _, tokenizer = _load_clip(
+            model_name, device_obj, checkpoint_path=checkpoint_path
+        )
         if print_model:
             print(model)
-        image_embeds = _encode_images_torch(model, image_dataset, device_obj, batch_size)
-        text_embeds = _encode_texts_torch(model, tokenizer, eval_data.texts, device_obj, batch_size)
+        image_embeds = _encode_images_torch(
+            model, image_dataset, device_obj, batch_size
+        )
+        text_embeds = _encode_texts_torch(
+            model, tokenizer, eval_data.texts, device_obj, batch_size
+        )
 
     image_to_text_recall = recall_at_k(
         image_embeds.numpy(),
@@ -193,14 +232,18 @@ def eval_val_recall_from_jsonl(
     device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
     device_obj = torch.device(device_str)
 
-    model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
+    model, _, tokenizer = _load_clip(
+        model_name, device_obj, checkpoint_path=checkpoint_path
+    )
     if print_model:
         print(model)
 
     all_records = load_jsonl_records(jsonl_path)
     _, val_records = split_val_records(all_records, val_split_size, val_split_seed)
     if not val_records:
-        raise ValueError("val_split_size=0 produces an empty val set; set --val-split-size > 0.")
+        raise ValueError(
+            "val_split_size=0 produces an empty val set; set --val-split-size > 0."
+        )
 
     return eval_val_recall(model, tokenizer, val_records, device_obj, batch_size, k)
 
@@ -210,23 +253,31 @@ def parse_args() -> argparse.Namespace:
         description="CLIP image-text retrieval evaluation (torch)"
     )
     parser.add_argument("--root-dir", type=str, default="./sample_data")
-    parser.add_argument("--image-to-text-csv", type=str, default="./sample_data/img_list.csv")
-    parser.add_argument("--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv")
+    parser.add_argument(
+        "--image-to-text-csv", type=str, default="./sample_data/img_list.csv"
+    )
+    parser.add_argument(
+        "--textnums-to-texts-csv", type=str, default="./sample_data/txt_list.csv"
+    )
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument(
-        "--device", type=str,
+        "--device",
+        type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
     parser.add_argument("--checkpoint-path", type=str, default=None)
     parser.add_argument(
-        "--onnx-dir", type=str, default=None,
+        "--onnx-dir",
+        type=str,
+        default=None,
         help="Path to exported ONNX dir (e.g. exported_MobileCLIP2-S0_onnx). "
-             "If set, uses ONNX inference instead of PyTorch.",
+        "If set, uses ONNX inference instead of PyTorch.",
     )
     parser.add_argument(
-        "--print-model", action="store_true",
+        "--print-model",
+        action="store_true",
         help="Print model architecture after loading (torch mode only).",
     )
 

@@ -29,14 +29,16 @@ class VGCalibrationLoader:
                 if len(records) >= n_calib:
                     break
                 row = json.loads(line)
-                if row.get('positives') and row.get('image_path'):
+                if row.get("positives") and row.get("image_path"):
                     records.append(row)
         self.records = records
 
     def get_image_batches(self) -> list[torch.Tensor]:
         """Returns list of (B, 3, 224, 224) float32 image tensors."""
         all_imgs = [
-            preprocess_image(Image.open(self.project_root / rec['image_path']).convert('RGB'))
+            preprocess_image(
+                Image.open(self.project_root / rec["image_path"]).convert("RGB")
+            )
             for rec in self.records
         ]
         return [
@@ -46,8 +48,14 @@ class VGCalibrationLoader:
 
     def get_text_batches(self) -> list[torch.Tensor]:
         """Returns list of tokenized (B, 77) int64 tensors."""
-        texts = [rec['positives'][0] for rec in self.records]
+        texts = [rec["positives"][0] for rec in self.records]
         return [
-            self.tokenizer(texts[i : i + self.batch_size])
+            self.tokenizer(
+                list(texts[i : i + self.batch_size]),
+                padding="max_length",
+                truncation=True,
+                max_length=77,
+                return_tensors="pt",
+            )["input_ids"]
             for i in range(0, len(texts), self.batch_size)
         ]

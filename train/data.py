@@ -159,7 +159,13 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
         positive_texts = [
             choose_texts(item["positives"], 1, text_sampling)[0] for item in batch
         ]
-        positive_tokens = tokenizer(positive_texts)
+        positive_tokens = tokenizer(
+            list(positive_texts),
+            padding="max_length",
+            truncation=True,
+            max_length=77,
+            return_tensors="pt",
+        )["input_ids"]
 
         use_all = num_hard_negatives == 0
         effective_count = (
@@ -195,7 +201,13 @@ def create_collate_fn(tokenizer, num_hard_negatives: int, text_sampling: str):
             hard_negative_mask.append(row_mask)
 
         if effective_count > 0:
-            flat_negative_tokens = tokenizer(hard_negative_texts)
+            flat_negative_tokens = tokenizer(
+                list(hard_negative_texts),
+                padding="max_length",
+                truncation=True,
+                max_length=77,
+                return_tensors="pt",
+            )["input_ids"]
             negative_tokens = flat_negative_tokens.view(len(batch), effective_count, -1)
             negative_mask = torch.tensor(hard_negative_mask, dtype=torch.float32)
         else:

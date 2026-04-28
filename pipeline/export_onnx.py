@@ -59,13 +59,13 @@ class OpenClipTextEncoder(nn.Module):
             print(f"Truncated text attn_mask to [{max_text_len}, {max_text_len}]")
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        token_ids = token_ids.to(dtype=torch.int64)
-        eot_pos = token_ids.argmax(dim=-1, keepdim=True)
-        positions = torch.arange(
-            token_ids.shape[-1], device=token_ids.device
-        ).unsqueeze(0)
-        mask = (positions <= eot_pos).to(token_ids.dtype)
-        token_ids = token_ids * mask
+        # token_ids = token_ids.to(dtype=torch.int64)
+        # eot_pos = token_ids.argmax(dim=-1, keepdim=True)
+        # positions = torch.arange(
+        #     token_ids.shape[-1], device=token_ids.device
+        # ).unsqueeze(0)
+        # mask = (positions <= eot_pos).to(token_ids.dtype)
+        # token_ids = token_ids * mask
         if self.max_text_len < token_ids.shape[-1]:
             token_ids = token_ids[:, : self.max_text_len]
         return self.model.encode_text(token_ids)
@@ -246,7 +246,7 @@ def export_encoders_to_onnx(
     text_encoder = OpenClipTextEncoder(clip_model, max_text_len).eval()
 
     dummy_image = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=device)
-    dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
+    dummy_text = torch.randint(0, 49408, (1, 77), dtype=torch.int32, device=device)
 
     print("\nCalculating PyTorch baseline outputs for validation...")
     with torch.no_grad():

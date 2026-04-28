@@ -42,7 +42,11 @@ def _get_image_output_dim(model, device: torch.device) -> int:
 
 @torch.no_grad()
 def encode_all_images(
-    model, image_paths: List[Path], device: torch.device, batch_size: int, num_workers: int
+    model,
+    image_paths: List[Path],
+    device: torch.device,
+    batch_size: int,
+    num_workers: int,
 ) -> torch.Tensor:
     output_dim = _get_image_output_dim(model, device)
     dataset = ImageDataset(image_paths)
@@ -69,7 +73,13 @@ def encode_all_texts(
 ) -> torch.Tensor:
     outputs = []
     for _, batch_texts in _batched(texts, batch_size):
-        tokens = tokenizer(list(batch_texts)).to(device)
+        tokens = tokenizer(
+            list(batch_texts),
+            padding="max_length",
+            truncation=True,
+            max_length=77,
+            return_tensors="pt",
+        )["input_ids"].to(device)
         with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
             feats = model.encode_text(tokens)
         outputs.append(F.normalize(feats.float(), dim=-1).cpu())
@@ -77,7 +87,9 @@ def encode_all_texts(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze positive vs hard negative similarity distributions")
+    parser = argparse.ArgumentParser(
+        description="Analyze positive vs hard negative similarity distributions"
+    )
     parser.add_argument(
         "--jsonl-path",
         type=str,
@@ -91,7 +103,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--max-records", type=int, default=None)
     parser.add_argument("--top-k-hard-cases", type=int, default=50)
-    parser.add_argument("--compile", action="store_true", help="torch.compile the model for faster inference")
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="torch.compile the model for faster inference",
+    )
     parser.add_argument(
         "--output-dir",
         type=str,
@@ -212,7 +228,9 @@ def main() -> None:
         for item in per_record_stats:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    hard_cases = sorted(per_record_stats, key=lambda x: x["gap_min_pos_minus_max_neg"])[: args.top_k_hard_cases]
+    hard_cases = sorted(per_record_stats, key=lambda x: x["gap_min_pos_minus_max_neg"])[
+        : args.top_k_hard_cases
+    ]
     hard_cases_path = output_dir / "hard_cases.jsonl"
     with hard_cases_path.open("w", encoding="utf-8") as f:
         for item in hard_cases:
@@ -256,7 +274,9 @@ def main() -> None:
         "ratio_gap_below_zero": float(sum(g < 0 for g in gaps) / len(gaps)),
     }
     summary_path = output_dir / "summary.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print(f"Saved summary     → {summary_path}")
     print(f"Saved full stats  → {stats_path}")
