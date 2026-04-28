@@ -132,9 +132,9 @@ def _export_encoder_onnx(
         verbose=False,
         export_params=True,
         training=torch.onnx.TrainingMode.EVAL,
-        # dynamo=True
+        dynamo=True,
     )
-    _simplify_onnx(onnx_path)
+    # _simplify_onnx(onnx_path)
     verify_onnx(onnx_path, {input_name: dummy.cpu()}, pt_feat)
 
 

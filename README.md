@@ -11,23 +11,17 @@ qai-hub configure --api_token <您的TOKEN> # requires API token from QAI Hub
 
 AIMET (for QAT) requires a separate wheel matched to your CUDA version — see comments in `requirements.txt`.
 
-Optional GPU visibility override:
-
-```bash
-export CUDA_VISIBLE_DEVICES=<gpu_id_or_gpu_list>
-```
-
 ## End-to-End Pipeline
 
 ```bash
 # 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
-python pipeline/export_onnx.py --model-name MobileCLIP2-S0
+python pipeline/export_onnx.py --model-name MobileCLIP2-B
 
 # 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-S0 [--postfix <suffix>]
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B [--postfix <suffix>]
 
 # 3. Evaluate
-python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10        # torch, local
+python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10        # torch, local
 
 # Remote evaluation (three modes):
 python pipeline/eval_remote.py --upload-dataset \
@@ -38,7 +32,7 @@ python pipeline/eval_remote.py \
     --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
 ```
 
-Available model names: `MobileCLIP2-S0`, `MobileCLIP2-S2`, `MobileCLIP2-S3`
+Available model names: `MobileCLIP2-B`
 
 ## Training (Fine-tuning)
 
@@ -56,13 +50,13 @@ Run all training commands from the repository root. Flat contrastive JSONL forma
 # Single GPU
 python train/finetune.py \
     --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 0 --batch-size 256 --epochs 20
+    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 256 --epochs 20
 
 # Multi-GPU DDP
 OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 \
     train/finetune.py \
     --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S2 --gpu-ids 0,1 --batch-size 256 --epochs 20
+    --model-name MobileCLIP2-B --gpu-ids 0,1 --batch-size 256 --epochs 20
 
 # Resume from checkpoint
 python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_05.pt
@@ -84,13 +78,13 @@ QAT optimizes model weights under simulated int8 quantization using AIMET, reduc
 # QAT from pretrained weights (W8A8)
 python train/finetune.py \
     --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S0 --gpu-ids 0 --batch-size 64 --epochs 5 \
+    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 64 --epochs 5 \
     --qat-enabled --qat-weight-bw 8 --qat-act-bw 8 --qat-calib-batches 32
 
 # QAT from a regular finetune checkpoint (W8A16)
 python train/finetune.py \
     --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-S0 --gpu-ids 0 --batch-size 64 --epochs 3 \
+    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 64 --epochs 3 \
     --resume checkpoints/.../checkpoint_epoch_20.pt \
     --qat-enabled --qat-weight-bw 8 --qat-act-bw 16
 
@@ -102,8 +96,8 @@ python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_02
 python train/finetune.py ... --qat-enabled --export-onnx
 
 # Export ONNX from an existing QAT checkpoint
-python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
-    --checkpoint-path checkpoints/.../MobileCLIP2-S0_finetuned.pt
+python pipeline/export_onnx.py --model-name MobileCLIP2-B \
+    --checkpoint-path checkpoints/.../MobileCLIP2-B_finetuned.pt
 ```
 
 QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_encodings`) and are auto-detected on `--resume`.
@@ -113,29 +107,29 @@ QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_
 Replaces all MLP GELU activations with ReLU via layer-by-layer knowledge distillation, without quantization. Based on APHQ-ViT (CVPR 2025). Speeds up inference ~10–20% with <0.5% accuracy loss.
 
 ```bash
-# Full reconstruction on pretrained S0 (~2 hours, 32 blocks)
+# Full reconstruction on pretrained B (~2 hours, 32 blocks)
 # Output auto-generated: checkpoints/{model}__{config}__{timestamp}/mlp_relu.pt
 # Recall@K eval runs automatically at the end (--skip-eval to disable)
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-S0 --gpu-id 2 \
+    --model-name MobileCLIP2-B --gpu-id 2 \
     --n-calib 1024 --n-iters 20000
 
 # On top of a fine-tuned checkpoint
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-S2 --gpu-id 2 \
+    --model-name MobileCLIP2-B --gpu-id 2 \
     --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt
 
 # Evaluate reconstructed model separately
-python pipeline/eval_local.py --model-name MobileCLIP2-S0 --k 10 \
+python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 \
     --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
 # Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
-python pipeline/export_onnx.py --model-name MobileCLIP2-S0 \
+python pipeline/export_onnx.py --model-name MobileCLIP2-B \
     --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
 
 # Resume after crash
 python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-S0 --gpu-id 2 \
+    --model-name MobileCLIP2-B --gpu-id 2 \
     --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
     --skip-to visual[s1b0]
 ```
@@ -146,7 +140,7 @@ Each run writes into the checkpoint directory: `train.log`, `run_config.json`, `
 
 Key options: `--gpu-id` (single GPU), `--n-calib` (default 1024), `--n-iters` (default 20000), `--lr` (default 1e-3), `--aph-mode uniform|magnitude`, `--output-dir` (default `checkpoints`), `--output` (overrides auto-generated path).
 
-Block counts: S0 = 32 (12 text + 20 visual), S2 = 56, B = 24.
+Block counts: B = 32 (12 text + 20 visual), B = 56, B = 24.
 
 ## `eval_remote.py` Modes
 
