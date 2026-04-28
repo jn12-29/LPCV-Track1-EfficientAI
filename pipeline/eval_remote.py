@@ -39,8 +39,8 @@ IMAGE_DIR = DATA_DIR / "images"
 IMG_LIST_CSV = DATA_DIR / "img_list.csv"
 TXT_LIST_CSV = DATA_DIR / "txt_list.csv"
 
-DEFAULT_IMAGE_DATASET_ID = "d2qe36jl2"
-DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
+DEFAULT_IMAGE_DATASET_ID = "d9pgxv0d9"
+DEFAULT_TEXT_DATASET_ID = "d7x5mogr9"
 
 
 # ---------------------------------------------------------------------------

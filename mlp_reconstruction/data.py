@@ -47,7 +47,7 @@ class VGCalibrationLoader:
         ]
 
     def get_text_batches(self) -> list[torch.Tensor]:
-        """Returns list of tokenized (B, 77) int64 tensors."""
+        """Returns list of tokenized (B, 77) int32 tensors."""
         texts = [rec["positives"][0] for rec in self.records]
         return [
             self.tokenizer(
