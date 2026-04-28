@@ -36,6 +36,8 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_200.pt --output-postfix _260428_1_30 --max-text-len 30
 
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr2e-06_wd0.2_acc16_hn10_hnw1_seed0__20260427_200640/checkpoint_epoch_200.pt --output-postfix _260428_1_40 --max-text-len 40
+
 # compile and profile
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-S2
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
@@ -54,8 +56,8 @@ CUDA_VISIBLE_DEVICES=4 python pipeline/eval_local.py --model-name MobileCLIP2-B 
 python pipeline/eval_local.py --onnx-dir exported_MobileCLIP2-B_260428_1_30_onnx
 
 # eval remote (Mode A: upload + infer)
-python pipeline/eval_remote.py --upload-dataset \
-    --image-compiled-id <image_compile_job_id> --text-compiled-id <text_compile_job_id>
+python pipeline/eval_remote.py --upload-dataset --model-name MobileCLIP2-B-260428_1_40 \
+    --image-compiled-id jgdr9welp --text-compiled-id jp1dl0ylp
 
 # eval remote (Mode B: existing dataset)
 python pipeline/eval_remote.py \

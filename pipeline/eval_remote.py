@@ -15,6 +15,7 @@ Three modes:
       python pipeline/eval_remote.py \\
           --image-inference-id <id> --text-inference-id <id>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,6 +47,7 @@ DEFAULT_TEXT_DATASET_ID = "d95k6jwm9"
 # Dataset upload
 # ---------------------------------------------------------------------------
 
+
 def _upload_image_dataset() -> str:
     """Preprocess and upload the image dataset; return dataset ID."""
     print("Processing images...")
@@ -76,8 +78,29 @@ def _upload_text_dataset() -> str:
             prompts.append(row["Unique_Texts"].strip())
     print(f"  {len(prompts)} prompts.")
 
-    tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    tokenized_texts = [tokenizer([p]).numpy() for p in prompts]
+    # tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    from transformers import CLIPTokenizer
+
+    pretrained_tokenizer = "openai/clip-vit-base-patch32"
+
+    tokenizer = CLIPTokenizer.from_pretrained(
+        pretrained_tokenizer, local_files_only=True
+    )
+
+    tokenizer.add_special_tokens({"cls_token": tokenizer.eos_token})
+
+    tokenized_texts = [
+        tokenizer(
+            [p],
+            padding="max_length",
+            truncation=True,
+            max_length=77,
+            return_tensors="pt",
+        )["input_ids"]
+        .numpy()
+        .astype(np.int32)
+        for p in prompts
+    ]
 
     print("Uploading text dataset to QAI Hub...")
     text_dataset = qai_hub.upload_dataset({"text": tokenized_texts})
@@ -99,6 +122,7 @@ def upload_datasets() -> tuple[str, str]:
 # Inference
 # ---------------------------------------------------------------------------
 
+
 def run_inference(model, name: str, device, input_dataset):
     """Submit an inference job, wait for completion, and return the job object."""
     inference_job = qai_hub.submit_inference_job(
@@ -116,18 +140,30 @@ def run_inference(model, name: str, device, input_dataset):
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--model-name", type=str, default="MobileCLIP2-S0")
-    parser.add_argument("--upload-dataset", action="store_true",
-                        help="Upload local sample_data to QAI Hub (Mode A).")
-    parser.add_argument("--image-dataset-id", type=str, default=None,
-                        help=f"QAI Hub image dataset ID (default: {DEFAULT_IMAGE_DATASET_ID}).")
-    parser.add_argument("--text-dataset-id", type=str, default=None,
-                        help=f"QAI Hub text dataset ID (default: {DEFAULT_TEXT_DATASET_ID}).")
+    parser.add_argument(
+        "--upload-dataset",
+        action="store_true",
+        help="Upload local sample_data to QAI Hub (Mode A).",
+    )
+    parser.add_argument(
+        "--image-dataset-id",
+        type=str,
+        default=None,
+        help=f"QAI Hub image dataset ID (default: {DEFAULT_IMAGE_DATASET_ID}).",
+    )
+    parser.add_argument(
+        "--text-dataset-id",
+        type=str,
+        default=None,
+        help=f"QAI Hub text dataset ID (default: {DEFAULT_TEXT_DATASET_ID}).",
+    )
     parser.add_argument("--image-compiled-id", type=str, default=None)
     parser.add_argument("--text-compiled-id", type=str, default=None)
     parser.add_argument("--image-inference-id", type=str, default=None)
@@ -139,7 +175,9 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    use_existing = args.image_inference_id is not None or args.text_inference_id is not None
+    use_existing = (
+        args.image_inference_id is not None or args.text_inference_id is not None
+    )
     outputs = {}
 
     if use_existing:
@@ -180,7 +218,7 @@ if __name__ == "__main__":
 
         device = qai_hub.Device("XR2 Gen 2 (Proxy)")
         tasks = {
-            "text":  {"compiled_id": args.text_compiled_id,  "dataset_id": txt_ds_id},
+            "text": {"compiled_id": args.text_compiled_id, "dataset_id": txt_ds_id},
             "image": {"compiled_id": args.image_compiled_id, "dataset_id": img_ds_id},
         }
 
