@@ -51,7 +51,7 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
 
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260428_1_40
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B_260429_0
 
 
 # eval local (torch)
