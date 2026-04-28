@@ -37,6 +37,7 @@ def distill_mlp(
     early_stop_patience: int = 5,
     early_stop_delta: float = 5e-4,
     keep_activation: bool = False,
+    warmup_steps: int = 1000,
 ) -> tuple[float, int]:
     """Distill a single MLP block in-place. Returns (final_loss, steps_run).
 
@@ -64,7 +65,18 @@ def distill_mlp(
     N = X_gpu.shape[0]
 
     optimizer = torch.optim.Adam(info.trainable_params(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_iters, eta_min=0.)
+    if warmup_steps > 0:
+        warmup = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=1e-6, end_factor=1.0, total_iters=warmup_steps
+        )
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(n_iters - warmup_steps, 1), eta_min=0.
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup, cosine], milestones=[warmup_steps]
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_iters, eta_min=0.)
 
     model.eval()
     final_loss = 0.0

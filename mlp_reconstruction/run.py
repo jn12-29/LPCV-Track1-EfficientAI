@@ -66,10 +66,21 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         metavar="T",
-        help="If cos_sim after distillation is below T, revert block to GELU and restore "
-        "original weights. E.g. --gelu-threshold 0.98",
+        help="Greedy mode only: revert to GELU if relu_cos_sim < T. "
+        "In non-greedy mode the 3-way weighted comparison handles selection.",
+    )
+    p.add_argument(
+        "--relu-bonus",
+        type=float,
+        default=0.0,
+        metavar="B",
+        help="Bonus added to relu_cos_sim when comparing against gelu_cos_sim and "
+        "gelu_recon_cos_sim (reflects hardware speedup of ReLU over GELU). "
+        "E.g. --relu-bonus 0.01 makes ReLU preferred when within 0.01 of GELU quality.",
     )
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--warmup-steps", type=int, default=1000,
+                   help="Linear warmup steps before cosine decay (0 = disabled).")
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--n-iters", type=int, default=20000)
     p.add_argument(

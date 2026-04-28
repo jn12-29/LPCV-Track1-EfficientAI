@@ -130,6 +130,7 @@ def _handle_gelu_drift(
             log_every=args.log_every, aph_mode=args.aph_mode, log_fn=log_fn,
             early_stop_patience=args.early_stop_patience if args.early_stop else 0,
             early_stop_delta=args.early_stop_delta,
+            warmup_steps=args.warmup_steps,
         )
         gelu_recon_cos_sim = verify_reconstruction(info, X_drift, O_all, device)
         gk = "OK" if gelu_recon_cos_sim >= 0.99 else "WARN"
@@ -161,63 +162,136 @@ def _process_block(
     device: torch.device,
     log_fn,
 ) -> tuple[dict, bool]:
-    """Distill one block, verify, and optionally revert + GELU drift distill.
+    """Distill one block and select the best outcome.
+
+    Step 1: ReLU distillation → relu_cos_sim.
+    Step 2 (only if relu_cos_sim < gelu_threshold, non-greedy):
+      - Measure GELU drift → gelu_cos_sim
+      - GELU drift distillation → gelu_recon_cos_sim
+      - Pick winner = argmax(relu_cos_sim + relu_bonus, gelu_cos_sim, gelu_recon_cos_sim)
+    If relu_cos_sim >= gelu_threshold (or threshold not set): accept ReLU immediately.
 
     Returns (metrics_row, accepted).
-    accepted=True: block converted to ReLU and should be added to relu_labels.
+    accepted=True: block converted to ReLU and added to relu_labels.
     """
     from mlp_reconstruction.distill import distill_mlp
-    from mlp_reconstruction.verify import verify_reconstruction
+    from mlp_reconstruction.verify import verify_reconstruction, verify_gelu_drift
 
-    saved = info.save_weights() if args.gelu_threshold is not None else None
+    relu_bonus: float = getattr(args, "relu_bonus", 0.0)
 
-    block_start = time.time()
-    final_loss, steps_run = distill_mlp(
+    # --- Step 1: ReLU distillation ---
+    saved_original = info.save_weights()
+
+    relu_start = time.time()
+    relu_final_loss, relu_steps = distill_mlp(
         model, info, X_all, O_all,
         lr=args.lr, batch_size=args.batch_size, n_iters=args.n_iters,
         alpha=args.alpha, gelu_ub=gelu_ub, device=device,
         log_every=args.log_every, aph_mode=args.aph_mode, log_fn=log_fn,
         early_stop_patience=args.early_stop_patience if args.early_stop else 0,
         early_stop_delta=args.early_stop_delta,
+        warmup_steps=args.warmup_steps,
     )
-    elapsed_s = time.time() - block_start
-    cos_sim = verify_reconstruction(info, X_all, O_all, device)
+    relu_elapsed_s = time.time() - relu_start
+    relu_cos_sim = verify_reconstruction(info, X_all, O_all, device)
+    log_fn(
+        f"  [ReLU] cos_sim={relu_cos_sim:.4f}  final_loss={relu_final_loss:.6f}"
+        f"  steps={relu_steps}/{args.n_iters}  elapsed={relu_elapsed_s:.1f}s"
+    )
 
-    drift: dict = {
-        "gelu_cos_sim": float("nan"), "gelu_loss": float("nan"),
-        "gelu_recon_cos_sim": float("nan"), "gelu_recon_steps": 0,
-    }
+    gelu_cos_sim = float("nan")
+    gelu_loss_val = float("nan")
+    gelu_recon_cos_sim = float("nan")
+    gelu_recon_steps = 0
 
-    if args.gelu_threshold is not None and cos_sim < args.gelu_threshold:
-        info.restore_weights(saved)
+    needs_comparison = (
+        not args.greedy
+        and args.gelu_threshold is not None
+        and relu_cos_sim < args.gelu_threshold
+    )
+
+    if needs_comparison:
+        # Save ReLU-distilled weights before restoring original.
+        saved_relu = info.save_weights()
+
+        # --- Step 2a: GELU drift measurement ---
+        info.restore_weights(saved_original)
         info.set_activation(nn.GELU)
-        log_fn(
-            f"  [REVERTED] cos_sim={cos_sim:.4f} < threshold={args.gelu_threshold:.4f},"
-            f" block kept as GELU"
+
+        gelu_cos_sim, gelu_loss_val, X_drift = verify_gelu_drift(
+            model, info, img_batches, txt_batches, O_all, device
         )
-        if not args.greedy:
-            drift = _handle_gelu_drift(
-                model, info, O_all, img_batches, txt_batches, args, device, log_fn
-            )
-        status = "REVERTED"
+        log_fn(f"  [GELU drift] cos_sim={gelu_cos_sim:.4f}  loss={gelu_loss_val:.6f}")
+
+        # --- Step 2b: GELU drift distillation ---
+        gelu_recon_start = time.time()
+        _, gelu_recon_steps = distill_mlp(
+            model, info, X_drift, O_all,
+            keep_activation=True, lr=args.lr, batch_size=args.batch_size,
+            n_iters=args.n_iters, alpha=0.0, gelu_ub=None, device=device,
+            log_every=args.log_every, aph_mode=args.aph_mode, log_fn=log_fn,
+            early_stop_patience=args.early_stop_patience if args.early_stop else 0,
+            early_stop_delta=args.early_stop_delta,
+            warmup_steps=args.warmup_steps,
+        )
+        gelu_recon_cos_sim = verify_reconstruction(info, X_drift, O_all, device)
+        gk = "OK" if gelu_recon_cos_sim >= 0.99 else "WARN"
+        log_fn(
+            f"  [GELU recon {gk}] cos_sim={gelu_recon_cos_sim:.4f}"
+            f"  steps={gelu_recon_steps}/{args.n_iters}"
+            f"  elapsed={time.time() - gelu_recon_start:.1f}s"
+        )
+
+        # --- Pick winner among three ---
+        relu_eff = relu_cos_sim + relu_bonus
+        gelu_eff = gelu_cos_sim
+        gelu_recon_eff = gelu_recon_cos_sim
+
+        if relu_eff >= gelu_eff and relu_eff >= gelu_recon_eff:
+            info.restore_weights(saved_relu)
+            info.set_activation(nn.ReLU)
+            winner, accepted = "relu", True
+            status = "OK" if relu_cos_sim >= 0.99 else "WARN"
+        elif gelu_recon_eff >= gelu_eff:
+            # Current model state is gelu_recon (last distill_mlp left it there).
+            winner, accepted, status = "gelu_recon", False, "REVERTED"
+        else:
+            info.restore_weights(saved_original)
+            info.set_activation(nn.GELU)
+            winner, accepted, status = "gelu", False, "REVERTED"
+
+        log_fn(
+            f"  [WINNER={winner}] relu={relu_cos_sim:.4f}(eff={relu_eff:.4f} +bonus={relu_bonus:+.4f})"
+            f"  gelu={gelu_eff:.4f}  gelu_recon={gelu_recon_eff:.4f}"
+        )
     else:
-        status = "OK" if cos_sim >= 0.99 else "WARN"
-        log_fn(
-            f"  [{status}] final_loss={final_loss:.6f}  cos_sim={cos_sim:.4f}"
-            f"  steps={steps_run}/{args.n_iters}  elapsed={elapsed_s:.1f}s"
-        )
+        # ReLU passed threshold (or greedy/no-threshold): accept/reject based on relu alone.
+        if args.gelu_threshold is not None and relu_cos_sim < args.gelu_threshold:
+            # greedy mode revert
+            info.restore_weights(saved_original)
+            info.set_activation(nn.GELU)
+            winner, accepted, status = "gelu", False, "REVERTED"
+            log_fn(f"  [REVERTED] cos_sim={relu_cos_sim:.4f} < {args.gelu_threshold:.4f}")
+        else:
+            winner, accepted = "relu", True
+            status = "OK" if relu_cos_sim >= 0.99 else "WARN"
+            log_fn(f"  [{status}] cos_sim={relu_cos_sim:.4f}")
 
     row = {
         "block": info.label,
         "kind": info.kind,
-        "final_loss": round(final_loss, 6),
-        "cos_sim": round(cos_sim, 4),
+        "final_loss": round(relu_final_loss, 6),
+        "cos_sim": round(relu_cos_sim, 4),
         "status": status,
-        "steps_run": steps_run,
-        "elapsed_s": round(elapsed_s, 1),
-        **drift,
+        "winner": winner,
+        "steps_run": relu_steps,
+        "elapsed_s": round(relu_elapsed_s, 1),
+        "gelu_cos_sim": round(gelu_cos_sim, 4) if not math.isnan(gelu_cos_sim) else float("nan"),
+        "gelu_loss": round(gelu_loss_val, 6) if not math.isnan(gelu_loss_val) else float("nan"),
+        "gelu_recon_cos_sim": round(gelu_recon_cos_sim, 4) if not math.isnan(gelu_recon_cos_sim) else float("nan"),
+        "gelu_recon_steps": gelu_recon_steps,
     }
-    return row, status != "REVERTED"
+    return row, accepted
 
 
 # ----------------------------------------------------------------------
@@ -319,8 +393,14 @@ def cmd_train(args: argparse.Namespace) -> None:
     keep_gelu_set = set(args.keep_gelu_blocks)
     if keep_gelu_set:
         log_message(f"Manual GELU blocks (skip distillation): {sorted(keep_gelu_set)}")
+    relu_bonus: float = getattr(args, "relu_bonus", 0.0)
     if args.gelu_threshold is not None:
-        log_message(f"Auto-revert threshold: cos_sim < {args.gelu_threshold} → keep GELU")
+        log_message(
+            f"Selection: relu if cos_sim >= {args.gelu_threshold}; "
+            f"else 3-way comparison (relu+{relu_bonus:+.4f} vs gelu vs gelu_recon)"
+        )
+    else:
+        log_message("Selection: relu accepted unconditionally (no --gelu-threshold set)")
 
     run_start = time.time()
 
