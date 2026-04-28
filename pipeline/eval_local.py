@@ -13,6 +13,12 @@ import torch
 import torch.nn.functional as F
 
 from pipeline.dataset import RetrievalEvalDataset
+from pipeline.export_onnx import (
+    _infer_vit_patch_size,
+    _resize_vit_pos_embed,
+    apply_image_resize_crop,
+    resolve_image_rings,
+)
 from train.data import load_jsonl_records, split_val_records
 from train.val_step import eval_val_recall
 from utils.clip_utils import _load_clip
@@ -88,12 +94,29 @@ def _encode_texts_torch(
 
 @torch.no_grad()
 def _encode_images_torch(
-    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int
+    model, image_dataset: RetrievalEvalDataset, device: torch.device, batch_size: int,
+    image_size: int = 224, image_mode: str = "resize",
+    resize_rings: int = 0, crop_rings: int = 0,
 ) -> torch.Tensor:
+    patch_size = _infer_vit_patch_size(model)
+    resize_rings, crop_rings, _ = resolve_image_rings(
+        image_size=image_size,
+        image_mode=image_mode,
+        resize_rings=resize_rings,
+        crop_rings=crop_rings,
+        patch_size=patch_size,
+    )
     features: List[torch.Tensor] = []
     for _, batch_indices in _batched(list(range(len(image_dataset))), batch_size):
         batch_images = [image_dataset[idx]["image"] for idx in batch_indices]
         pixel_values = torch.stack(batch_images, dim=0).to(device)
+        if resize_rings > 0 or crop_rings > 0:
+            pixel_values = apply_image_resize_crop(
+                pixel_values,
+                resize_rings=resize_rings,
+                crop_rings=crop_rings,
+                patch_size=patch_size,
+            )
         image_features = model.encode_image(pixel_values)
         features.append(F.normalize(image_features, dim=-1).cpu())
     return torch.cat(features, dim=0)
@@ -115,6 +138,10 @@ def run_clip_retrieval_eval(
     checkpoint_path: str | None = None,
     onnx_dir: str | Path | None = None,
     print_model: bool = False,
+    image_size: int = 224,
+    image_mode: str = "resize",
+    resize_rings: int = 0,
+    crop_rings: int = 0,
 ) -> Dict[str, float]:
     root_dir = Path(root_dir)
     device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -160,8 +187,25 @@ def run_clip_retrieval_eval(
         )
         if print_model:
             print(model)
+        patch_size = _infer_vit_patch_size(model)
+        resize_rings, crop_rings, final_image_size = resolve_image_rings(
+            image_size=image_size,
+            image_mode=image_mode,
+            resize_rings=resize_rings,
+            crop_rings=crop_rings,
+            patch_size=patch_size,
+        )
+        if final_image_size != 224:
+            _resize_vit_pos_embed(model, final_image_size)
         image_embeds = _encode_images_torch(
-            model, image_dataset, device_obj, batch_size
+            model,
+            image_dataset,
+            device_obj,
+            batch_size,
+            image_size=image_size,
+            image_mode=image_mode,
+            resize_rings=resize_rings,
+            crop_rings=crop_rings,
         )
         text_embeds = _encode_texts_torch(
             model, tokenizer, eval_data.texts, device_obj, batch_size
@@ -280,6 +324,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print model architecture after loading (torch mode only).",
     )
+    parser.add_argument(
+        "--image-size", type=int, default=224,
+        help="Downsample images to this resolution inside the model (torch path). Match export_onnx.py --image-size.",
+    )
+    parser.add_argument(
+        "--image-mode", type=str, default="resize", choices=["resize", "crop"],
+        help="Deprecated compatibility flag. Prefer --resize / --crop rings.",
+    )
+    parser.add_argument(
+        "--resize", type=int, default=0,
+        help="Shrink by N ViT patch rings using bilinear resize. 0 keeps 224.",
+    )
+    parser.add_argument(
+        "--crop", type=int, default=0,
+        help="Shrink by N ViT patch rings using center crop. Applied after resize when both are set.",
+    )
 
     # --- Val-split mode ---
     parser.add_argument(
@@ -335,6 +395,10 @@ def main() -> None:
             checkpoint_path=args.checkpoint_path,
             onnx_dir=args.onnx_dir,
             print_model=args.print_model,
+            image_size=args.image_size,
+            image_mode=args.image_mode,
+            resize_rings=args.resize,
+            crop_rings=args.crop,
         )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
