@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-every-n-epochs",
         type=int,
-        default=5,
+        default=10,
         help="Save a numbered checkpoint every N epochs (0 = disabled).",
     )
 
@@ -119,8 +119,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--val-split-seed",
         type=int,
-        default=1,
-        help="If set, use a random split with this seed.",
+        default=None,
+        help="Random seed for val split (default None = deterministic tail split).",
     )
 
     # --- Val metrics ---
@@ -144,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--val-batch-size",
         type=int,
-        default=32,
+        default=64,
         help="Batch size for val recall encoding.",
     )
 

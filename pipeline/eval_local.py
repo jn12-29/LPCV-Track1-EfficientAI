@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -13,6 +13,8 @@ import torch
 import torch.nn.functional as F
 
 from pipeline.dataset import RetrievalEvalDataset
+from train.data import load_jsonl_records, split_val_records
+from train.val_step import eval_val_recall
 from utils.clip_utils import _load_clip
 from utils.data_utils import _batched, recall_at_k
 
@@ -175,6 +177,34 @@ def eval_recall_with_model(
     return {f"sample_recall@{k}": recall}
 
 
+def eval_val_recall_from_jsonl(
+    jsonl_path: str | Path,
+    val_split_size: int,
+    val_split_seed: Optional[int] = None,
+    model_name: str = "MobileCLIP2-S0",
+    checkpoint_path: str | None = None,
+    device: str | None = None,
+    batch_size: int = 32,
+    k: int = 10,
+    print_model: bool = False,
+) -> Dict[str, float]:
+    """Compute Recall@k on the val split of a training JSONL, using the same
+    split logic as finetune.py (split_val_records with identical defaults)."""
+    device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device_obj = torch.device(device_str)
+
+    model, _, tokenizer = _load_clip(model_name, device_obj, checkpoint_path=checkpoint_path)
+    if print_model:
+        print(model)
+
+    all_records = load_jsonl_records(jsonl_path)
+    _, val_records = split_val_records(all_records, val_split_size, val_split_seed)
+    if not val_records:
+        raise ValueError("val_split_size=0 produces an empty val set; set --val-split-size > 0.")
+
+    return eval_val_recall(model, tokenizer, val_records, device_obj, batch_size, k)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="CLIP image-text retrieval evaluation (torch)"
@@ -199,23 +229,62 @@ def parse_args() -> argparse.Namespace:
         "--print-model", action="store_true",
         help="Print model architecture after loading (torch mode only).",
     )
+
+    # --- Val-split mode ---
+    parser.add_argument(
+        "--val",
+        action="store_true",
+        help="Evaluate on the val split of --jsonl-path instead of the sample-set CSVs.",
+    )
+    parser.add_argument(
+        "--jsonl-path",
+        type=str,
+        default="./build_datasets/data/dataset_raw_contrastive.jsonl",
+        help="Path to training JSONL (used with --val).",
+    )
+    parser.add_argument(
+        "--val-split-size",
+        type=int,
+        default=1024,
+        help="Number of tail records held out as the val set (must match finetune.py).",
+    )
+    parser.add_argument(
+        "--val-split-seed",
+        type=int,
+        default=None,
+        help="Random seed for val split (default None = deterministic tail split). Must match finetune.py.",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    metrics = run_clip_retrieval_eval(
-        root_dir=args.root_dir,
-        image_to_text_csv=args.image_to_text_csv,
-        textnums_to_texts_csv=args.textnums_to_texts_csv,
-        model_name=args.model_name,
-        batch_size=args.batch_size,
-        k=args.k,
-        device=args.device,
-        checkpoint_path=args.checkpoint_path,
-        onnx_dir=args.onnx_dir,
-        print_model=args.print_model,
-    )
+    if args.val:
+        metrics = eval_val_recall_from_jsonl(
+            jsonl_path=args.jsonl_path,
+            val_split_size=args.val_split_size,
+            val_split_seed=args.val_split_seed,
+            model_name=args.model_name,
+            checkpoint_path=args.checkpoint_path,
+            device=args.device,
+            batch_size=args.batch_size,
+            k=args.k,
+            print_model=args.print_model,
+        )
+    else:
+        metrics = run_clip_retrieval_eval(
+            root_dir=args.root_dir,
+            image_to_text_csv=args.image_to_text_csv,
+            textnums_to_texts_csv=args.textnums_to_texts_csv,
+            model_name=args.model_name,
+            batch_size=args.batch_size,
+            k=args.k,
+            device=args.device,
+            checkpoint_path=args.checkpoint_path,
+            onnx_dir=args.onnx_dir,
+            print_model=args.print_model,
+        )
     for name, value in metrics.items():
         print(f"{name}: {value:.4f}")
 
