@@ -531,7 +531,7 @@ def run_training(args) -> None:
         _val_recall_key = f"val_recall@{val_k}"
         _sample_recall_key = f"sample_recall@{sample_k}"
 
-        # Best-checkpoint tracking: prefer val_recall > sample_recall > val_loss
+        # Best-checkpoint tracking: primary metric set by args.best_metric, others as fallback
         best_ckpt_path = output_dir / "checkpoint_best.pt"
         best_val_recall: Optional[float] = None
         best_sample_recall: Optional[float] = None
@@ -730,25 +730,34 @@ def run_training(args) -> None:
                 sim = getattr(unwrap_model(model), "_qat_sim", None)
                 _improved = False
                 _reason = ""
-                # Priority: val_recall > sample_recall > val_loss
-                if val_compute_recall and epoch_row[_val_recall_key] != "":
-                    _cur = float(epoch_row[_val_recall_key])
-                    if best_val_recall is None or _cur > best_val_recall:
-                        best_val_recall = _cur
-                        _improved = True
-                        _reason = f"{_val_recall_key}={_cur:.4f}"
-                elif sample_eval_active and epoch_row[_sample_recall_key] != "":
-                    _cur = float(epoch_row[_sample_recall_key])
-                    if best_sample_recall is None or _cur > best_sample_recall:
-                        best_sample_recall = _cur
-                        _improved = True
-                        _reason = f"{_sample_recall_key}={_cur:.4f}"
-                elif val_compute_loss and epoch_row["val_total_loss"] != "":
-                    _cur = float(epoch_row["val_total_loss"])
-                    if best_val_loss is None or _cur < best_val_loss:
-                        best_val_loss = _cur
-                        _improved = True
-                        _reason = f"val_total_loss={_cur:.4f}"
+                _best_metric = getattr(args, "best_metric", "sample_recall")
+                _all_candidates = [
+                    ("sample_recall", _sample_recall_key, sample_eval_active),
+                    ("val_recall",    _val_recall_key,    val_compute_recall),
+                    ("val_loss",      "val_total_loss",   val_compute_loss),
+                ]
+                _primary = [c for c in _all_candidates if c[0] == _best_metric]
+                _others  = [c for c in _all_candidates if c[0] != _best_metric]
+                for _mtype, _mkey, _active in _primary + _others:
+                    if not _active or epoch_row.get(_mkey, "") == "":
+                        continue
+                    _cur = float(epoch_row[_mkey])
+                    if _mtype == "val_loss":
+                        if best_val_loss is None or _cur < best_val_loss:
+                            best_val_loss = _cur
+                            _improved = True
+                            _reason = f"val_total_loss={_cur:.4f}"
+                    elif _mtype == "val_recall":
+                        if best_val_recall is None or _cur > best_val_recall:
+                            best_val_recall = _cur
+                            _improved = True
+                            _reason = f"{_mkey}={_cur:.4f}"
+                    else:
+                        if best_sample_recall is None or _cur > best_sample_recall:
+                            best_sample_recall = _cur
+                            _improved = True
+                            _reason = f"{_mkey}={_cur:.4f}"
+                    break  # use only the highest-priority available metric
                 if _improved:
                     save_checkpoint(
                         save_path=best_ckpt_path,

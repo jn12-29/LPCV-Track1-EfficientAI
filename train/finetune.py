@@ -148,6 +148,20 @@ def parse_args() -> argparse.Namespace:
         help="Batch size for val recall encoding.",
     )
 
+    # --- Best checkpoint metric ---
+    parser.add_argument(
+        "--best-metric",
+        type=str,
+        default="sample_recall",
+        choices=["sample_recall", "val_recall", "val_loss"],
+        help=(
+            "Primary metric for best-checkpoint selection. "
+            "The chosen metric is checked first; if unavailable, falls back to the "
+            "remaining two in order: sample_recall→val_recall→val_loss. "
+            "Default: sample_recall."
+        ),
+    )
+
     # --- Sample-set eval ---
     parser.add_argument(
         "--sample-eval-root",
