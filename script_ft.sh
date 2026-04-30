@@ -1,8 +1,16 @@
 # fine-tune
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 5 --batch-size 256 --accum-freq 50 --epochs 20 --lr 1e-6
+    --model-name MobileCLIP2-B --gpu-ids 4 --batch-size 256 --accum-freq 50 --epochs 200 \
+     --lr 2e-6 --weight-decay 0.2 --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 1 --crop-rings 1 --resize-rings 1
 
+python train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 5 --batch-size 128 --accum-freq 16 --epochs 200 \
+     --lr 1e-6 --weight-decay 0.2 --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10
+    
 # fine-tune (multi-GPU DDP)
 
 # NCCL_P2P_DISABLE=1: PCIe P2P direct GPU memory access is broken on GPUs 0-3 on this machine.
@@ -23,6 +31,54 @@ NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=4 --ma
 
     # --max-hard-negatives-per-image 0
 
+# 290240
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 0,1 \
+    --batch-size 256 --accum-freq 4 --epochs 100 --lr 1e-6 --init-lr 0 --min-lr 5e-7 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10 --crop-rings 2
+
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29502 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 2,3 \
+    --batch-size 256 --accum-freq 4 --epochs 100 --lr 1e-6 --init-lr 0 --min-lr 5e-7 --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10 --resize-rings 2
+
+# 290800
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 0,1 \
+    --batch-size 256 --accum-freq 4 --epochs 100 --lr 1e-6 --init-lr 0 --min-lr 5e-7  \
+    --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10 --crop-rings 1 --resize-rings 1
+
+NCCL_P2P_DISABLE=1 OMP_NUM_THREADS=8 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29502 train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 2,3 \
+    --batch-size 256 --accum-freq 4 --epochs 100 --lr 1e-6 --init-lr 0 --min-lr 5e-7  \
+    --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10
+
+# 291845
+python train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 0 \
+    --batch-size 512 --accum-freq 16 --epochs 200 --lr 1e-6 --init-lr 1e-8 --min-lr 1e-8  \
+    --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10 --resize-rings 2
+
+python train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 6 \
+    --batch-size 512 --accum-freq 16 --epochs 200 --lr 1e-6 --init-lr 1e-8 --min-lr 1e-8  \
+    --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4  --compile \
+    --log-every-n-steps 10 --resize-rings 3
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \

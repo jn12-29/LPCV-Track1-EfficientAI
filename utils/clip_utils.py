@@ -285,4 +285,14 @@ def _load_clip(
 
     tokenizer.add_special_tokens({"cls_token": tokenizer.eos_token})
 
+    _resume_state = None
+    if checkpoint_path and checkpoint is not None and isinstance(checkpoint, dict):
+        _resume_state = {}
+        for k in ("epoch", "global_step", "optimizer_state_dict",
+                   "scheduler_state_dict", "scaler_state_dict", "metrics_history"):
+            if k in checkpoint:
+                _resume_state[k] = checkpoint[k]
+    if _resume_state is not None:
+        model._resume_ckpt = _resume_state
+
     return model, preprocess, tokenizer

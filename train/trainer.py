@@ -107,10 +107,17 @@ def run_training(args) -> None:
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    run_timestamp = make_run_timestamp() if is_main_process else None
-    run_timestamp = broadcast_run_timestamp(run_timestamp, distributed)
-    run_name = build_run_name(args, run_timestamp)
-    output_dir = Path(args.output_dir) / run_name
+    _resume_path = getattr(args, "resume", None)
+    if _resume_path:
+        resume_ckpt = Path(_resume_path)
+        output_dir = resume_ckpt.parent
+        run_name = output_dir.name
+        run_timestamp = run_name.rsplit("__", 1)[-1] if "__" in run_name else make_run_timestamp()
+    else:
+        run_timestamp = make_run_timestamp() if is_main_process else None
+        run_timestamp = broadcast_run_timestamp(run_timestamp, distributed)
+        run_name = build_run_name(args, run_timestamp)
+        output_dir = Path(args.output_dir) / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
     train_log_path = output_dir / "train.log"
     metrics_csv_path = output_dir / "metrics.csv"
@@ -138,6 +145,9 @@ def run_training(args) -> None:
         "local_rank": dist_ctx["local_rank"],
         "gpu_ids": gpu_ids,
     }
+    if _resume_path:
+        run_config["resumed_from"] = str(Path(_resume_path).resolve())
+        run_config["resumed_at"] = current_timestamp()
     try:
         if is_main_process:
             save_run_config(config_json_path, run_config)
@@ -216,6 +226,25 @@ def run_training(args) -> None:
         relu_labels = getattr(model, "_relu_blocks", None)
         if is_main_process:
             log_message(f"[Timer] model_load: {time.perf_counter() - _t0:.2f}s", run_name=run_name)
+
+        # --- Extract resume state from checkpoint (attached by _load_clip) ---
+        resume_epoch = 0
+        resume_global_step = 0
+        resume_metrics_history = []
+        _resume_state_dict = None
+        if hasattr(model, "_resume_ckpt"):
+            _resume_state_dict = model._resume_ckpt
+            del model._resume_ckpt
+            resume_epoch = int(_resume_state_dict.get("epoch", 0))
+            resume_global_step = int(_resume_state_dict.get("global_step", 0))
+            resume_metrics_history = _resume_state_dict.get("metrics_history", [])
+            if is_main_process:
+                log_message(
+                    f"Checkpoint contains training state: epoch={resume_epoch}, "
+                    f"global_step={resume_global_step}, "
+                    f"metrics_history={len(list(resume_metrics_history))} rows",
+                    run_name=run_name,
+                )
 
         if args.grad_checkpointing and hasattr(model, "set_grad_checkpointing"):
             model.set_grad_checkpointing()
@@ -434,8 +463,41 @@ def run_training(args) -> None:
         amp_enabled = not args.no_amp and device.type == "cuda" and not (qat_config is not None)
         scaler = GradScaler(device=device.type, enabled=amp_enabled)
 
-        metrics_history: List[MetricsRow] = []
-        global_step = 0
+        # --- Restore optimizer / scheduler / scaler state from checkpoint ---
+        if _resume_state_dict is not None and resume_epoch > 0:
+            try:
+                optimizer.load_state_dict(_resume_state_dict.get("optimizer_state_dict", {}))
+                if is_main_process:
+                    log_message("Restored optimizer state from checkpoint.", run_name=run_name)
+            except Exception as e:
+                if is_main_process:
+                    log_message(
+                        f"WARNING: Failed to restore optimizer state ({e}); using fresh optimizer.",
+                        run_name=run_name,
+                    )
+            try:
+                scheduler.load_state_dict(_resume_state_dict.get("scheduler_state_dict", {}))
+                if is_main_process:
+                    log_message("Restored scheduler state from checkpoint.", run_name=run_name)
+            except Exception as e:
+                if is_main_process:
+                    log_message(
+                        f"WARNING: Failed to restore scheduler state ({e}); using fresh scheduler.",
+                        run_name=run_name,
+                    )
+            try:
+                scaler.load_state_dict(_resume_state_dict.get("scaler_state_dict", {}))
+                if is_main_process:
+                    log_message("Restored scaler state from checkpoint.", run_name=run_name)
+            except Exception as e:
+                if is_main_process:
+                    log_message(
+                        f"WARNING: Failed to restore scaler state ({e}); using fresh scaler.",
+                        run_name=run_name,
+                    )
+
+        metrics_history: List[MetricsRow] = list(resume_metrics_history) if resume_metrics_history else []
+        global_step = resume_global_step
         epoch_digits = max(len(str(args.epochs)), 2)
         previous_latest_path: Optional[Path] = None
 
@@ -475,7 +537,37 @@ def run_training(args) -> None:
         best_sample_recall: Optional[float] = None
         best_val_loss: Optional[float] = None
 
-        for epoch in range(1, args.epochs + 1):
+        if resume_epoch > 0 and resume_metrics_history:
+            _vr_key = f"val_recall@{val_k}"
+            _sr_key = f"sample_recall@{sample_k}"
+            for _row in resume_metrics_history:
+                _v = _row.get(_vr_key)
+                if isinstance(_v, (int, float)) and _v != "":
+                    _v = float(_v)
+                    if best_val_recall is None or _v > best_val_recall:
+                        best_val_recall = _v
+                _s = _row.get(_sr_key)
+                if isinstance(_s, (int, float)) and _s != "":
+                    _s = float(_s)
+                    if best_sample_recall is None or _s > best_sample_recall:
+                        best_sample_recall = _s
+                _l = _row.get("val_total_loss")
+                if isinstance(_l, (int, float)) and _l != "":
+                    _l = float(_l)
+                    if best_val_loss is None or _l < best_val_loss:
+                        best_val_loss = _l
+            if is_main_process and (best_val_recall is not None or best_sample_recall is not None or best_val_loss is not None):
+                _parts = []
+                if best_val_recall is not None:
+                    _parts.append(f"{_vr_key}={best_val_recall:.4f}")
+                if best_sample_recall is not None:
+                    _parts.append(f"{_sr_key}={best_sample_recall:.4f}")
+                if best_val_loss is not None:
+                    _parts.append(f"val_loss={best_val_loss:.4f}")
+                log_message(f"Restored best metrics from history: {', '.join(_parts)}", run_name=run_name)
+
+        start_epoch = resume_epoch + 1 if resume_epoch > 0 else 1
+        for epoch in range(start_epoch, args.epochs + 1):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
