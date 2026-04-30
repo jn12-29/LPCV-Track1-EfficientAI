@@ -73,8 +73,7 @@ def eval_val_loss(
                 # Local InfoNCE (no cross-GPU gather; val is always single-process)
                 image_f = F.normalize(image_features, dim=-1)
                 positive_f = F.normalize(positive_features, dim=-1)
-                scale = logit_scale.exp()
-                sims = image_f @ positive_f.T * scale
+                sims = image_f @ positive_f.T * logit_scale
                 labels = torch.arange(len(sims), device=device)
                 clip_loss = (
                     F.cross_entropy(sims, labels) + F.cross_entropy(sims.T, labels)

@@ -91,6 +91,14 @@ NCCL_P2P_DISABLE=1 torchrun --nnodes=1 --nproc_per_node=4 --master_addr=127.0.0.
 
 python train/finetune.py \
     --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
+    --model-name MobileCLIP2-B --gpu-ids 4 \
+    --batch-size 512 --accum-freq 16 --epochs 200 --lr 1e-5 --init-lr 1e-8 --min-lr 1e-8  \
+    --weight-decay 0.2 \
+    --loss-type clip --num-hard-negatives 4 --max-hard-negatives-per-image 0 --compile \
+    --log-every-n-steps 10 --resize-rings 2
+
+python train/finetune.py \
+    --jsonl-path ./build_datasets/data/vg_llm_contrastive.jsonl \
     --model-name MobileCLIP2-B --gpu-ids 2 --batch-size 64 --accum-freq 128 --epochs 100 --lr 1e-6 --no-amp # no amp will make train very slow from 180 samples/s to 40 samples/s per gpu
 
 # fine-tune with SigLIP loss (hard negatives absorbed into sigmoid matrix)
