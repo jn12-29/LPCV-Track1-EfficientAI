@@ -130,12 +130,14 @@ def _print_pack_result(
     print(f"  └── manifest.json")
 
 
-def _print_unpack_plan(shards: list[Path], dst: Path) -> None:
+def _print_unpack_plan(shards: list[Path], dst: Path, jsonl_dst: Path | None = None) -> None:
     src_dir = shards[0].parent if shards[0].is_file() else shards[0]
     print(f"\n{src_dir}/")
     for shard in shards:
         print(f"  ├── {shard.name}")
-    print(f"\n  → extract to: {dst}/")
+    print(f"\n  → images extract to : {dst}/  (existing files will be skipped)")
+    if jsonl_dst is not None:
+        print(f"  → vg_llm_contrastive.jsonl  →  {jsonl_dst}")
 
 
 def _print_load_hint(dst: Path, n_shards: int, compress: bool) -> None:
@@ -166,14 +168,23 @@ def _write_shard(task: tuple) -> tuple[str, int, float]:
     return shard_path, len(file_paths), time.monotonic() - t0
 
 
-def _extract_shard(task: tuple) -> tuple[str, int, float]:
-    """Extract one tar shard. Returns (shard_path, n_files, elapsed_sec)."""
+def _extract_shard(task: tuple) -> tuple[str, int, int, float]:
+    """Extract one tar shard, skipping already-existing files.
+
+    Returns (shard_path, n_extracted, n_skipped, elapsed_sec).
+    """
     shard_path, dst = task
+    dst_path = Path(dst)
     t0 = time.monotonic()
+    extracted = skipped = 0
     with tarfile.open(shard_path, "r:*") as tf:
-        members = tf.getmembers()
-        tf.extractall(dst, members=members, filter="data")
-    return shard_path, len(members), time.monotonic() - t0
+        for member in tf.getmembers():
+            if (dst_path / member.name).exists():
+                skipped += 1
+                continue
+            tf.extract(member, dst, filter="data")
+            extracted += 1
+    return shard_path, extracted, skipped, time.monotonic() - t0
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +307,12 @@ def cmd_unpack(args):
     if not shards:
         sys.exit(f"[unpack] No .tar / .tar.gz shards found in {src}")
 
+    jsonl_src_dir = src if src.is_dir() else src.parent
+    jsonl_file = jsonl_src_dir / "vg_llm_contrastive.jsonl"
+    jsonl_dst = dst.parent / jsonl_file.name if jsonl_file.exists() else None
+
     print(f"\nPlanned extraction:")
-    _print_unpack_plan(shards, dst)
+    _print_unpack_plan(shards, dst, jsonl_dst)
     print()
     _confirm("Proceed with unpacking?")
 
@@ -305,20 +320,32 @@ def cmd_unpack(args):
 
     tasks = [(str(s), str(dst)) for s in shards]
     workers = min(args.workers, len(shards))
-    total_files = 0
+    total_extracted = total_skipped = 0
     t_start = time.monotonic()
 
     with tqdm(total=len(shards), desc="Unpacking", unit="shard") as pbar:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_extract_shard, t): t for t in tasks}
             for fut in as_completed(futures):
-                shard_path, n_files, shard_elapsed = fut.result()
-                total_files += n_files
-                pbar.set_postfix({"last": Path(shard_path).name, "imgs": n_files, "s": f"{shard_elapsed:.1f}"})
+                shard_path, n_extracted, n_skipped, shard_elapsed = fut.result()
+                total_extracted += n_extracted
+                total_skipped += n_skipped
+                pbar.set_postfix({
+                    "last": Path(shard_path).name,
+                    "new": n_extracted,
+                    "skip": n_skipped,
+                    "s": f"{shard_elapsed:.1f}",
+                })
                 pbar.update(1)
 
     elapsed = time.monotonic() - t_start
-    print(f"\n[unpack] Extracted {total_files} images in {elapsed:.1f}s  →  {dst}")
+    print(f"\n[unpack] Extracted {total_extracted} images ({total_skipped} skipped) in {elapsed:.1f}s  →  {dst}")
+
+    # Special-case: copy vg_llm_contrastive.jsonl alongside dst (i.e. dst.parent)
+    if jsonl_dst is not None:
+        jsonl_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(jsonl_file, jsonl_dst)
+        print(f"[unpack] Copied {jsonl_file.name}  →  {jsonl_dst}")
 
 
 # ---------------------------------------------------------------------------
