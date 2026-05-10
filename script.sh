@@ -51,7 +51,7 @@ python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./ch
 
 # 4/28/2026 20:30:23	****m3jw5	****vzlkg	0.6079269746	13128	10437	2691
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep100_lr1e-06_wd0.2_acc4_hn4_hnw1_seed0__20260429_024529/checkpoint_epoch_100.pt --output-postfix _260429_1 --max-text-len 40
-
+# 4/29/2026 7:09:21     ****ny0zg	****kzqz5	0.6269567186	16343	13632	2711
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep100_lr1e-06_wd0.2_acc4_hn4_hnw1_seed0__20260429_075545/checkpoint_epoch_080.pt --output-postfix _260430_0 --max-text-len 40
 
 python pipeline/export_onnx.py --model-name MobileCLIP2-B --checkpoint-path ./checkpoints/MobileCLIP2-B__bs256_ep200_lr1e-06_wd0.2_acc16_hn4_hnw1_seed0__20260428_154224/checkpoint_epoch_180.pt --output-postfix _260430_1 --max-text-len 40 

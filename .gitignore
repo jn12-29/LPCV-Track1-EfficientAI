@@ -4,6 +4,7 @@
 **/vis_out
 # **/sample_data
 /exported_*
+!exported_MobileCLIP2-B_260430_0_onnx
 .env
 **/*.zip
 .worktrees/
