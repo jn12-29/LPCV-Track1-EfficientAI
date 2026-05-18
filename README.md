@@ -1,212 +1,644 @@
-# LPCVC 2026 Track 1 — Efficient AI (Image-to-Text Retrieval)
+# LPCV 2026 Track 1 — Efficient AI
 
-Goal: maximize Recall@K on a Qualcomm XR2 Gen 2 device using MobileCLIP2 (open_clip), exported to ONNX and compiled via QAI Hub for on-device inference.
+This project targets image-to-text retrieval on Qualcomm XR2 Gen 2 devices. The main goal is to maximize Recall@K. The core model is `MobileCLIP2-B`. Local evaluation supports both PyTorch and ONNX Runtime, while the deployment path is ONNX export + QAI Hub compilation + remote device inference.
 
-## Setup
+This document is organized for reproducibility from a clean machine, starting from the Conda environment.
+
+## 1. Environment Setup
+
+### 1.1 Requirements
+
+- Linux
+- A Conda environment with Python 3.10 or 3.11
+- NVIDIA GPU + CUDA recommended for training and MLP reconstruction
+- `conda` installed
+- A valid QAI Hub account and API token for compilation and remote evaluation
+- An OpenRouter-compatible API key if you want to build training data
+
+### 1.2 Create a Conda Environment
+
+Run from the repository root:
+
+```bash
+conda create -n lpcv python=3.10 
+conda activate lpcv
+```
+
+### 1.3 Install PyTorch
+
+Install the PyTorch build that matches your CUDA version. Example for CUDA 12.1:
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+If you use CPU or another CUDA version, replace the command with the appropriate official install command.
+
+### 1.4 Install Project Dependencies
 
 ```bash
 pip install -r requirements.txt
-qai-hub configure --api_token <您的TOKEN> # requires API token from QAI Hub
 ```
 
-AIMET (for QAT) requires a separate wheel matched to your CUDA version — see comments in `requirements.txt`.
+Notes:
 
-## End-to-End Pipeline
+- `requirements.txt` includes `aimet-torch` for the optional QAT path. QAT support is kept in the repository, but it was not part of the final solution and is not guaranteed to work cleanly.
+
+
+### 1.5 Pre-download the Hugging Face Tokenizer
+
+Several code paths in this project use:
+
+```python
+CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32", local_files_only=True)
+```
+
+That means the tokenizer must already exist in the local Hugging Face cache before first use.
+
+Recommended:
 
 ```bash
-# 1. Export ONNX (fp32) — output goes to exported_{model_name}_onnx/
-python pipeline/export_onnx.py --model-name MobileCLIP2-B
-
-# 2. Compile for XR2 Gen 2 and submit profiling job to QAI Hub
-python pipeline/compile_and_profile.py --model-name MobileCLIP2-B [--postfix <suffix>]
-
-# 3. Evaluate
-python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10        # torch, local
-
-# Remote evaluation (three modes):
-python pipeline/eval_remote.py --upload-dataset \
-    --image-compiled-id <id> --text-compiled-id <id>            # Mode A: upload + infer
-python pipeline/eval_remote.py \
-    --image-compiled-id <id> --text-compiled-id <id>            # Mode B: infer, existing dataset
-python pipeline/eval_remote.py \
-    --image-inference-id <id> --text-inference-id <id>          # Mode C: reuse inference jobs
+hf download openai/clip-vit-base-patch32
 ```
 
-Available model names: `MobileCLIP2-B`
+### 1.6 Configure QAI Hub
 
-## Training (Fine-tuning)
+Only required if you want to compile ONNX models or run remote evaluation:
 
-Run all training commands from the repository root. Flat contrastive JSONL format:
+```bash
+qai-hub configure --api_token <YOUR_QAI_HUB_TOKEN>
+```
+
+## 2. Model Downloads
+
+This project uses two kinds of model assets:
+
+- the base pretrained model: `MobileCLIP2-B`
+- the current best exported model: `jn12/2026LPCV-Track1-MobileCLIP2-B-Best`
+
+### 2.1 Download the Base Pretrained MobileCLIP2-B Model
+
+The code loads `MobileCLIP2-B` through `open_clip`. If the local cache does not exist yet, the pretrained weights will be downloaded automatically on first use.
+
+If you want to prepare the cache explicitly, first complete Section 1.5 for the tokenizer, then run a local evaluation once:
+
+```bash
+python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10
+```
+
+This will trigger the `open_clip` download and cache the required pretrained weights for `MobileCLIP2-B`.
+
+### 2.2 Download the Current Best Model
+
+Current best model repository:
+
+```text
+https://huggingface.co/jn12/2026LPCV-Track1-MobileCLIP2-B-Best
+```
+
+This repository currently provides exported ONNX files. The main files include:
+
+- `image_encoder.onnx`
+- `image_encoder.onnx.data`
+- `text_encoder.onnx`
+- `text_encoder.onnx.data`
+
+Recommended local download path:
+
+
+```bash
+hf download jn12/2026LPCV-Track1-MobileCLIP2-B-Best \
+  --local-dir ./pretrained/2026LPCV-Track1-MobileCLIP2-B-Best
+```
+
+The downloaded directory should look like:
+
+```text
+pretrained/2026LPCV-Track1-MobileCLIP2-B-Best/
+├── image_encoder.onnx
+├── image_encoder.onnx.data
+├── text_encoder.onnx
+└── text_encoder.onnx.data
+```
+
+You can use it directly for local ONNX evaluation:
+
+```bash
+python pipeline/eval_local.py \
+  --onnx-dir ./pretrained/2026LPCV-Track1-MobileCLIP2-B-Best \
+  --k 10
+```
+
+## 3. Training Data Download
+
+The full fine-tuning dataset is available on Hugging Face Datasets:
+
+```text
+https://huggingface.co/datasets/jn12/VG100K4CL
+```
+
+Repository:
+
+
+```bash
+hf download jn12/VG100K4CL \
+  --repo-type dataset \
+  --local-dir ./data/VG100K4CL
+```
+
+`VG100K4CL` is the complete fine-tuning dataset used in this project. It includes the JSONL annotations needed for training.
+
+If you want to unpack the image shards into a normal image folder, run:
+
+```bash
+python build_datasets/pack_dataset.py unpack \
+  --src ./data/VG100K4CL \
+  --dst ./build_datasets/data/VG_100K
+```
+
+
+
+## 4. Repository and Data Layout
+
+Run all commands from the repository root by default:
+
+```bash
+cd /path/to/LPCV-Track1-EfficientAI-main
+```
+
+The sample evaluation set is already included under `sample_data/`:
+
+```text
+sample_data/
+├── images/
+├── img_list.csv
+└── txt_list.csv
+```
+
+Where:
+
+- `img_list.csv` columns are `Image_names`, `Text_nums`
+- `txt_list.csv` columns are `Text_nums`, `Unique_Texts`
+
+Training data uses a flat JSONL format:
 
 ```json
 {
   "image_path": "build_datasets/data/VG_100K/107914.jpg",
-  "positives": ["..."],
-  "hard_negatives": ["..."]
+  "positives": ["positive text 1", "positive text 2"],
+  "hard_negatives": ["negative text 1", "negative text 2"]
 }
 ```
 
+## 5. Minimal Reproducible Pipeline
+
+If you only want to verify that the project works end to end, run these steps first.
+
+### 5.1 Local PyTorch Evaluation
+
 ```bash
-# Single GPU
-python train/finetune.py \
-    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 256 --epochs 20
-
-# Multi-GPU DDP
-OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=2 --master_addr=127.0.0.1 --master_port=29501 \
-    train/finetune.py \
-    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0,1 --batch-size 256 --epochs 20
-
-# Resume from checkpoint
-python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_05.pt
+python pipeline/eval_local.py \
+  --model-name MobileCLIP2-B \
+  --root-dir ./sample_data \
+  --image-to-text-csv ./sample_data/img_list.csv \
+  --textnums-to-texts-csv ./sample_data/txt_list.csv \
+  --k 10
 ```
 
-`--batch-size` is per-GPU. Effective global batch size = `batch_size × world_size × accum_freq`.
+This loads pretrained `MobileCLIP2-B` and computes `image_to_text_recall@10` on the sample set locally.
 
-Each run writes into `checkpoints/<model>__<config>__<timestamp>/` containing `train.log`, `metrics.csv`, `metrics.jsonl`, `training_curves.png`, epoch-tagged checkpoints, `run_config.json`, and TensorBoard logs.
+### 5.2 Export ONNX
+
+```bash
+python pipeline/export_onnx.py --model-name MobileCLIP2-B
+```
+
+Output directory:
+
+```text
+exported_MobileCLIP2-B_onnx/
+├── image_encoder.onnx
+└── text_encoder.onnx
+```
+
+### 5.3 Local ONNX Evaluation
+
+```bash
+python pipeline/eval_local.py \
+  --onnx-dir exported_MobileCLIP2-B_onnx \
+  --root-dir ./sample_data \
+  --image-to-text-csv ./sample_data/img_list.csv \
+  --textnums-to-texts-csv ./sample_data/txt_list.csv \
+  --k 10
+```
+
+This verifies that the exported ONNX path works locally.
+
+Both local evaluation modes are supported:
+
+- without `--onnx-dir`: PyTorch path
+- with `--onnx-dir`: ONNX Runtime path
+
+## 6. Remote Device Compilation and Evaluation
+
+### 6.1 Compile and Submit Profiling Jobs
+
+Make sure `qai-hub configure` is already done, then run:
+
+```bash
+python pipeline/compile_and_profile.py --model-name MobileCLIP2-B
+```
+
+The script will:
+
+- read `exported_MobileCLIP2-B_onnx/`
+- submit image and text compilation jobs to QAI Hub
+- automatically submit profile jobs after compilation finishes
+
+The target device is fixed to:
+
+- `XR2 Gen 2 (Proxy)`
+
+Compilation settings are fixed to:
+
+- runtime: `qnn_dlc`
+- image input: `(1, 3, 224, 224)` float32
+- text input: `(1, 77)` int32
+
+### 6.2 Remote Evaluation
+
+`pipeline/eval_remote.py` supports three modes.
+
+Mode A: upload local `sample_data`, then run inference
+
+```bash
+python pipeline/eval_remote.py \
+  --upload-dataset \
+  --model-name MobileCLIP2-B \
+  --image-compiled-id <IMAGE_COMPILED_JOB_ID> \
+  --text-compiled-id <TEXT_COMPILED_JOB_ID>
+```
+
+Mode B: reuse existing dataset IDs, then run inference
+
+```bash
+python pipeline/eval_remote.py \
+  --model-name MobileCLIP2-B \
+  --image-compiled-id <IMAGE_COMPILED_JOB_ID> \
+  --text-compiled-id <TEXT_COMPILED_JOB_ID> \
+  --image-dataset-id <IMAGE_DATASET_ID> \
+  --text-dataset-id <TEXT_DATASET_ID>
+```
+
+Mode C: reuse completed inference jobs
+
+```bash
+python pipeline/eval_remote.py \
+  --image-inference-id <IMAGE_INFERENCE_JOB_ID> \
+  --text-inference-id <TEXT_INFERENCE_JOB_ID> \
+  --k 10
+```
+
+Notes:
+
+- If `--image-dataset-id` and `--text-dataset-id` are omitted, the code falls back to built-in default dataset IDs.
+- Mode A is the safest choice for first-time reproduction.
+
+## 7. Training Reproduction
+
+### 7.1 Training Input
+
+Default training file:
+
+```text
+./build_datasets/data/dataset_verify_contrastive.jsonl
+```
+
+In practice, the final training data used by this project came from Path B below, i.e. the VisualGenome-based pipeline. If you use your own data, keep the JSONL structure identical to the format shown above.
+
+### 7.2 Single-GPU Training
+
+```bash
+python train/finetune.py \
+  --jsonl-path ./build_datasets/data/dataset_verify_contrastive.jsonl \
+  --model-name MobileCLIP2-B \
+  --gpu-ids 0 \
+  --batch-size 256 \
+  --accum-freq 4 \
+  --epochs 20 \
+  --lr 1e-6 \
+  --weight-decay 0.2 \
+  --loss-type clip \
+  --num-hard-negatives 4
+```
+
+### 7.3 Multi-GPU DDP Training
+
+```bash
+OMP_NUM_THREADS=8 torchrun \
+  --nnodes=1 \
+  --nproc_per_node=2 \
+  --master_addr=127.0.0.1 \
+  --master_port=29501 \
+  train/finetune.py \
+  --jsonl-path ./build_datasets/data/dataset_verify_contrastive.jsonl \
+  --model-name MobileCLIP2-B \
+  --gpu-ids 0,1 \
+  --batch-size 256 \
+  --accum-freq 4 \
+  --epochs 20 \
+  --lr 1e-6 \
+  --weight-decay 0.2 \
+  --loss-type clip \
+  --num-hard-negatives 4
+```
+
+Notes:
+
+- `--batch-size` is per GPU.
+- Effective global batch size = `batch_size × world_size × accum_freq`.
+- If your machine has NCCL P2P issues, use `NCCL_P2P_DISABLE=1` as shown in `script_ft.sh`.
+
+### 7.4 Resume from a Checkpoint
+
+```bash
+python train/finetune.py \
+  --jsonl-path ./build_datasets/data/dataset_verify_contrastive.jsonl \
+  --model-name MobileCLIP2-B \
+  --gpu-ids 0 \
+  --resume ./checkpoints/<run_name>/checkpoint_latest_epoch_05.pt
+```
+
+Note:
+
+- Resume support exists, but it currently appears to have edge-case bugs.
+- Treat resumed runs as best-effort only; correctness is not guaranteed without manual verification.
+
+### 7.5 Training Outputs
+
+Each run writes to:
+
+```text
+checkpoints/<model>__<config>__<timestamp>/
+```
+
+Typical contents include:
+
+- `train.log`
+- `metrics.csv`
+- `metrics.jsonl`
+- `training_curves.png`
+- `run_config.json`
+- `checkpoint_latest_epoch_*.pt`
+- TensorBoard logs
+
+Launch TensorBoard:
 
 ```bash
 tensorboard --logdir checkpoints
 ```
 
-## QAT (Quantization-Aware Training)
+## 8. Export and Evaluate Trained Checkpoints
 
-QAT optimizes model weights under simulated int8 quantization using AIMET, reducing accuracy loss when QAI Hub compiles to QNN int8.
-
-```bash
-# QAT from pretrained weights (W8A8)
-python train/finetune.py \
-    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 64 --epochs 5 \
-    --qat-enabled --qat-weight-bw 8 --qat-act-bw 8 --qat-calib-batches 32
-
-# QAT from a regular finetune checkpoint (W8A16)
-python train/finetune.py \
-    --jsonl-path build_datasets/data/dataset_raw_contrastive.jsonl \
-    --model-name MobileCLIP2-B --gpu-ids 0 --batch-size 64 --epochs 3 \
-    --resume checkpoints/.../checkpoint_epoch_20.pt \
-    --qat-enabled --qat-weight-bw 8 --qat-act-bw 16
-
-# Resume QAT from a QAT checkpoint (auto-detected, calibration skipped)
-python train/finetune.py ... --resume checkpoints/.../checkpoint_latest_epoch_02.pt \
-    --qat-enabled
-
-# Also export ONNX at each numbered checkpoint
-python train/finetune.py ... --qat-enabled --export-onnx
-
-# Export ONNX from an existing QAT checkpoint
-python pipeline/export_onnx.py --model-name MobileCLIP2-B \
-    --checkpoint-path checkpoints/.../MobileCLIP2-B_finetuned.pt
-```
-
-QAT checkpoints are standard `.pt` files with extra fields (`qat_enabled`, `qat_encodings`) and are auto-detected on `--resume`.
-
-## MLP Reconstruction (GELU → ReLU)
-
-Replaces all MLP GELU activations with ReLU via layer-by-layer knowledge distillation, without quantization. Based on APHQ-ViT (CVPR 2025). Speeds up inference ~10–20% with <0.5% accuracy loss.
+### 8.1 Export a Specific Checkpoint
 
 ```bash
-# Full reconstruction on pretrained B (~2 hours, 32 blocks)
-# Output auto-generated: checkpoints/{model}__{config}__{timestamp}/mlp_relu.pt
-# Recall@K eval runs automatically at the end (--skip-eval to disable)
-python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 2 \
-    --n-calib 1024 --n-iters 20000
-
-# On top of a fine-tuned checkpoint
-python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 2 \
-    --checkpoint-path checkpoints/.../checkpoint_latest_epoch_100.pt
-
-# Evaluate reconstructed model separately
-python pipeline/eval_local.py --model-name MobileCLIP2-B --k 10 \
-    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
-
-# Export reconstructed model to ONNX (_load_clip auto-detects relu_blocks checkpoint)
-python pipeline/export_onnx.py --model-name MobileCLIP2-B \
-    --checkpoint-path checkpoints/<run_name>/mlp_relu.pt
-
-# Resume after crash
-python mlp_reconstruction/run.py \
-    --model-name MobileCLIP2-B --gpu-id 2 \
-    --resume-from checkpoints/<run_name>/mlp_relu.pt.tmp \
-    --skip-to visual[s1b0]
+python pipeline/export_onnx.py \
+  --model-name MobileCLIP2-B \
+  --checkpoint-path ./checkpoints/<run_name>/checkpoint_epoch_020.pt \
+  --output-postfix _ft
 ```
 
-Reconstruction proceeds **block by block** (serial). Each block: collect calibration activations → replace GELU with ReLU → distill (`L_Direct + 2×L_Clamp`) → save intermediate checkpoint (`.tmp`). Calibration data is read from `build_datasets/data/vg_llm_contrastive.jsonl`.
+Example output directory:
 
-Each run writes into the checkpoint directory: `train.log`, `run_config.json`, `metrics.csv`, `metrics.jsonl`, and `reconstruction_curves.png` (cosine similarity and final loss per block).
-
-Key options: `--gpu-id` (single GPU), `--n-calib` (default 1024), `--n-iters` (default 20000), `--lr` (default 1e-3), `--aph-mode uniform|magnitude`, `--output-dir` (default `checkpoints`), `--output` (overrides auto-generated path).
-
-Block counts: B = 32 (12 text + 20 visual), B = 56, B = 24.
-
-## `eval_remote.py` Modes
-
-| Mode  | Arguments                         | Description                                                  |
-| ----- | --------------------------------- | ------------------------------------------------------------ |
-| **A** | `--upload-dataset` + compiled IDs | Upload local `sample_data` to QAI Hub, then submit inference |
-| **B** | compiled IDs only                 | Submit inference using existing dataset IDs                  |
-| **C** | inference IDs                     | Download outputs from already-completed inference jobs       |
-
-## Architecture
-
-### Shared utilities (`utils/`)
-
-- **`utils/clip_utils.py`** — `_load_clip()`: canonical model loader. Supports regular and QAT checkpoints via `qat_config` parameter (auto-detects checkpoint type). MobileCLIP2-specific `image_mean/std=(0,0,0)/(1,1,1)`.
-- **`utils/qat_utils.py`** — `QATConfig` dataclass; `wrap_model_for_qat()` (reparameterize + AIMET QuantSim), `calibrate_quantsim()`, `get_qat_encodings_json()`, `extract_base_model_state_dict()`.
-- **`utils/preprocess.py`** — `preprocess_image()`: resize 224×224, divide by 255, return `(3,224,224)` float32. No mean/std normalization.
-- **`utils/data_utils.py`** — `_batched`, `recall_at_k`, CSV loaders, `load_ground_truth`.
-
-### Pipeline (`pipeline/`)
-
-- **`pipeline/export_onnx.py`** — exports image/text encoders to ONNX opset 18, simplifies, verifies. Key arg: `--max-text-len N` (default 77) — ONNX external I/O stays `(1, 77)` per competition spec, but the text encoder internally truncates tokens to `(1, N)` and attn_mask to `(N, N)` before the transformer, so the compiled model attends over only N positions (faster for short texts). All checkpoint types auto-detected via `--checkpoint-path`.
-- **`pipeline/compile_and_profile.py`** — submits ONNX to QAI Hub (runtime: `qnn_dlc`, `--truncate_64bit_io`), then profile jobs. Auto-shares results.
-- **`pipeline/eval_local.py`** — torch local Recall@K evaluation.
-- **`pipeline/eval_remote.py`** — dataset upload, QAI Hub inference, Recall@K. Three modes: A/B/C.
-- **`pipeline/dataset.py`** — `RetrievalEvalDataset` and `ImageTextRetrievalDataset`.
-
-### Training (`train/`)
-
-- **`train/finetune.py`** — CLI entry point. Args: model, data, optimizer, loss, DDP, QAT (`--qat-*`), resume (`--resume`), export (`--export-onnx`).
-- **`train/trainer.py`** — `run_training()`: model load → dataset → QAT calibration → DDP wrap → training loop → export.
-- **`train/train_step.py`** — `train_one_epoch()`.
-- **`train/loss.py`** — CLIP InfoNCE + hard-negative loss; SigLIP loss.
-- **`train/data.py`** — `ContrastiveRecordDataset`, `create_collate_fn()`.
-- **`train/train_utils.py`** — `save_checkpoint()` (QAT-aware), logging, metrics helpers.
-- **`train/optim.py`** — AdamW + cosine scheduler with warmup.
-- **`train/distributed.py`** — DDP init, seed management.
-- **`train/metrics.py`** — CSV/JSONL metrics and training curve plots.
-- **`train/analyze_hard_negatives.py`** — similarity distribution analysis.
-
-### Dataset builder (`build_datasets/`)
-
-Generates fine-grained retrieval training data from images via an OpenRouter VLM API. Config and prompts in `DEFINE.py`; builder in `vlm_dataset_builder.py`. Output: `dataset_raw_contrastive.jsonl`.
-
-### Sample dataset layout
-
-```
-sample_data/
-├── images/          # .jpg, .png, .jpeg, .webp
-├── img_list.csv     # columns: Image_names, Text_nums (semicolon-separated)
-└── txt_list.csv     # columns: Text_nums, Unique_Texts
+```text
+exported_MobileCLIP2-B_ft_onnx/
 ```
 
-### Preprocessing (non-standard)
+### 8.2 Local Evaluation of a Trained PyTorch Checkpoint
 
-Images are resized to 224×224 and divided by 255. **No ImageNet mean/std normalization** — this differs from typical CLIP usage.
+```bash
+python pipeline/eval_local.py \
+  --model-name MobileCLIP2-B \
+  --checkpoint-path ./checkpoints/<run_name>/checkpoint_epoch_020.pt \
+  --k 10
+```
 
-### QAI Hub compile settings
+### 8.3 Local Evaluation of Exported ONNX
 
-- Target device: `"XR2 Gen 2 (Proxy)"`
-- Runtime: `qnn_dlc`
-- Image input spec: `(1, 3, 224, 224)` float32
-- Text input spec: `(1, 77)` int32
+```bash
+python pipeline/eval_local.py \
+  --onnx-dir ./exported_MobileCLIP2-B_ft_onnx \
+  --k 10
+```
 
-## Key Gotchas
+## 9. Dataset Building Reproduction
 
-- `reparameterize_model()` from `timm.utils` must be called before ONNX export — this folds multi-branch conv structures. For QAT, it is called automatically inside `wrap_model_for_qat()` before QuantSim creation.
-- For QAT checkpoints, the model must be reparameterized before QuantSim is created so the state dict key names match. `_load_clip()` handles this automatically.
-- The `OpenClipTextEncoder` wrapper zeros tokens after the EOS position to ensure consistent input regardless of tokenizer padding. With `--max-text-len N < 77`, it additionally slices `token_ids[:, :N]` and truncates `attn_mask` to `(N, N)` — the ONNX graph still accepts `(1, 77)` externally but computes attention over only N positions, reducing latency.
-- The tokenizer is always `open_clip.get_tokenizer("ViT-B-32")` for all MobileCLIP2 variants.
+This repository contains two dataset-building paths:
+
+- a direct image-to-JSONL builder based on `build_datasets/vlm_dataset_builder.py`
+- a VisualGenome-based pipeline driven by `build_datasets/run_vg.sh`
+
+The final dataset used in this project came from Path B, i.e. the VisualGenome-based pipeline driven by `build_datasets/run_vg.sh`.
+
+### 9.1 Path A: Direct Builder
+
+If you need to generate training JSONL files from images directly, use `build_datasets/vlm_dataset_builder.py`.
+
+This pipeline produces two annotation variants:
+
+- raw outputs
+- cleaned / verified outputs
+
+### 9.2 Environment Variable
+
+```bash
+export OPENROUTER_API_KEY=<YOUR_API_KEY>
+```
+
+### 9.3 Build Command
+
+```bash
+python build_datasets/vlm_dataset_builder.py \
+  --image_dir /path/to/images \
+  --output_dir ./build_datasets/data/my_build \
+  --base_url https://openrouter.ai/api/v1 \
+  --api_key "$OPENROUTER_API_KEY" \
+  --model google/gemini-3.1-pro-preview \
+  --verify \
+  --verify_model google/gemini-3.1-flash-lite-preview \
+  --detail high \
+  --max_workers 4
+```
+
+Output files:
+
+```text
+build_datasets/data/my_build/
+├── dataset_raw.jsonl
+├── dataset_raw_contrastive.jsonl
+├── dataset_verify.jsonl
+├── dataset_verify_contrastive.jsonl
+└── build.log
+```
+
+For Path A, the important files are usually:
+
+- `dataset_verify.jsonl`
+- `dataset_verify_contrastive.jsonl`
+
+Path A can produce `dataset_verify_contrastive.jsonl`, but it was not the final dataset-building path used for the main training results in this repository.
+
+If you only want to regenerate the contrastive JSONL from existing annotations:
+
+```bash
+python build_datasets/vlm_dataset_builder.py \
+  --image_dir /path/to/images \
+  --output_dir ./build_datasets/data/my_build \
+  --base_url https://openrouter.ai/api/v1 \
+  --api_key "$OPENROUTER_API_KEY" \
+  --model google/gemini-3.1-pro-preview \
+  --reconvert_raw
+```
+
+### 9.4 Path B: VisualGenome Pipeline
+
+This is the dataset-building path used for the final training data in this project.
+
+The pipeline is defined in:
+
+- `build_datasets/run_vg.sh`
+
+This path requires downloading the VisualGenome dataset first:
+
+```bash
+hf download jn12/VisualGenome \
+  --repo-type dataset \
+  --local-dir ./build_datasets/data/VisualGenome
+```
+
+Then run the pipeline steps referenced by `run_vg.sh`:
+
+```bash
+python build_datasets/setup_vg_data.py
+python build_datasets/vg_integrate.py
+python build_datasets/vg_llm_annotate.py \
+  --base_url http://localhost:8000/v1 \
+  --model google/gemma-4-31B-it \
+  --max_workers 100
+```
+
+An alternative annotation command in the same script is:
+
+```bash
+python build_datasets/vg_llm_annotate.py \
+  --base_url http://localhost:8000/v1 \
+  --model google/gemma-4-26B-A4B-it \
+  --max_workers 240
+```
+
+At a high level, this path does the following:
+
+1. unpack VisualGenome into the local working directories expected by the scripts
+2. integrate VisualGenome annotations into an intermediate per-image JSONL
+3. run VLM-based annotation to produce contrastive training data
+
+
+## 10. MLP Reconstruction Reproduction
+
+This pipeline replaces `GELU` with `ReLU` in MLP blocks and restores accuracy with block-wise distillation.
+
+### 10.1 Run from the Pretrained Model
+
+```bash
+python mlp_reconstruction/run.py \
+  --model-name MobileCLIP2-B \
+  --gpu-id 0 \
+  --n-calib 1024 \
+  --n-iters 20000
+```
+
+### 10.2 Run from a Fine-tuned Checkpoint
+
+```bash
+python mlp_reconstruction/run.py \
+  --model-name MobileCLIP2-B \
+  --gpu-id 0 \
+  --checkpoint-path ./checkpoints/<ft_run>/checkpoint_latest_epoch_100.pt
+```
+
+### 10.3 Evaluate the Reconstructed Model
+
+```bash
+python pipeline/eval_local.py \
+  --model-name MobileCLIP2-B \
+  --checkpoint-path ./checkpoints/<mr_run>/mlp_relu.pt \
+  --k 10
+```
+
+### 10.4 Export the Reconstructed Model to ONNX
+
+```bash
+python pipeline/export_onnx.py \
+  --model-name MobileCLIP2-B \
+  --checkpoint-path ./checkpoints/<mr_run>/mlp_relu.pt \
+  --output-postfix _mr
+```
+
+
+## 11. Common Optional Settings
+
+### 11.1 Shorten Internal Text Length for Lower Latency
+
+You can restrict the internal text length during ONNX export:
+
+```bash
+python pipeline/export_onnx.py \
+  --model-name MobileCLIP2-B \
+  --max-text-len 40
+```
+
+Notes:
+
+- The ONNX external input shape remains `(1, 77)`
+- Internally, the model truncates attention to the first `40` tokens
+- This usually reduces latency for short-text scenarios
+
+### 11.2 Image Rings
+
+The project supports removing ViT patch rings with `--resize` and `--crop`:
+
+```bash
+python pipeline/export_onnx.py --model-name MobileCLIP2-B --resize 1 --crop 1
+python pipeline/eval_local.py --model-name MobileCLIP2-B --resize 1 --crop 1
+```
+
+The corresponding training arguments are:
+
+```bash
+--resize-rings N
+--crop-rings N
+```
+
+## 12. Important Implementation Constraints
+
+- Image preprocessing is `resize to 224x224 + divide by 255`, with no ImageNet mean/std normalization. This differs from common CLIP setups.
+- The tokenizer is `CLIPTokenizer` from `openai/clip-vit-base-patch32`, and it must already exist in the local cache.
+- Regular checkpoints and MLP reconstruction checkpoints are auto-detected by `utils/clip_utils.py::_load_clip()`.
+- ONNX compilation targets `XR2 Gen 2 (Proxy)` with runtime `qnn_dlc`.
+- QAT-related code still exists in the repository, but we did not use quantization in the final result because the relevant QAI hardware/operator path was not favorable for this model; treat that path as experimental only.
+
+## 13. Directory Overview
+
+- `pipeline/`: ONNX export, QAI Hub compilation, local and remote evaluation
+- `train/`: fine-tuning, DDP, loss, metrics, checkpoints
+- `mlp_reconstruction/`: block-wise GELU → ReLU reconstruction
+- `build_datasets/`: VLM-based annotation and contrastive JSONL export
+- `utils/`: model loading, preprocessing, retrieval metrics
+- `sample_data/`: sample evaluation dataset included in the repo
+
+## 14. Key Gotchas
+
+- `eval_remote.py` also depends on a locally cached Hugging Face tokenizer for text tokenization. Even though inference runs on QAI Hub, the text inputs are still tokenized locally before upload, so “remote evaluation” does not mean the local tokenizer resources are unnecessary.
+- `pipeline/eval_local.py --onnx-dir ...` uses the ONNXRuntime path, while `pipeline/eval_local.py` without `--onnx-dir` uses the default PyTorch path. Both paths use the same sample set, but the underlying encoding implementations differ. When debugging accuracy differences, first make sure you are comparing the same checkpoint, the same `--max-text-len`, and the same resize/crop rings configuration.
+- The training-time `--resize-rings` / `--crop-rings` options and the export/evaluation-time `--resize` / `--crop` options change the effective visual encoder input structure. This information is stored in checkpoints, and `_load_clip()` will try to restore it automatically. If you manually override these options, you may end up with a `pos_embed` structure that no longer matches training.
